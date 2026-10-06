@@ -1,0 +1,2874 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Control de Inventario y Facturación Multimoneda</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen flex antialiased overflow-x-hidden">
+
+  <!-- ========================================================
+       BARRA LATERAL IZQUIERDA VERTICAL (SIDEBAR)
+       ======================================================== -->
+  <aside id="appSidebar" class="w-64 min-w-[16rem] bg-slate-900 text-slate-100 flex flex-col shrink-0 min-h-screen border-r border-slate-800 z-40 transition-transform duration-300 md:translate-x-0 -translate-x-full fixed md:static inset-y-0 left-0 shadow-2xl md:shadow-none">
+    
+    <!-- Encabezado / Marca en Sidebar -->
+    <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+      <div class="flex items-center space-x-3 cursor-pointer" onclick="navigate('dashboard')">
+        <div class="bg-indigo-600 p-2.5 rounded-xl shadow-inner text-white flex items-center justify-center">
+          <i class="fa-solid fa-boxes-stacked text-xl"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-base leading-tight tracking-wide" id="sidebarBusinessName" data-label-key="titulo_app">Mi Negocio</h1>
+          <p class="text-xs text-indigo-300" id="sidebarSubtitle" data-label-key="subtitulo_app">Control Multimoneda</p>
+        </div>
+      </div>
+      <!-- Botón cerrar para móvil -->
+      <button class="md:hidden text-slate-400 hover:text-white" onclick="toggleMobileSidebar()">
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+    </div>
+
+    <!-- Navegación Vertical con Pestañas -->
+    <nav class="flex-1 p-3 space-y-1.5 overflow-y-auto" id="sidebarNavList">
+      <button onclick="navigate('dashboard')" id="nav-dashboard" class="sidebar-nav-btn active-nav">
+        <i class="fa-solid fa-chart-pie mr-3 text-indigo-400"></i>
+        <span data-label-key="tab_dashboard">Dashboard</span>
+      </button>
+      <button onclick="navigate('categorias')" id="nav-categorias" class="sidebar-nav-btn">
+        <i class="fa-solid fa-tags mr-3 text-cyan-400"></i>
+        <span data-label-key="tab_categorias">1. Categorías</span>
+      </button>
+      <button onclick="navigate('productos')" id="nav-productos" class="sidebar-nav-btn">
+        <i class="fa-solid fa-box mr-3 text-amber-400"></i>
+        <span data-label-key="tab_productos">2. Productos & Servicios</span>
+      </button>
+      <button onclick="navigate('clientes')" id="nav-clientes" class="sidebar-nav-btn">
+        <i class="fa-solid fa-users mr-3 text-emerald-400"></i>
+        <span data-label-key="tab_clientes">3. Clientes</span>
+      </button>
+      <button onclick="navigate('facturacion')" id="nav-facturacion" class="sidebar-nav-btn">
+        <i class="fa-solid fa-file-invoice-dollar mr-3 text-green-400"></i>
+        <span data-label-key="tab_facturacion">4. Facturación (Ventas)</span>
+      </button>
+      <button onclick="navigate('compras')" id="nav-compras" class="sidebar-nav-btn">
+        <i class="fa-solid fa-truck-ramp-box mr-3 text-blue-400"></i>
+        <span data-label-key="tab_compras">5. Compras</span>
+      </button>
+      <button onclick="navigate('proveedores')" id="nav-proveedores" class="sidebar-nav-btn">
+        <i class="fa-solid fa-building-user mr-3 text-purple-400"></i>
+        <span data-label-key="tab_proveedores">6. Proveedores</span>
+      </button>
+      <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn">
+        <i class="fa-solid fa-hand-holding-dollar mr-3 text-orange-400"></i>
+        <span data-label-key="tab_cxc">7. Cuentas por Cobrar</span>
+      </button>
+      <button onclick="navigate('cxp')" id="nav-cxp" class="sidebar-nav-btn">
+        <i class="fa-solid fa-receipt mr-3 text-rose-400"></i>
+        <span data-label-key="tab_cxp">8. Cuentas por Pagar</span>
+      </button>
+      <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn">
+        <i class="fa-solid fa-chart-column mr-3 text-pink-400"></i>
+        <span data-label-key="tab_reportes">9. Reportes & Balances</span>
+      </button>
+    </nav>
+
+    <!-- Tarjeta de Tasas Oficiales en Sidebar -->
+    <div class="p-3 mx-3 my-2 rounded-xl bg-slate-800/90 border border-slate-700/60 text-xs space-y-2">
+      <div class="flex items-center justify-between">
+        <span class="font-bold text-slate-300 flex items-center">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse mr-1.5"></span>
+          Tasas Oficiales
+        </span>
+        <span class="text-[10px] text-slate-400" id="sidebarRatesDate">Hoy</span>
+      </div>
+      <div class="space-y-1">
+        <div class="flex justify-between items-center py-0.5">
+          <span class="text-slate-400 flex items-center"><i class="fa-solid fa-landmark text-amber-400 mr-1"></i>BCV USD:</span>
+          <strong class="text-amber-300 font-mono font-bold" id="sidebarRateVes">45.00 Bs.</strong>
+        </div>
+        <div class="flex justify-between items-center py-0.5">
+          <span class="text-slate-400 flex items-center"><i class="fa-solid fa-scale-balanced text-emerald-400 mr-1"></i>TRM USD:</span>
+          <strong class="text-emerald-300 font-mono font-bold" id="sidebarRateCop">4,100 COP</strong>
+        </div>
+      </div>
+      <button onclick="sincronizarTasasOficiales()" id="btnSyncTasasSidebar" class="w-full mt-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center transition shadow-sm">
+        <i class="fa-solid fa-rotate mr-1.5" id="iconSyncTasas"></i>
+        <span data-label-key="btn_sincronizar_tasas">Sincronizar BCV / TRM</span>
+      </button>
+    </div>
+
+    <!-- Opciones del Sistema en Pie de Sidebar -->
+    <div class="p-3 border-t border-slate-800 space-y-1 text-xs">
+      <button onclick="openPersonalizacionModal()" class="w-full flex items-center px-3 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition font-medium">
+        <i class="fa-solid fa-palette mr-2.5 text-pink-400"></i>
+        <span>Personalizar Todo</span>
+      </button>
+      <button onclick="openConfigModal()" class="w-full flex items-center px-3 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition font-medium">
+        <i class="fa-solid fa-gear mr-2.5 text-slate-400"></i>
+        <span>Configuración Negocio</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Overlay para Móviles -->
+  <div id="sidebarBackdrop" onclick="toggleMobileSidebar()" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-30 hidden md:hidden"></div>
+
+  <!-- ========================================================
+       CONTENEDOR DE CONTENIDO PRINCIPAL (DERECHA)
+       ======================================================== -->
+  <div class="flex-1 flex flex-col min-w-0 min-h-screen">
+    
+    <!-- Barra Superior (Header) -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-20 px-4 sm:px-6 py-3 flex items-center justify-between shadow-sm">
+      <div class="flex items-center space-x-3">
+        <!-- Botón Toggle Menú Móvil -->
+        <button onclick="toggleMobileSidebar()" class="md:hidden p-2 text-slate-600 hover:text-slate-900 rounded-lg border border-slate-200">
+          <i class="fa-solid fa-bars text-lg"></i>
+        </button>
+        <div>
+          <h2 class="font-bold text-base text-slate-800 leading-tight" id="headerBusinessName">Mi Negocio Comercial</h2>
+          <div class="flex items-center space-x-2 text-xs text-slate-500">
+            <span id="headerDocFiscal">J-12345678-9</span>
+            <span>•</span>
+            <span class="text-emerald-600 font-medium flex items-center">
+              <i class="fa-solid fa-circle-check text-[10px] mr-1"></i>En línea
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tasas en Header (Tablet / Desktop) & Acciones Rápidas -->
+      <div class="flex items-center space-x-3">
+        <!-- Badge de Tasas -->
+        <div class="hidden lg:flex items-center space-x-3 bg-slate-50 px-3.5 py-1.5 rounded-xl border border-slate-200 text-xs">
+          <div class="flex items-center space-x-1 font-medium">
+            <span class="text-slate-500 font-semibold">BCV:</span>
+            <span class="text-amber-700 font-bold" id="headerRateVes">45.00 Bs.</span>
+          </div>
+          <span class="text-slate-300">|</span>
+          <div class="flex items-center space-x-1 font-medium">
+            <span class="text-slate-500 font-semibold">TRM:</span>
+            <span class="text-emerald-700 font-bold" id="headerRateCop">4,100 COP</span>
+          </div>
+          <button onclick="sincronizarTasasOficiales()" title="Sincronizar Tasas Oficiales de BCV y TRM" class="text-slate-500 hover:text-indigo-600 ml-1 transition">
+            <i class="fa-solid fa-arrows-rotate"></i>
+          </button>
+        </div>
+
+        <!-- Botones de Acción Rápida -->
+        <button onclick="navigate('facturacion')" class="btn-theme-factura text-white px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow flex items-center transition">
+          <i class="fa-solid fa-cash-register mr-1.5"></i>
+          <span data-label-key="btn_nueva_venta">Nueva Venta</span>
+        </button>
+        <button onclick="navigate('compras')" class="btn-theme-compra text-white px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow flex items-center transition">
+          <i class="fa-solid fa-cart-shopping mr-1.5"></i>
+          <span data-label-key="btn_cargar_compra">Cargar Compra</span>
+        </button>
+        <button onclick="openPersonalizacionModal()" title="Personalizar Colores y Nombres" class="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition">
+          <i class="fa-solid fa-palette text-sm"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- Contenedor Principal de Vistas -->
+    <main class="flex-1 px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- ========================================================
+         VISTA 1: DASHBOARD
+         ======================================================== -->
+    <section id="view-dashboard" class="space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">Panel de Control & Resumen</h2>
+          <p class="text-sm text-slate-500">Monitoreo general de inventario, stock crítico y operaciones comerciales.</p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="loadDashboard()" class="text-sm bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-2 rounded-xl shadow-sm transition">
+            <i class="fa-solid fa-rotate-right mr-1.5"></i>Actualizar
+          </button>
+        </div>
+      </div>
+
+      <!-- Tarjetas de Estadísticas Principales -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        <!-- Tarjeta Productos con Control de Existencia -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Productos (Con Stock)</p>
+            <h3 class="text-2xl font-bold text-slate-800 mt-1" id="dashTotalProductos">0</h3>
+            <p class="text-xs text-emerald-600 mt-1 font-medium"><i class="fa-solid fa-check-circle mr-1"></i>Controlan existencia</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-cubes"></i>
+          </div>
+        </div>
+
+        <!-- Tarjeta Servicios -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Servicios (Sin Stock)</p>
+            <h3 class="text-2xl font-bold text-slate-800 mt-1" id="dashTotalServicios">0</h3>
+            <p class="text-xs text-purple-600 mt-1 font-medium"><i class="fa-solid fa-wrench mr-1"></i>Sin manejo de stock</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-hand-holding-heart"></i>
+          </div>
+        </div>
+
+        <!-- Tarjeta Alertas Stock Bajo -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Stock Bajo / Crítico</p>
+            <h3 class="text-2xl font-bold text-rose-600 mt-1" id="dashAlertasStock">0</h3>
+            <p class="text-xs text-rose-500 mt-1 font-medium"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Requieren compra</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-bell"></i>
+          </div>
+        </div>
+
+        <!-- Tarjeta Ventas Totales -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Facturación Total</p>
+            <h3 class="text-2xl font-bold text-indigo-700 mt-1" id="dashTotalVentas">$0.00</h3>
+            <p class="text-xs text-slate-500 mt-1" id="dashTotalVentasBs">0.00 Bs.</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-dollar-sign"></i>
+          </div>
+        </div>
+
+        <!-- Tarjeta Cuentas por Cobrar (Total Deuda Pendiente) -->
+        <div onclick="navigate('cxc')" class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between cursor-pointer hover:shadow-md hover:border-amber-300 transition" title="Ir a Cuentas por Cobrar">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Cuentas por Cobrar</p>
+            <h3 class="text-2xl font-bold text-amber-600 mt-1" id="dashTotalCxc">$0.00</h3>
+            <p class="text-xs text-amber-600 mt-1 font-medium" id="dashTotalCxcBs">0.00 Bs. (0 pendientes)</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-hand-holding-dollar"></i>
+          </div>
+        </div>
+
+        <!-- Tarjeta Cuentas por Pagar (Total Deuda a Proveedores) -->
+        <div onclick="navigate('cxp')" class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between cursor-pointer hover:shadow-md hover:border-rose-300 transition" title="Ir a Cuentas por Pagar">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Cuentas por Pagar</p>
+            <h3 class="text-2xl font-bold text-rose-600 mt-1" id="dashTotalCxp">$0.00</h3>
+            <p class="text-xs text-rose-600 mt-1 font-medium" id="dashTotalCxpBs">0.00 Bs. (0 pendientes)</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-receipt"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sección de Alertas y Últimas Ventas -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Productos que necesitan reposición -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-slate-800 flex items-center">
+              <i class="fa-solid fa-triangle-exclamation text-amber-500 mr-2"></i>
+              Productos con Stock Mínimo o Agotados
+            </h3>
+            <button onclick="navigate('compras')" class="text-xs font-semibold text-blue-600 hover:text-blue-700">
+              Cargar Compra &rarr;
+            </button>
+          </div>
+          <div id="dashStockList" class="space-y-3 overflow-y-auto max-h-72">
+            <!-- Dinámico -->
+          </div>
+        </div>
+
+        <!-- Últimas Facturas Emitidas -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-slate-800 flex items-center">
+              <i class="fa-solid fa-receipt text-indigo-600 mr-2"></i>
+              Últimas Facturas Registradas
+            </h3>
+            <button onclick="navigate('facturacion')" class="text-xs font-semibold text-indigo-600 hover:text-indigo-700">
+              Ir a Facturación &rarr;
+            </button>
+          </div>
+          <div id="dashFacturasList" class="space-y-3 overflow-y-auto max-h-72">
+            <!-- Dinámico -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Sección de Top 5 Productos y Top 5 Clientes -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Top 5 Productos Más Vendidos -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-slate-800 flex items-center">
+              <i class="fa-solid fa-trophy text-amber-500 mr-2"></i>
+              Top 5 Productos Más Vendidos
+            </h3>
+            <button onclick="navigate('reportes')" class="text-xs font-semibold text-indigo-600 hover:text-indigo-700">
+              Ver Reportes &rarr;
+            </button>
+          </div>
+          <div id="dashTopProductosList" class="space-y-3">
+            <!-- Dinámico -->
+          </div>
+        </div>
+
+        <!-- Top 5 Mejores Clientes -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-slate-800 flex items-center">
+              <i class="fa-solid fa-crown text-indigo-600 mr-2"></i>
+              Top 5 Mejores Clientes
+            </h3>
+            <button onclick="navigate('clientes')" class="text-xs font-semibold text-indigo-600 hover:text-indigo-700">
+              Ver Clientes &rarr;
+            </button>
+          </div>
+          <div id="dashTopClientesList" class="space-y-3">
+            <!-- Dinámico -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         VISTA 2: CATEGORÍAS (SERVICIOS Y PRODUCTOS)
+         ======================================================== -->
+    <section id="view-categorias" class="hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">Módulo 1: Categorías</h2>
+          <p class="text-sm text-slate-500">
+            Estructuradas en dos clasificaciones maestras: 
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-purple-100 text-purple-700">Servicios (Sin stock)</span> y 
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-700">Productos (Con stock)</span>.
+          </p>
+        </div>
+        <button onclick="openCategoryModal()" class="btn-theme-primary px-4 py-2.5 rounded-xl font-medium shadow text-sm flex items-center justify-center transition">
+          <i class="fa-solid fa-plus mr-2"></i><span data-label-key="btn_nueva_categoria">Nueva Categoría</span>
+        </button>
+      </div>
+
+      <!-- Filtros de Categorías -->
+      <div class="flex space-x-2 border-b border-slate-200 pb-3">
+        <button onclick="filterCategorias('todos')" id="filter-cat-todos" class="px-3.5 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 text-white">Todos</button>
+        <button onclick="filterCategorias('producto')" id="filter-cat-producto" class="px-3.5 py-1.5 rounded-lg text-sm font-medium bg-slate-200 text-slate-700 hover:bg-slate-300">Solo Productos (Controlan Stock)</button>
+        <button onclick="filterCategorias('servicio')" id="filter-cat-servicio" class="px-3.5 py-1.5 rounded-lg text-sm font-medium bg-slate-200 text-slate-700 hover:bg-slate-300">Solo Servicios (No Manejan Stock)</button>
+      </div>
+
+      <!-- Tabla de Categorías -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <th class="py-3 px-4">ID</th>
+                <th class="py-3 px-4">Nombre de Categoría</th>
+                <th class="py-3 px-4">Clasificación Maestra</th>
+                <th class="py-3 px-4">Regla de Existencia</th>
+                <th class="py-3 px-4">Descripción</th>
+                <th class="py-3 px-4 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="categoriasTableBody" class="divide-y divide-slate-100 text-sm">
+              <!-- Renderizado dinámico -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         VISTA 3: PRODUCTOS & SERVICIOS
+         ======================================================== -->
+    <section id="view-productos" class="hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">Módulo 2: Productos y Servicios</h2>
+          <p class="text-sm text-slate-500">Gestión de catálogo, asignación gravado (16% IVA) / exento, imágenes y control de existencia.</p>
+        </div>
+        <button onclick="openProductoModal()" class="btn-theme-primary px-4 py-2.5 rounded-xl font-medium shadow text-sm flex items-center justify-center transition">
+          <i class="fa-solid fa-plus mr-2"></i><span data-label-key="btn_nuevo_producto">Crear Producto o Servicio</span>
+        </button>
+      </div>
+
+      <!-- Barra de Filtros y Búsqueda -->
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-3 items-center justify-between">
+        <div class="relative w-full md:w-96">
+          <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+          <input type="text" id="prodSearchInput" oninput="loadProductos()" placeholder="Buscar por nombre o código..." 
+                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+        </div>
+        <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          <select id="prodFilterTipo" onchange="loadProductos()" class="bg-slate-50 border border-slate-200 text-slate-700 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-indigo-500">
+            <option value="">Todos los tipos</option>
+            <option value="producto">Solo Productos (Controlan existencia)</option>
+            <option value="servicio">Solo Servicios (Sin existencia)</option>
+          </select>
+          <select id="prodFilterCategoria" onchange="loadProductos()" class="bg-slate-50 border border-slate-200 text-slate-700 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-indigo-500">
+            <option value="">Todas las categorías</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Grid de Productos / Tarjetas y Tabla -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <th class="py-3 px-4">Ítem / Imagen</th>
+                <th class="py-3 px-4">Código</th>
+                <th class="py-3 px-4">Categoría</th>
+                <th class="py-3 px-4">Clasificación</th>
+                <th class="py-3 px-4">Impuesto (IVA)</th>
+                <th class="py-3 px-4">Precio Base</th>
+                <th class="py-3 px-4">Precio Total (con IVA)</th>
+                <th class="py-3 px-4">Existencia (Stock)</th>
+                <th class="py-3 px-4 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="productosTableBody" class="divide-y divide-slate-100 text-sm">
+              <!-- Renderizado dinámico -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         VISTA 4: CLIENTES
+         ======================================================== -->
+    <section id="view-clientes" class="hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">Módulo 3: Clientes</h2>
+          <p class="text-sm text-slate-500">Directorio de clientes con enlace directo a WhatsApp para atención y envío de comprobantes.</p>
+        </div>
+        <button onclick="openClienteModal()" class="btn-theme-primary px-4 py-2.5 rounded-xl font-medium shadow text-sm flex items-center justify-center transition">
+          <i class="fa-solid fa-user-plus mr-2"></i><span data-label-key="btn_nuevo_cliente">Registrar Cliente</span>
+        </button>
+      </div>
+
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row gap-3 items-center justify-between">
+        <div class="relative w-full sm:w-96">
+          <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+          <input type="text" id="clienteSearchInput" oninput="loadClientes()" placeholder="Buscar por nombre o cédula/RIF..." 
+                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <th class="py-3 px-4">Cédula / RIF</th>
+                <th class="py-3 px-4">Nombre / Razón Social</th>
+                <th class="py-3 px-4">WhatsApp / Teléfono</th>
+                <th class="py-3 px-4">Correo Electrónico</th>
+                <th class="py-3 px-4">Dirección</th>
+                <th class="py-3 px-4 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="clientesTableBody" class="divide-y divide-slate-100 text-sm">
+              <!-- Renderizado dinámico -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         VISTA 5: FACTURACIÓN & PUNTO DE VENTA (MULTIMONEDA)
+         ======================================================== -->
+    <section id="view-facturacion" class="hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">Módulo 4: Facturación y Punto de Venta</h2>
+          <p class="text-sm text-slate-500">
+            Factura productos (descuenta stock) y servicios. Soporta pagos mixtos en Dólares ($), Bolívares (Bs.) y Pesos (COP).
+          </p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="toggleHistorialFacturas()" id="btnToggleHistorialFacturas" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-sm font-medium shadow-sm transition">
+            <i class="fa-solid fa-list-check mr-1.5"></i>Historial de Facturas
+          </button>
+          <button onclick="limpiarPOS()" class="bg-rose-50 hover:bg-rose-100 text-rose-700 px-3.5 py-2 rounded-xl text-sm font-medium transition">
+            <i class="fa-solid fa-trash-can mr-1.5"></i>Nueva / Limpiar
+          </button>
+        </div>
+      </div>
+
+      <!-- Sección Principal del Terminal POS -->
+      <div id="posMainContainer" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Columna Izquierda: Selección de Cliente y Catálogo de Ítems (7 Cols) -->
+        <div class="lg:col-span-7 space-y-4">
+          
+          <!-- Selección y Búsqueda de Cliente por Nombre o Cédula -->
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center">
+                <i class="fa-solid fa-user-tag mr-1.5 text-indigo-600"></i>Cliente Receptor *
+              </label>
+              <button onclick="openClienteModal()" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800">
+                + Crear Nuevo Cliente
+              </button>
+            </div>
+            
+            <!-- Barra de Búsqueda Interactiva de Cliente -->
+            <div class="relative">
+              <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+              <input type="text" id="posClienteSearchInput" oninput="buscarClientePOS(this.value)" onfocus="buscarClientePOS(this.value)" placeholder="Buscar cliente por Nombre o Cédula / RIF..." autocomplete="off"
+                     class="w-full pl-10 pr-24 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+              <button type="button" id="btnClearClientePOS" onclick="limpiarClientePOS()" class="hidden absolute right-2.5 top-2 text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1 rounded-lg font-medium">
+                Cambiar
+              </button>
+              <!-- Menú Flotante de Resultados de Búsqueda de Clientes -->
+              <div id="posClienteSearchResults" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-56 overflow-y-auto z-30 divide-y divide-slate-100">
+              </div>
+            </div>
+
+            <!-- Tarjeta de Cliente Seleccionado -->
+            <div id="posClienteSelectedCard" class="hidden bg-indigo-50/70 border border-indigo-200 p-3 rounded-xl flex items-center justify-between text-xs">
+              <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold">
+                  <i class="fa-solid fa-user"></i>
+                </div>
+                <div>
+                  <p class="font-bold text-slate-900 text-sm" id="posSelectedClienteNombre">-</p>
+                  <p class="text-slate-600"><span id="posSelectedClienteCedula">-</span> &bull; <span id="posSelectedClienteTelefono">-</span></p>
+                </div>
+              </div>
+              <span class="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full text-[11px] flex items-center">
+                <i class="fa-solid fa-check mr-1"></i>Seleccionado
+              </span>
+            </div>
+            <input type="hidden" id="posClienteSelect" value="">
+          </div>
+
+          <!-- Selector y Buscador Rápido de Productos / Servicios -->
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+            <div class="flex flex-col sm:flex-row gap-2 justify-between items-center">
+              <div class="relative w-full">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400 text-sm"></i>
+                <input type="text" id="posSearchProduct" oninput="renderPosCatalog()" placeholder="Buscar ítem para agregar..." 
+                       class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500">
+              </div>
+              <div class="flex space-x-1 shrink-0">
+                <button onclick="setPosFilterCategory('todos')" id="posCat-todos" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white">Todos</button>
+                <button onclick="setPosFilterCategory('producto')" id="posCat-producto" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Productos</button>
+                <button onclick="setPosFilterCategory('servicio')" id="posCat-servicio" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Servicios</button>
+              </div>
+            </div>
+
+            <!-- Catálogo interactivo tipo cuadrícula -->
+            <div id="posCatalogGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-96 overflow-y-auto pr-1">
+              <!-- Renderizado de tarjetas de productos -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Columna Derecha: Detalle de la Factura y Pagos Mixtos (5 Cols) -->
+        <div class="lg:col-span-5 space-y-4">
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full space-y-4">
+            
+            <div class="border-b border-slate-200 pb-3 flex items-center justify-between">
+              <h3 class="font-bold text-slate-800 flex items-center">
+                <i class="fa-solid fa-cart-shopping text-emerald-600 mr-2"></i>
+                Detalle de la Factura
+              </h3>
+              <span id="posItemsCountBadge" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-semibold">0 ítems</span>
+            </div>
+
+            <!-- Lista de Ítems en el Carrito -->
+            <div id="posCartItemsList" class="flex-1 space-y-2 overflow-y-auto max-h-72 pr-1 min-h-[140px]">
+              <!-- Ítems del carrito -->
+              <p class="text-sm text-slate-400 text-center py-8">El carrito está vacío. Selecciona productos o servicios de la izquierda.</p>
+            </div>
+
+            <!-- Resumen de Totales e Impuesto -->
+            <div class="border-t border-slate-200 pt-3 space-y-1.5 text-sm">
+              <div class="flex justify-between text-slate-500">
+                <span>Subtotal (Base Imponible + Exento):</span>
+                <span class="font-medium text-slate-700" id="posSubtotalUsd">$0.00</span>
+              </div>
+              <div class="flex justify-between text-slate-500">
+                <span class="flex items-center">IVA (16% sobre gravados):</span>
+                <span class="font-medium text-slate-700" id="posIvaUsd">$0.00</span>
+              </div>
+              <div class="flex justify-between items-baseline pt-2 border-t border-slate-200">
+                <span class="text-base font-bold text-slate-900">Total a Pagar (USD):</span>
+                <span class="text-2xl font-extrabold text-indigo-700" id="posTotalUsd">$0.00</span>
+              </div>
+              <!-- Conversiones de Referencia -->
+              <div class="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
+                <div>
+                  <span class="text-slate-400 block">Total en Bolívares:</span>
+                  <span class="font-bold text-slate-800 text-sm" id="posTotalVes">0.00 Bs.</span>
+                </div>
+                <div>
+                  <span class="text-slate-400 block">Total en Pesos:</span>
+                  <span class="font-bold text-slate-800 text-sm" id="posTotalCop">0 COP</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Condición de Venta: Contado o Crédito -->
+            <div class="border-t border-slate-200 pt-3 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold uppercase text-slate-600 tracking-wider">
+                  <i class="fa-solid fa-handshake mr-1 text-indigo-600"></i>Condición de Venta:
+                </span>
+                <div class="inline-flex rounded-lg border border-slate-300 p-0.5 bg-slate-200">
+                  <button type="button" onclick="setPosTipoVenta('contado')" id="btnTipoVentaContado" class="px-3 py-1 rounded-md text-xs font-bold bg-white text-slate-900 shadow-xs transition">
+                    Al Contado
+                  </button>
+                  <button type="button" onclick="setPosTipoVenta('credito')" id="btnTipoVentaCredito" class="px-3 py-1 rounded-md text-xs font-bold text-slate-600 hover:text-slate-900 transition">
+                    A Crédito
+                  </button>
+                </div>
+              </div>
+
+              <!-- Panel informativo y de Fecha de Vencimiento para Ventas a Crédito -->
+              <div id="posCreditoContainer" class="hidden bg-amber-50/80 border border-amber-200 p-3 rounded-xl space-y-2">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label class="text-xs font-bold text-amber-900 flex items-center">
+                    <i class="fa-solid fa-calendar-day mr-1.5 text-amber-600"></i>Fecha de Vencimiento *
+                  </label>
+                  <div class="flex items-center gap-1">
+                    <button type="button" onclick="setVencimientoDias(7)" class="text-[10px] font-bold bg-amber-200/70 hover:bg-amber-200 text-amber-900 px-2 py-1 rounded border border-amber-300">+7 días</button>
+                    <button type="button" onclick="setVencimientoDias(15)" class="text-[10px] font-bold bg-amber-200/70 hover:bg-amber-200 text-amber-900 px-2 py-1 rounded border border-amber-300">+15 días</button>
+                    <button type="button" onclick="setVencimientoDias(30)" class="text-[10px] font-bold bg-amber-200/70 hover:bg-amber-200 text-amber-900 px-2 py-1 rounded border border-amber-300">+30 días</button>
+                  </div>
+                </div>
+                <input type="date" id="posFechaVencimiento" class="w-full bg-white border border-amber-300 py-2 px-3 rounded-lg text-xs font-bold text-amber-950 focus:outline-none focus:border-amber-500">
+                <p class="text-[11px] text-amber-800">
+                  <i class="fa-solid fa-circle-info mr-1"></i>
+                  El saldo de esta factura se enviará al módulo <strong>Cuentas por Cobrar</strong>. Si el cliente entrega un <strong>abono inicial</strong>, puedes registrarlo en las formas de pago abajo. Si no abona nada hoy, puedes dejar los pagos en $0.
+                </p>
+              </div>
+            </div>
+
+            <!-- Sección de Métodos de Pago y Pago Mixto -->
+            <div class="border-t border-slate-200 pt-3 space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold uppercase text-slate-600 tracking-wider" id="lblFormasPagoTitulo">
+                  <i class="fa-solid fa-money-bill-transfer mr-1 text-emerald-600"></i>Formas de Pago Mixto
+                </span>
+                <button type="button" onclick="addPagoRow()" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 px-2 py-1 rounded-lg">
+                  + Agregar Moneda
+                </button>
+              </div>
+
+              <!-- Filas de pagos multimoneda -->
+              <div id="posPagosList" class="space-y-2 max-h-40 overflow-y-auto">
+                <!-- Se llena dinámicamente con pagos en USD, VES o COP -->
+              </div>
+
+              <!-- Balance / Saldo restante o Cambio -->
+              <div class="bg-indigo-50/70 p-3 rounded-xl border border-indigo-100 flex items-center justify-between text-xs font-medium">
+                <div>
+                  <span class="text-indigo-900 block">Total Pagado: <strong id="posPagadoUsd">$0.00</strong></span>
+                  <span class="text-slate-500" id="posPagadoDetalle">0 pagos</span>
+                </div>
+                <div class="text-right">
+                  <span class="block text-slate-600" id="posBalanceLabel">Saldo Pendiente:</span>
+                  <span class="text-base font-bold text-rose-600" id="posBalanceVal">$0.00</span>
+                </div>
+              </div>
+
+              <!-- Botones de Acción de Facturación -->
+              <div class="space-y-2 pt-1">
+                <button type="button" onclick="procesarFactura('contado')" id="btnProcesarContado" class="w-full btn-theme-factura font-bold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center space-x-2">
+                  <i class="fa-solid fa-circle-check text-lg"></i>
+                  <span data-label-key="btn_procesar_venta">Completar Facturación</span>
+                </button>
+                <button type="button" onclick="procesarFactura('credito')" id="btnProcesarCredito" class="hidden w-full btn-theme-cxc font-bold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center space-x-2">
+                  <i class="fa-solid fa-hand-holding-dollar text-lg"></i>
+                  <span data-label-key="btn_credito">Facturar a Crédito & Enviar a Cobrar</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Sección Ocultable de Historial de Facturas -->
+      <div id="historialFacturasContainer" class="hidden bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="font-bold text-slate-800">Historial de Facturas Emitidas</h3>
+          <button onclick="loadFacturas()" class="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg text-slate-700">
+            <i class="fa-solid fa-rotate-right mr-1"></i>Refrescar
+          </button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase">
+                <th class="py-2.5 px-3">N° Factura</th>
+                <th class="py-2.5 px-3">Fecha</th>
+                <th class="py-2.5 px-3">Cliente</th>
+                <th class="py-2.5 px-3">Total USD</th>
+                <th class="py-2.5 px-3">Total Bs.</th>
+                <th class="py-2.5 px-3">Total COP</th>
+                <th class="py-2.5 px-3 text-right">Comprobante</th>
+              </tr>
+            </thead>
+            <tbody id="facturasTableBody" class="divide-y divide-slate-100">
+              <!-- Dinámico -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         VISTA 6: COMPRAS (INCREMENTO DE STOCK, FOTO DE FACTURA Y AUTO-CREAR PRODUCTO)
+         ======================================================== -->
+    <section id="view-compras" class="hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">Módulo 5: Compras de Mercancía</h2>
+          <p class="text-sm text-slate-500">
+            Registra compras a proveedores, sube la foto de la factura física, incrementa existencias y crea ítems nuevos al instante.
+          </p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="toggleHistorialCompras()" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-sm font-medium shadow-sm transition">
+            <i class="fa-solid fa-list mr-1.5"></i>Historial de Compras
+          </button>
+          <button onclick="nuevaCompraForm()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow transition">
+            <i class="fa-solid fa-plus mr-1.5"></i>Nueva Carga de Compra
+          </button>
+        </div>
+      </div>
+
+      <!-- Formulario de Registro de Compra -->
+      <div id="compraFormContainer" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Datos del Proveedor y Foto de la Factura (5 Cols) -->
+        <div class="lg:col-span-5 space-y-4">
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+            <h3 class="font-bold text-slate-800 flex items-center">
+              <i class="fa-solid fa-truck-field mr-2 text-blue-600"></i>
+              Datos de la Compra & Proveedor
+            </h3>
+
+            <!-- Proveedor -->
+            <div>
+              <div class="flex justify-between items-center mb-1">
+                <label class="text-xs font-semibold text-slate-600">Proveedor *</label>
+                <button onclick="openProveedorModal()" class="text-xs text-blue-600 hover:underline">+ Crear Proveedor</button>
+              </div>
+              <select id="compraProveedorSelect" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+                <option value="">Seleccione proveedor...</option>
+              </select>
+            </div>
+
+            <!-- Número de Control / Factura del Proveedor -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">N° de Factura / Control del Proveedor *</label>
+              <input type="text" id="compraNumeroControl" placeholder="Ej: F-987654" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+            </div>
+
+            <!-- Fecha de Compra -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Fecha de la Factura *</label>
+              <input type="date" id="compraFecha" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+            </div>
+
+            <!-- CARGA DE FOTO DE LA FACTURA -->
+            <div class="border-t border-slate-100 pt-3">
+              <label class="block text-xs font-semibold text-slate-700 mb-1 flex items-center">
+                <i class="fa-solid fa-camera mr-1.5 text-indigo-600"></i>
+                Foto de la Factura del Proveedor
+              </label>
+              <p class="text-xs text-slate-400 mb-2">Sube o toma una foto del comprobante físico para soporte contable.</p>
+              
+              <div class="flex items-center space-x-2">
+                <input type="file" id="compraFotoInput" accept="image/*" capture="environment" onchange="previewFotoFactura(event)" class="text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+              </div>
+
+              <!-- Vista previa de la foto de la factura -->
+              <div id="compraFotoPreviewContainer" class="hidden mt-3 border border-slate-200 rounded-xl p-2 bg-slate-50 text-center relative group">
+                <img id="compraFotoImg" src="" alt="Foto Factura" class="max-h-48 mx-auto rounded-lg object-contain shadow-sm cursor-pointer" onclick="verFotoAmpliada()">
+                <div class="mt-1 flex justify-center space-x-2">
+                  <button type="button" onclick="verFotoAmpliada()" class="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-lg">
+                    <i class="fa-solid fa-expand mr-1"></i>Ampliar
+                  </button>
+                  <button type="button" onclick="eliminarFotoFactura()" class="text-xs bg-rose-600 text-white px-2.5 py-1 rounded-lg">
+                    <i class="fa-solid fa-trash mr-1"></i>Quitar
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Notas -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Observaciones / Notas</label>
+              <textarea id="compraNotas" rows="2" placeholder="Detalles de entrega, crédito, etc." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-blue-500"></textarea>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Ítems Comprados y Creación en el Vuelo (7 Cols) -->
+        <div class="lg:col-span-7 space-y-4">
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+            
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              <div>
+                <h3 class="font-bold text-slate-800 flex items-center">
+                  <i class="fa-solid fa-boxes-packing text-emerald-600 mr-2"></i>
+                  Productos de la Compra
+                </h3>
+                <p class="text-xs text-slate-500">Cada producto incrementará el stock en el inventario al guardar.</p>
+              </div>
+              <button onclick="abrirModalCrearItemEnCompra()" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center">
+                <i class="fa-solid fa-sparkles mr-1.5"></i>¿No existe el ítem? Crearlo aquí
+              </button>
+            </div>
+
+            <!-- Agregar ítem existente -->
+            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-3">
+              <span class="text-xs font-semibold text-slate-700 block">Agregar Producto Existente del Catálogo:</span>
+              <div class="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                <div class="sm:col-span-6">
+                  <select id="compraItemSelect" class="w-full bg-white border border-slate-200 py-2 px-2.5 rounded-lg text-xs">
+                    <option value="">Seleccione producto...</option>
+                  </select>
+                </div>
+                <div class="sm:col-span-2">
+                  <input type="number" id="compraItemCant" value="1" min="1" step="any" placeholder="Cant." class="w-full bg-white border border-slate-200 py-2 px-2 rounded-lg text-xs" title="Cantidad">
+                </div>
+                <div class="sm:col-span-2">
+                  <input type="number" id="compraItemCosto" value="0.00" min="0" step="any" placeholder="Costo $" class="w-full bg-white border border-slate-200 py-2 px-2 rounded-lg text-xs" title="Costo Unitario ($)">
+                </div>
+                <div class="sm:col-span-2">
+                  <button onclick="agregarItemACompra()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 rounded-lg text-xs transition">
+                    + Añadir
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tabla de Ítems a Comprar -->
+            <div class="border border-slate-200 rounded-xl overflow-hidden">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 uppercase">
+                  <tr>
+                    <th class="py-2.5 px-3">Producto</th>
+                    <th class="py-2.5 px-3">Cant.</th>
+                    <th class="py-2.5 px-3">Costo Unit.</th>
+                    <th class="py-2.5 px-3">Impuesto</th>
+                    <th class="py-2.5 px-3">Total ($)</th>
+                    <th class="py-2.5 px-3 text-right"></th>
+                  </tr>
+                </thead>
+                <tbody id="compraItemsTableBody" class="divide-y divide-slate-100">
+                  <tr>
+                    <td colspan="6" class="text-center py-6 text-slate-400">Aún no has agregado ítems a la compra.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Totales de la Compra -->
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-between items-center text-sm">
+              <div class="space-y-0.5 text-xs text-slate-500">
+                <div>Subtotal: <strong id="compraSubtotalVal" class="text-slate-800">$0.00</strong></div>
+                <div>IVA Compra (16%): <strong id="compraIvaVal" class="text-slate-800">$0.00</strong></div>
+              </div>
+              <div class="text-right">
+                <span class="text-xs text-slate-500 block">Total de la Compra:</span>
+                <span class="text-xl font-bold text-slate-900" id="compraTotalVal">$0.00</span>
+              </div>
+            </div>
+
+            <!-- Condición de Pago de la Compra: Contado o Crédito -->
+            <div class="border-t border-slate-200 pt-3 space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold uppercase text-slate-600 tracking-wider">
+                  <i class="fa-solid fa-file-invoice-dollar mr-1 text-blue-600"></i>Condición de Compra
+                </span>
+                <div class="flex bg-slate-100 p-1 rounded-lg">
+                  <button type="button" onclick="setCompraTipo('contado')" id="btnCompraTipoContado" class="px-3 py-1 rounded-md text-xs font-bold bg-white text-blue-700 shadow-xs transition">
+                    Al Contado
+                  </button>
+                  <button type="button" onclick="setCompraTipo('credito')" id="btnCompraTipoCredito" class="px-3 py-1 rounded-md text-xs font-bold text-slate-600 hover:text-slate-900 transition">
+                    A Crédito (CXP)
+                  </button>
+                </div>
+              </div>
+
+              <!-- Panel de Pago Multimoneda (Para compras al contado) -->
+              <div id="compraPagosContainer" class="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-semibold text-slate-700">Formas de Pago de la Compra:</span>
+                  <button type="button" onclick="addCompraPagoRow()" class="text-xs font-bold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition">
+                    + Otra Moneda (Pago Mixto)
+                  </button>
+                </div>
+                <div id="compraPagosList" class="space-y-2">
+                  <!-- Filas dinámicas de pago multimoneda -->
+                </div>
+                <div class="flex justify-between items-center text-xs pt-1 border-t border-slate-200 text-slate-600">
+                  <span>Total Pagado: <strong class="text-emerald-700 font-bold" id="compraTotalPagadoUsd">$0.00</strong></span>
+                  <span>Saldo / Restante: <strong class="text-slate-800 font-bold" id="compraSaldoRestanteUsd">$0.00</strong></span>
+                </div>
+              </div>
+
+              <!-- Panel de Fecha de Vencimiento (Para compras a crédito) -->
+              <div id="compraCreditoContainer" class="hidden bg-rose-50/80 border border-rose-200 p-3.5 rounded-xl space-y-2">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <span class="text-xs font-bold text-rose-800 block">Compra a Crédito del Proveedor</span>
+                    <span class="text-[11px] text-rose-600">Se generará una cuenta por pagar y el stock se incrementará de inmediato.</span>
+                  </div>
+                  <div class="flex items-center space-x-2">
+                    <label class="text-xs font-semibold text-slate-700 whitespace-nowrap">Fecha de Vencimiento:</label>
+                    <input type="date" id="compraFechaVencimiento" class="bg-white border border-rose-300 py-1.5 px-3 rounded-lg text-xs font-bold text-rose-800">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Botón Guardar Compra -->
+            <button onclick="guardarCompra()" id="btnGuardarCompra" class="w-full btn-theme-compra text-white font-bold py-3 px-4 rounded-xl shadow-lg transition flex items-center justify-center space-x-2">
+              <i class="fa-solid fa-cloud-arrow-up text-lg"></i>
+              <span id="btnGuardarCompraTexto" data-label-key="btn_cargar_compra">Registrar Compra e Incrementar Inventario</span>
+            </button>
+
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Historial de Compras -->
+      <div id="historialComprasContainer" class="hidden bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="font-bold text-slate-800">Historial de Compras Registradas</h3>
+          <button onclick="loadCompras()" class="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg text-slate-700">
+            <i class="fa-solid fa-rotate-right mr-1"></i>Refrescar
+          </button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase">
+                <th class="py-2.5 px-3">N° Control</th>
+                <th class="py-2.5 px-3">Fecha</th>
+                <th class="py-2.5 px-3">Proveedor</th>
+                <th class="py-2.5 px-3">Total Compra ($)</th>
+                <th class="py-2.5 px-3">Foto Factura</th>
+                <th class="py-2.5 px-3 text-right">Detalle</th>
+              </tr>
+            </thead>
+            <tbody id="comprasTableBody" class="divide-y divide-slate-100">
+              <!-- Dinámico -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         VISTA 7: PROVEEDORES
+         ======================================================== -->
+    <section id="view-proveedores" class="hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800">Módulo 6: Proveedores</h2>
+          <p class="text-sm text-slate-500">Directorio de proveedores comerciales vinculado al módulo de compras.</p>
+        </div>
+        <button onclick="openProveedorModal()" class="btn-theme-primary px-4 py-2.5 rounded-xl font-medium shadow text-sm flex items-center justify-center transition">
+          <i class="fa-solid fa-building-circle-check mr-2"></i><span data-label-key="btn_nuevo_proveedor">Registrar Proveedor</span>
+        </button>
+      </div>
+
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row gap-3 items-center justify-between">
+        <div class="relative w-full sm:w-96">
+          <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+          <input type="text" id="proveedorSearchInput" oninput="loadProveedores()" placeholder="Buscar por razón social o RIF/Cédula..." 
+                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <th class="py-3 px-4">RIF / Cédula</th>
+                <th class="py-3 px-4">Razón Social / Nombre</th>
+                <th class="py-3 px-4">WhatsApp / Teléfono</th>
+                <th class="py-3 px-4">Correo Electrónico</th>
+                <th class="py-3 px-4">Dirección Fiscal</th>
+                <th class="py-3 px-4 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="proveedoresTableBody" class="divide-y divide-slate-100 text-sm">
+              <!-- Renderizado dinámico -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         VISTA 8: CUENTAS POR COBRAR (CXC)
+         ======================================================== -->
+    <section id="view-cxc" class="hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800 flex items-center">
+            <i class="fa-solid fa-hand-holding-dollar text-amber-600 mr-2.5"></i>
+            Módulo 7: Cuentas por Cobrar (CXC)
+          </h2>
+          <p class="text-sm text-slate-500">
+            Control de facturas a crédito, saldos pendientes, vencimientos y registro de abonos multimoneda.
+          </p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="loadCxc()" class="text-sm bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl shadow-sm transition">
+            <i class="fa-solid fa-rotate-right mr-1.5"></i>Actualizar
+          </button>
+          <button onclick="navigate('facturacion')" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow transition">
+            <i class="fa-solid fa-plus mr-1.5"></i>Nueva Factura a Crédito
+          </button>
+        </div>
+      </div>
+
+      <!-- Tarjetas de Resumen de Cuentas por Cobrar -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Total por Cobrar USD -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total por Cobrar (USD)</p>
+            <h3 class="text-2xl font-black text-rose-600 mt-1" id="cxcResumenSaldoUsd">$0.00</h3>
+            <p class="text-xs text-slate-500 mt-0.5" id="cxcResumenSaldoBs">0.00 Bs.</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-sack-dollar"></i>
+          </div>
+        </div>
+
+        <!-- Cuentas Pendientes / Activas -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Cuentas por Cobrar</p>
+            <h3 class="text-2xl font-bold text-amber-700 mt-1" id="cxcResumenPendientes">0</h3>
+            <p class="text-xs text-amber-600 font-medium mt-0.5">Pendientes o con abonos</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-clock"></i>
+          </div>
+        </div>
+
+        <!-- Cuentas Vencidas -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Cuentas Vencidas</p>
+            <h3 class="text-2xl font-bold text-rose-700 mt-1" id="cxcResumenVencidas">0</h3>
+            <p class="text-xs text-rose-600 font-medium mt-0.5"><i class="fa-solid fa-circle-exclamation mr-1"></i>Excedieron plazo</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-calendar-xmark"></i>
+          </div>
+        </div>
+
+        <!-- Cuentas Saldadas -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Cuentas Pagadas</p>
+            <h3 class="text-2xl font-bold text-emerald-700 mt-1" id="cxcResumenPagadas">0</h3>
+            <p class="text-xs text-emerald-600 font-medium mt-0.5"><i class="fa-solid fa-circle-check mr-1"></i>Saldadas al 100%</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-check-double"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filtros y Búsqueda -->
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-3 items-center justify-between">
+        <div class="relative w-full md:w-96">
+          <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+          <input type="text" id="cxcSearchInput" oninput="loadCxc()" placeholder="Buscar por cliente, cédula o factura..." 
+                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5 w-full md:w-auto">
+          <button onclick="filterCxcEstado('todos')" id="cxcFilter-todos" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white">Todas</button>
+          <button onclick="filterCxcEstado('pendiente')" id="cxcFilter-pendiente" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pendientes</button>
+          <button onclick="filterCxcEstado('vencida')" id="cxcFilter-vencida" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Vencidas</button>
+          <button onclick="filterCxcEstado('pagada')" id="cxcFilter-pagada" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pagadas</button>
+        </div>
+      </div>
+
+      <!-- Tabla de Cuentas por Cobrar -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <th class="py-3 px-4">Factura</th>
+                <th class="py-3 px-4">Cliente</th>
+                <th class="py-3 px-4">Emisión</th>
+                <th class="py-3 px-4">Vencimiento</th>
+                <th class="py-3 px-4">Monto Factura</th>
+                <th class="py-3 px-4">Abonado</th>
+                <th class="py-3 px-4">Saldo Pendiente</th>
+                <th class="py-3 px-4">Estado</th>
+                <th class="py-3 px-4 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="cxcTableBody" class="divide-y divide-slate-100">
+              <!-- Renderizado dinámico -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         VISTA 8: CUENTAS POR PAGAR (CXP)
+         ======================================================== -->
+    <section id="view-cxp" class="hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800 flex items-center">
+            <i class="fa-solid fa-receipt text-rose-600 mr-2.5"></i>
+            Módulo 8: Cuentas por Pagar (CXP)
+          </h2>
+          <p class="text-sm text-slate-500">
+            Control de compras a crédito a proveedores, gastos fijos (alquiler, servicios), saldos pendientes y abonos multimoneda.
+          </p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="loadCxp()" class="text-sm bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl shadow-sm transition">
+            <i class="fa-solid fa-rotate-right mr-1.5"></i>Actualizar
+          </button>
+          <button onclick="abrirModalDirectoCXP()" class="bg-rose-600 hover:bg-rose-500 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow transition flex items-center">
+            <i class="fa-solid fa-plus mr-1.5"></i>Nuevo Gasto / Saldo a Pagar
+          </button>
+          <button onclick="navigate('compras')" class="btn-theme-compra text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow transition flex items-center">
+            <i class="fa-solid fa-cart-shopping mr-1.5"></i>Cargar Compra
+          </button>
+        </div>
+      </div>
+
+      <!-- Tarjetas de Resumen de Cuentas por Pagar -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Total por Pagar USD -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Deuda por Pagar (USD)</p>
+            <h3 class="text-2xl font-black text-rose-600 mt-1" id="cxpResumenSaldoUsd">$0.00</h3>
+            <p class="text-xs text-slate-500 mt-0.5" id="cxpResumenSaldoBs">0.00 Bs. | 0 COP</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-hand-holding-dollar"></i>
+          </div>
+        </div>
+
+        <!-- Cuentas Pendientes / Activas -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Cuentas por Pagar Activas</p>
+            <h3 class="text-2xl font-bold text-amber-700 mt-1" id="cxpResumenPendientes">0</h3>
+            <p class="text-xs text-amber-600 font-medium mt-0.5">Pendientes de cancelación</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-clock"></i>
+          </div>
+        </div>
+
+        <!-- Cuentas Vencidas -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Cuentas Vencidas</p>
+            <h3 class="text-2xl font-bold text-rose-700 mt-1" id="cxpResumenVencidas">0</h3>
+            <p class="text-xs text-rose-600 font-medium mt-0.5"><i class="fa-solid fa-circle-exclamation mr-1"></i>Vencimiento superado</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-calendar-xmark"></i>
+          </div>
+        </div>
+
+        <!-- Total Pagado a Proveedores -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Abonado a Proveedores</p>
+            <h3 class="text-2xl font-bold text-emerald-600 mt-1" id="cxpResumenPagado">$0.00</h3>
+            <p class="text-xs text-emerald-600 font-medium mt-0.5"><i class="fa-solid fa-circle-check mr-1"></i>Pagos realizados</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-check-double"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- Barra de Filtros y Búsqueda -->
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-3 items-center justify-between">
+        <div class="relative w-full md:w-96">
+          <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+          <input type="text" id="cxpSearchInput" oninput="loadCxp()" placeholder="Buscar por proveedor, RIF, factura o concepto..." 
+                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-rose-500 focus:bg-white transition">
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5 w-full md:w-auto">
+          <button onclick="filterCxpEstado('todos')" id="cxpFilter-todos" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-600 text-white">Todas</button>
+          <button onclick="filterCxpEstado('pendiente')" id="cxpFilter-pendiente" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pendientes</button>
+          <button onclick="filterCxpEstado('parcial')" id="cxpFilter-parcial" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Con Abonos</button>
+          <button onclick="filterCxpEstado('vencida')" id="cxpFilter-vencida" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Vencidas</button>
+          <button onclick="filterCxpEstado('pagada')" id="cxpFilter-pagada" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pagadas</button>
+        </div>
+      </div>
+
+      <!-- Tabla de Cuentas por Pagar -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <th class="py-3 px-4">Factura / Concepto</th>
+                <th class="py-3 px-4">Proveedor</th>
+                <th class="py-3 px-4">Tipo</th>
+                <th class="py-3 px-4">Emisión</th>
+                <th class="py-3 px-4">Vencimiento</th>
+                <th class="py-3 px-4">Monto Total</th>
+                <th class="py-3 px-4">Abonado</th>
+                <th class="py-3 px-4">Saldo Pendiente</th>
+                <th class="py-3 px-4">Estado</th>
+                <th class="py-3 px-4 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="cxpTableBody" class="divide-y divide-slate-100">
+              <!-- Renderizado dinámico -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         VISTA 9: CENTRO DE REPORTES & ESTADÍSTICAS
+         ======================================================== -->
+    <section id="view-reportes" class="hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800 flex items-center">
+            <i class="fa-solid fa-chart-column text-indigo-600 mr-2.5"></i>
+            Módulo 8: Centro de Reportes & Análisis
+          </h2>
+          <p class="text-sm text-slate-500">
+            Valoración total de inventario, ventas diarias con desglose de monedas, análisis mensual y cuentas por cobrar.
+          </p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="abrirVistaPreliminarReporte()" class="text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-xl shadow-sm transition flex items-center">
+            <i class="fa-solid fa-file-invoice mr-1.5"></i>Vista Preliminar / PDF
+          </button>
+          <button onclick="recargarReporteActual()" class="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-3.5 py-2 rounded-xl transition flex items-center">
+            <i class="fa-solid fa-rotate-right mr-1.5"></i>Actualizar
+          </button>
+        </div>
+      </div>
+
+      <!-- Pestañas internas de reportes -->
+      <div class="flex space-x-2 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
+        <button onclick="setReportTab('inventario')" id="btn-subtab-rep-inventario" class="px-4 py-2 rounded-xl text-sm font-bold bg-indigo-600 text-white shadow-xs transition">
+          <i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario & Valoración
+        </button>
+        <button onclick="setReportTab('diarias')" id="btn-subtab-rep-diarias" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">
+          <i class="fa-solid fa-calendar-day mr-1.5"></i>Ventas Diarias (Monedas)
+        </button>
+        <button onclick="setReportTab('mensuales')" id="btn-subtab-rep-mensuales" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">
+          <i class="fa-solid fa-calendar-days mr-1.5"></i>Ventas Mensuales
+        </button>
+        <button onclick="setReportTab('cxc')" id="btn-subtab-rep-cxc" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">
+          <i class="fa-solid fa-hand-holding-dollar mr-1.5"></i>Cuentas por Cobrar Detalle
+        </button>
+        <button onclick="setReportTab('cxp')" id="btn-subtab-rep-cxp" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">
+          <i class="fa-solid fa-file-invoice-dollar mr-1.5"></i>Cuentas por Pagar Detalle
+        </button>
+      </div>
+
+      <!-- ============================================== -->
+      <!-- SUB-REPORTE 1: INVENTARIO & VALORACIÓN -->
+      <!-- ============================================== -->
+      <div id="subview-rep-inventario" class="space-y-6">
+        <!-- Tarjetas de Valoración de Inventario -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Costo Total Inventario</p>
+              <h3 class="text-2xl font-bold text-slate-900 mt-1" id="repInvTotalCostoUsd">$0.00</h3>
+              <p class="text-xs text-slate-500 mt-0.5" id="repInvTotalCostoBs">0.00 Bs. | 0 COP</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-vault"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Valor Estimado de Venta</p>
+              <h3 class="text-2xl font-bold text-emerald-600 mt-1" id="repInvTotalVentaUsd">$0.00</h3>
+              <p class="text-xs text-emerald-600 font-medium mt-0.5">Precio de venta x stock</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-tags"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Ganancia Bruta Potencial</p>
+              <h3 class="text-2xl font-bold text-blue-600 mt-1" id="repInvGananciaUsd">$0.00</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Venta total menos costo</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-chart-line"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Unidades en Existencia</p>
+              <h3 class="text-2xl font-bold text-amber-600 mt-1" id="repInvTotalUnidades">0</h3>
+              <p class="text-xs text-slate-500 mt-0.5" id="repInvTotalItemsCount">0 ítems registrados</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-cubes-stacked"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Filtros de Inventario -->
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-3 items-center justify-between">
+          <div class="relative w-full md:w-96">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+            <input type="text" id="repInvSearchInput" oninput="renderReporteInventarioTabla()" placeholder="Buscar ítem por nombre o código..." 
+                   class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+          </div>
+          <div class="flex items-center gap-1.5 w-full md:w-auto">
+            <button onclick="filterRepInvTipo('todos')" id="repInvFilter-todos" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white">Todos</button>
+            <button onclick="filterRepInvTipo('producto')" id="repInvFilter-producto" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Solo Productos (Stock)</button>
+            <button onclick="filterRepInvTipo('servicio')" id="repInvFilter-servicio" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Solo Servicios</button>
+          </div>
+        </div>
+
+        <!-- Tabla de Inventario y Valoración -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th class="py-3 px-4">Código</th>
+                  <th class="py-3 px-4">Ítem / Descripción</th>
+                  <th class="py-3 px-4">Categoría</th>
+                  <th class="py-3 px-4 text-center">Clasificación</th>
+                  <th class="py-3 px-4 text-right">Existencia (Stock)</th>
+                  <th class="py-3 px-4 text-right">Costo Unitario ($)</th>
+                  <th class="py-3 px-4 text-right font-bold text-slate-700 bg-slate-100/60">Costo Total por Existencia ($)</th>
+                  <th class="py-3 px-4 text-right">Precio Venta ($)</th>
+                  <th class="py-3 px-4 text-right">Valor Venta Estimado ($)</th>
+                </tr>
+              </thead>
+              <tbody id="repInvTableBody" class="divide-y divide-slate-100">
+                <!-- Dinámico -->
+              </tbody>
+              <tfoot id="repInvTableFoot" class="bg-slate-50 font-bold border-t-2 border-slate-300 text-xs text-slate-800">
+                <!-- Totales acumulados -->
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================== -->
+      <!-- SUB-REPORTE 2: VENTAS DIARIAS (MONEDAS) -->
+      <!-- ============================================== -->
+      <div id="subview-rep-diarias" class="hidden space-y-6">
+        <!-- Barra de Selección de Fecha -->
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div class="flex items-center space-x-3 w-full sm:w-auto">
+            <span class="text-sm font-semibold text-slate-700 flex items-center">
+              <i class="fa-solid fa-calendar-day text-indigo-600 mr-2"></i>Fecha de Consulta:
+            </span>
+            <input type="date" id="repVentasFechaInput" onchange="loadReporteVentasDiarias()" 
+                   class="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-sm font-bold text-slate-800 focus:outline-none focus:border-indigo-500">
+            <button onclick="setRepVentasHoy()" class="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold rounded-xl text-xs transition">
+              Hoy
+            </button>
+          </div>
+          <div class="text-xs text-slate-500 text-right w-full sm:w-auto">
+            Consolidado de ventas directas de contado + abonos de crédito recibidos en la fecha.
+          </div>
+        </div>
+
+        <!-- Tarjetas de Resumen del Día -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Facturas Emitidas</p>
+              <h3 class="text-2xl font-bold text-slate-800 mt-1" id="repDiaFacturasCount">0</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Comprobantes generados</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-receipt"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Facturado</p>
+              <h3 class="text-2xl font-bold text-indigo-700 mt-1" id="repDiaTotalFacturadoUsd">$0.00</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Ventas del día</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-file-invoice-dollar"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">IVA Recaudado</p>
+              <h3 class="text-2xl font-bold text-slate-800 mt-1" id="repDiaIvaUsd">$0.00</h3>
+              <p class="text-xs text-slate-500 mt-0.5" id="repDiaSubtotalUsd">Subtotal: $0.00</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-percent"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Dinero Cobrado</p>
+              <h3 class="text-2xl font-black text-emerald-600 mt-1" id="repDiaTotalCobradoUsd">$0.00</h3>
+              <p class="text-xs text-emerald-600 font-medium mt-0.5">Ingreso real a caja (Consolidado)</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-cash-register"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- DESGLOSE DETALLADO POR MONEDA -->
+        <div class="space-y-3">
+          <h3 class="font-bold text-slate-800 flex items-center text-base">
+            <i class="fa-solid fa-money-bill-transfer text-emerald-600 mr-2"></i>
+            Desglose de Ingresos por Moneda Recibida
+          </h3>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <!-- Bloque Dólares (USD) -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4">
+              <div class="flex items-center justify-between border-b pb-3 border-slate-100">
+                <div class="flex items-center space-x-2.5">
+                  <span class="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-sm">$</span>
+                  <div>
+                    <h4 class="font-bold text-slate-800 text-sm">Dólares (USD)</h4>
+                    <p class="text-[11px] text-slate-400">Efectivo, Zelle, Binance, Zinli</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <span class="text-lg font-black text-emerald-600" id="repMonedaTotalUsd">$0.00</span>
+                </div>
+              </div>
+              <div class="space-y-2 text-xs" id="repMetodosUsdList">
+                <!-- Métodos dinámicos -->
+              </div>
+            </div>
+
+            <!-- Bloque Bolívares (VES) -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4">
+              <div class="flex items-center justify-between border-b pb-3 border-slate-100">
+                <div class="flex items-center space-x-2.5">
+                  <span class="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs">Bs</span>
+                  <div>
+                    <h4 class="font-bold text-slate-800 text-sm">Bolívares (VES)</h4>
+                    <p class="text-[11px] text-slate-400">Pago Móvil, Transferencia, Punto</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <span class="text-lg font-black text-blue-600 block" id="repMonedaTotalVes">0.00 Bs.</span>
+                  <span class="text-[11px] text-slate-400 font-semibold" id="repMonedaEquivVesUsd">≈ $0.00</span>
+                </div>
+              </div>
+              <div class="space-y-2 text-xs" id="repMetodosVesList">
+                <!-- Métodos dinámicos -->
+              </div>
+            </div>
+
+            <!-- Bloque Pesos (COP) -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4">
+              <div class="flex items-center justify-between border-b pb-3 border-slate-100">
+                <div class="flex items-center space-x-2.5">
+                  <span class="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-xs">COP</span>
+                  <div>
+                    <h4 class="font-bold text-slate-800 text-sm">Pesos (COP)</h4>
+                    <p class="text-[11px] text-slate-400">Efectivo, Bancolombia, Nequi</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <span class="text-lg font-black text-amber-600 block" id="repMonedaTotalCop">0 COP</span>
+                  <span class="text-[11px] text-slate-400 font-semibold" id="repMonedaEquivCopUsd">≈ $0.00</span>
+                </div>
+              </div>
+              <div class="space-y-2 text-xs" id="repMetodosCopList">
+                <!-- Métodos dinámicos -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabla de Facturas del Día -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden space-y-2">
+          <div class="p-4 border-b border-slate-100 flex justify-between items-center">
+            <h4 class="font-bold text-slate-800 text-sm">Facturas Registradas en la Fecha</h4>
+            <span class="text-xs text-slate-400" id="repDiaFacturasSubtitle">0 comprobantes</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th class="py-2.5 px-4">N° Factura</th>
+                  <th class="py-2.5 px-4">Hora</th>
+                  <th class="py-2.5 px-4">Cliente</th>
+                  <th class="py-2.5 px-4">Condición</th>
+                  <th class="py-2.5 px-4 text-right">Subtotal ($)</th>
+                  <th class="py-2.5 px-4 text-right">IVA ($)</th>
+                  <th class="py-2.5 px-4 text-right font-bold text-slate-800">Total ($)</th>
+                  <th class="py-2.5 px-4 text-right">Equiv. Bs.</th>
+                  <th class="py-2.5 px-4 text-right">Equiv. COP</th>
+                  <th class="py-2.5 px-4 text-center">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="repDiaFacturasTableBody" class="divide-y divide-slate-100">
+                <!-- Dinámico -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================== -->
+      <!-- SUB-REPORTE 3: VENTAS MENSUALES -->
+      <!-- ============================================== -->
+      <div id="subview-rep-mensuales" class="hidden space-y-6">
+        <!-- Tarjetas de Resumen Histórico -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Histórico Facturado</p>
+              <h3 class="text-2xl font-bold text-indigo-700 mt-1" id="repMesTotalHistoricoUsd">$0.00</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Suma de todas las ventas</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-chart-pie"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Facturas Emitidas</p>
+              <h3 class="text-2xl font-bold text-slate-800 mt-1" id="repMesTotalFacturasCount">0</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Comprobantes históricos</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-file-invoice"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Promedio Mensual Facturado</p>
+              <h3 class="text-2xl font-bold text-emerald-600 mt-1" id="repMesPromedioUsd">$0.00</h3>
+              <p class="text-xs text-emerald-600 font-medium mt-0.5">Promedio por mes registrado</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-arrow-trend-up"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabla de Ventas Mensuales -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="p-4 border-b border-slate-100 flex justify-between items-center">
+            <h4 class="font-bold text-slate-800 text-sm">Evolución de Facturación Mes a Mes</h4>
+            <span class="text-xs text-slate-400">Desglose de contado vs crédito e impuestos</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th class="py-3 px-4">Mes (Año-Mes)</th>
+                  <th class="py-3 px-4 text-center">N° Facturas</th>
+                  <th class="py-3 px-4 text-right">Ventas Contado ($)</th>
+                  <th class="py-3 px-4 text-right">Ventas Crédito ($)</th>
+                  <th class="py-3 px-4 text-right">Subtotal ($)</th>
+                  <th class="py-3 px-4 text-right">IVA ($)</th>
+                  <th class="py-3 px-4 text-right font-bold text-indigo-700 bg-indigo-50/50">Total Facturado ($)</th>
+                  <th class="py-3 px-4 text-right">Equiv. Bolívares</th>
+                  <th class="py-3 px-4 text-right">Equiv. Pesos COP</th>
+                </tr>
+              </thead>
+              <tbody id="repMesesTableBody" class="divide-y divide-slate-100">
+                <!-- Dinámico -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================== -->
+      <!-- SUB-REPORTE 4: CUENTAS POR COBRAR DETALLE -->
+      <!-- ============================================== -->
+      <div id="subview-rep-cxc" class="hidden space-y-6">
+        <!-- Tarjetas de Resumen de Cuentas por Cobrar -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Deuda Pendiente (USD)</p>
+              <h3 class="text-2xl font-black text-rose-600 mt-1" id="repCxcTotalDeudaUsd">$0.00</h3>
+              <p class="text-xs text-slate-500 mt-0.5" id="repCxcTotalDeudaBs">0.00 Bs. | 0 COP</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-sack-xmark"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Facturado a Crédito</p>
+              <h3 class="text-2xl font-bold text-slate-800 mt-1" id="repCxcTotalFacturadoUsd">$0.00</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Monto original otorgado</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-handshake"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Cobrado (Abonos)</p>
+              <h3 class="text-2xl font-bold text-emerald-600 mt-1" id="repCxcTotalCobradoUsd">$0.00</h3>
+              <p class="text-xs text-emerald-600 font-medium mt-0.5">Recuperado a la fecha</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-circle-check"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Estado de Cartera</p>
+              <h3 class="text-2xl font-bold text-amber-700 mt-1" id="repCxcCuentasActivas">0 activas</h3>
+              <p class="text-xs text-rose-600 font-bold mt-0.5" id="repCxcCuentasVencidas">0 vencidas</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-calendar-xmark"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Filtros de CXC -->
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-3 items-center justify-between">
+          <div class="relative w-full md:w-96">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+            <input type="text" id="repCxcSearchInput" oninput="renderReporteCxcTabla()" placeholder="Buscar por cliente, cédula o factura..." 
+                   class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+          </div>
+          <div class="flex items-center gap-1.5 w-full md:w-auto">
+            <button onclick="filterRepCxcEstado('todos')" id="repCxcFilter-todos" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white">Todas</button>
+            <button onclick="filterRepCxcEstado('pendiente')" id="repCxcFilter-pendiente" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pendientes</button>
+            <button onclick="filterRepCxcEstado('vencida')" id="repCxcFilter-vencida" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Vencidas</button>
+            <button onclick="filterRepCxcEstado('pagada')" id="repCxcFilter-pagada" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pagadas</button>
+          </div>
+        </div>
+
+        <!-- Tabla Detallada de Cuentas por Cobrar -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th class="py-3 px-4">Factura & Emisión</th>
+                  <th class="py-3 px-4">Cliente & Contacto</th>
+                  <th class="py-3 px-4">Vencimiento & Plazo</th>
+                  <th class="py-3 px-4 text-right">Monto Factura ($)</th>
+                  <th class="py-3 px-4 text-right">Abonado ($)</th>
+                  <th class="py-3 px-4 text-right font-bold text-rose-700 bg-rose-50/50">Saldo Pendiente ($)</th>
+                  <th class="py-3 px-4 text-right">Saldo en Bs.</th>
+                  <th class="py-3 px-4 text-center">Estado</th>
+                  <th class="py-3 px-4 text-right">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="repCxcTableBody" class="divide-y divide-slate-100">
+                <!-- Dinámico -->
+              </tbody>
+              <tfoot id="repCxcTableFoot" class="bg-slate-50 font-bold border-t-2 border-slate-300 text-xs text-slate-800">
+                <!-- Totales acumulados -->
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================== -->
+      <!-- SUB-REPORTE 5: CUENTAS POR PAGAR (DETALLE) -->
+      <!-- ============================================== -->
+      <div id="subview-rep-cxp" class="space-y-6 hidden">
+        <!-- Tarjetas KPIs CXP -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Deuda CXP (USD)</p>
+              <h3 class="text-2xl font-black text-rose-600 mt-1" id="repCxpTotalSaldoUsd">$0.00</h3>
+              <p class="text-xs text-slate-500 mt-0.5" id="repCxpTotalSaldoBs">0.00 Bs. | 0 COP</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-receipt"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Cuentas Pendientes</p>
+              <h3 class="text-2xl font-bold text-amber-700 mt-1" id="repCxpCountPendientes">0</h3>
+              <p class="text-xs text-amber-600 font-medium mt-0.5">Por pagar a proveedores</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-clock"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Deuda Vencida (Mora)</p>
+              <h3 class="text-2xl font-bold text-rose-700 mt-1" id="repCxpTotalVencidoUsd">$0.00</h3>
+              <p class="text-xs text-rose-600 font-medium mt-0.5" id="repCxpCountVencidas">0 cuentas vencidas</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Abonado a la Fecha</p>
+              <h3 class="text-2xl font-bold text-emerald-600 mt-1" id="repCxpTotalAbonadoUsd">$0.00</h3>
+              <p class="text-xs text-emerald-600 font-medium mt-0.5"><i class="fa-solid fa-check mr-1"></i>Pagos amortizados</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-hand-holding-dollar"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Filtros y Búsqueda -->
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-3 items-center justify-between">
+          <div class="relative w-full md:w-96">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+            <input type="text" id="repCxpSearchInput" oninput="renderReporteCxpTable()" placeholder="Buscar por proveedor, factura o concepto..."
+                   class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-rose-500 focus:bg-white transition">
+          </div>
+          <div class="flex flex-wrap items-center gap-1.5 w-full md:w-auto">
+            <span class="text-xs font-semibold text-slate-500 mr-1">Estado:</span>
+            <button onclick="setReporteCxpFilter('todos')" id="repCxpFilter-todos" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-600 text-white">Todos</button>
+            <button onclick="setReporteCxpFilter('pendientes')" id="repCxpFilter-pendientes" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pendientes</button>
+            <button onclick="setReporteCxpFilter('vencidas')" id="repCxpFilter-vencidas" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Vencidas</button>
+            <button onclick="setReporteCxpFilter('pagadas')" id="repCxpFilter-pagadas" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Saldadas</button>
+          </div>
+        </div>
+
+        <!-- Tabla Detallada de CXP -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th class="py-3 px-4">Factura / Control</th>
+                  <th class="py-3 px-4">Proveedor</th>
+                  <th class="py-3 px-4">Tipo / Concepto</th>
+                  <th class="py-3 px-4">Vencimiento</th>
+                  <th class="py-3 px-4 text-right">Total ($)</th>
+                  <th class="py-3 px-4 text-right">Abonado ($)</th>
+                  <th class="py-3 px-4 text-right">Saldo Pendiente</th>
+                  <th class="py-3 px-4 text-right">Equiv. Bs. (BCV)</th>
+                  <th class="py-3 px-4 text-center">Estado</th>
+                  <th class="py-3 px-4 text-right">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="repCxpTableBody" class="divide-y divide-slate-100">
+                <!-- Dinámico -->
+              </tbody>
+              <tfoot id="repCxpTableFoot" class="bg-slate-50 font-bold border-t-2 border-slate-300 text-xs text-slate-800">
+                <!-- Totales acumulados -->
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+  <!-- ========================================================
+       MODALES Y VENTANAS FLOTANTES
+       ======================================================== -->
+
+  <!-- Modal de Personalización Completa (Temas, Colores y Nombres) -->
+  <div id="modalPersonalizacion" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 space-y-5 m-4 max-h-[92vh] flex flex-col">
+      <!-- Encabezado Modal -->
+      <div class="flex items-center justify-between border-b pb-3">
+        <div class="flex items-center space-x-2.5">
+          <div class="p-2 bg-pink-100 text-pink-600 rounded-xl">
+            <i class="fa-solid fa-palette text-lg"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-lg text-slate-800">Centro de Personalización</h3>
+            <p class="text-xs text-slate-500">Modifica libremente colores, fondos y nombres de botones y pestañas</p>
+          </div>
+        </div>
+        <button onclick="closePersonalizacionModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+          <i class="fa-solid fa-xmark text-xl"></i>
+        </button>
+      </div>
+
+      <!-- Pestañas internas de personalización -->
+      <div class="flex border-b border-slate-200 space-x-2 text-xs font-semibold">
+        <button type="button" onclick="setPersonalizacionTab('colores')" id="tabBtnColores" class="px-4 py-2 text-indigo-600 border-b-2 border-indigo-600 transition flex items-center">
+          <i class="fa-solid fa-brush mr-1.5"></i>Colores & Paletas
+        </button>
+        <button type="button" onclick="setPersonalizacionTab('pestanas')" id="tabBtnPestanas" class="px-4 py-2 text-slate-500 hover:text-slate-800 transition flex items-center">
+          <i class="fa-solid fa-folder-tree mr-1.5"></i>Nombres de Pestañas
+        </button>
+        <button type="button" onclick="setPersonalizacionTab('botones')" id="tabBtnBotones" class="px-4 py-2 text-slate-500 hover:text-slate-800 transition flex items-center">
+          <i class="fa-solid fa-font mr-1.5"></i>Nombres de Botones & Textos
+        </button>
+      </div>
+
+      <!-- Contenido scrolleable -->
+      <div class="flex-1 overflow-y-auto pr-1 space-y-4 text-xs">
+        <!-- 1. Panel de Colores & Paletas -->
+        <div id="panelPersonalizacionColores" class="space-y-4">
+          <!-- Paletas Rápidas -->
+          <div>
+            <label class="block font-bold text-slate-700 uppercase tracking-wider text-[11px] mb-2">Paletas Rápidas Prediseñadas</label>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <button type="button" onclick="aplicarPresetTema('indigo')" class="flex items-center p-2 rounded-xl border border-slate-200 hover:border-indigo-500 hover:shadow-sm text-left transition">
+                <span class="w-4 h-4 rounded-full bg-indigo-600 mr-2 flex-shrink-0"></span>
+                <span class="font-medium text-slate-700">Índigo Clásico</span>
+              </button>
+              <button type="button" onclick="aplicarPresetTema('esmeralda')" class="flex items-center p-2 rounded-xl border border-slate-200 hover:border-emerald-500 hover:shadow-sm text-left transition">
+                <span class="w-4 h-4 rounded-full bg-emerald-600 mr-2 flex-shrink-0"></span>
+                <span class="font-medium text-slate-700">Esmeralda Pro</span>
+              </button>
+              <button type="button" onclick="aplicarPresetTema('azul')" class="flex items-center p-2 rounded-xl border border-slate-200 hover:border-blue-500 hover:shadow-sm text-left transition">
+                <span class="w-4 h-4 rounded-full bg-blue-600 mr-2 flex-shrink-0"></span>
+                <span class="font-medium text-slate-700">Azul Corporativo</span>
+              </button>
+              <button type="button" onclick="aplicarPresetTema('violeta')" class="flex items-center p-2 rounded-xl border border-slate-200 hover:border-purple-500 hover:shadow-sm text-left transition">
+                <span class="w-4 h-4 rounded-full bg-purple-600 mr-2 flex-shrink-0"></span>
+                <span class="font-medium text-slate-700">Violeta Dark</span>
+              </button>
+              <button type="button" onclick="aplicarPresetTema('oscuro')" class="flex items-center p-2 rounded-xl border border-slate-200 hover:border-slate-800 hover:shadow-sm text-left transition">
+                <span class="w-4 h-4 rounded-full bg-slate-900 mr-2 flex-shrink-0"></span>
+                <span class="font-medium text-slate-700">Modo Noche</span>
+              </button>
+              <button type="button" onclick="aplicarPresetTema('sunset')" class="flex items-center p-2 rounded-xl border border-slate-200 hover:border-orange-500 hover:shadow-sm text-left transition">
+                <span class="w-4 h-4 rounded-full bg-orange-600 mr-2 flex-shrink-0"></span>
+                <span class="font-medium text-slate-700">Sunset Ámbar</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Selectores de Color en Tiempo Real -->
+          <div class="border-t pt-3">
+            <label class="block font-bold text-slate-700 uppercase tracking-wider text-[11px] mb-3">Ajuste Individual de Colores (En Tiempo Real)</label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div>
+                  <span class="font-semibold text-slate-700 block">Fondo Barra Lateral</span>
+                  <span class="text-[10px] text-slate-500">Color del panel izquierdo</span>
+                </div>
+                <input type="color" id="pickerSidebarBg" oninput="previewColorChange('sidebarBg', this.value)" class="w-12 h-8 rounded cursor-pointer">
+              </div>
+
+              <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div>
+                  <span class="font-semibold text-slate-700 block">Texto Barra Lateral</span>
+                  <span class="text-[10px] text-slate-500">Color de letras de la barra</span>
+                </div>
+                <input type="color" id="pickerSidebarText" oninput="previewColorChange('sidebarText', this.value)" class="w-12 h-8 rounded cursor-pointer">
+              </div>
+
+              <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div>
+                  <span class="font-semibold text-slate-700 block">Color Primario / Pestaña Activa</span>
+                  <span class="text-[10px] text-slate-500">Color de resalte general</span>
+                </div>
+                <input type="color" id="pickerPrimaryColor" oninput="previewColorChange('primaryColor', this.value)" class="w-12 h-8 rounded cursor-pointer">
+              </div>
+
+              <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div>
+                  <span class="font-semibold text-slate-700 block">Fondo General de la App</span>
+                  <span class="text-[10px] text-slate-500">Fondo de pantallas y módulos</span>
+                </div>
+                <input type="color" id="pickerBgApp" oninput="previewColorChange('bgApp', this.value)" class="w-12 h-8 rounded cursor-pointer">
+              </div>
+
+              <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div>
+                  <span class="font-semibold text-slate-700 block">Botón Nueva Venta / Factura</span>
+                  <span class="text-[10px] text-slate-500">Color del botón de facturar</span>
+                </div>
+                <input type="color" id="pickerBtnFactura" oninput="previewColorChange('btnFactura', this.value)" class="w-12 h-8 rounded cursor-pointer">
+              </div>
+
+              <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div>
+                  <span class="font-semibold text-slate-700 block">Botón Cargar Compra</span>
+                  <span class="text-[10px] text-slate-500">Color del botón de compras</span>
+                </div>
+                <input type="color" id="pickerBtnCompra" oninput="previewColorChange('btnCompra', this.value)" class="w-12 h-8 rounded cursor-pointer">
+              </div>
+
+              <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div>
+                  <span class="font-semibold text-slate-700 block">Botón Crédito / Cobros</span>
+                  <span class="text-[10px] text-slate-500">Color de abonos y crédito</span>
+                </div>
+                <input type="color" id="pickerBtnCxc" oninput="previewColorChange('btnCxc', this.value)" class="w-12 h-8 rounded cursor-pointer">
+              </div>
+
+              <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div>
+                  <span class="font-semibold text-slate-700 block">Botón Cuentas por Pagar</span>
+                  <span class="text-[10px] text-slate-500">Color de pagos a proveedores</span>
+                </div>
+                <input type="color" id="pickerBtnCxp" oninput="previewColorChange('btnCxp', this.value)" class="w-12 h-8 rounded cursor-pointer">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Panel de Nombres de Pestañas -->
+        <div id="panelPersonalizacionPestanas" class="space-y-3 hidden">
+          <p class="text-slate-500 mb-2">Edita el texto que se muestra en cada pestaña de la barra lateral:</p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña Dashboard</label>
+              <input type="text" id="customTabDashboard" placeholder="Dashboard" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 1 (Categorías)</label>
+              <input type="text" id="customTabCategorias" placeholder="1. Categorías" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 2 (Productos & Servicios)</label>
+              <input type="text" id="customTabProductos" placeholder="2. Productos & Servicios" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 3 (Clientes)</label>
+              <input type="text" id="customTabClientes" placeholder="3. Clientes" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 4 (Facturación)</label>
+              <input type="text" id="customTabFacturacion" placeholder="4. Facturación (Ventas)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 5 (Compras)</label>
+              <input type="text" id="customTabCompras" placeholder="5. Compras" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 6 (Proveedores)</label>
+              <input type="text" id="customTabProveedores" placeholder="6. Proveedores" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 7 (Cuentas por Cobrar)</label>
+              <input type="text" id="customTabCxc" placeholder="7. Cuentas por Cobrar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 8 (Cuentas por Pagar)</label>
+              <input type="text" id="customTabCxp" placeholder="8. Cuentas por Pagar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 9 (Reportes & Balances)</label>
+              <input type="text" id="customTabReportes" placeholder="9. Reportes & Balances" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Panel de Nombres de Botones & Textos -->
+        <div id="panelPersonalizacionBotones" class="space-y-3 hidden">
+          <p class="text-slate-500 mb-2">Edita los títulos y los nombres de las acciones principales:</p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Título de la Aplicación</label>
+              <input type="text" id="customTituloApp" placeholder="Mi Negocio Comercial" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Subtítulo de la Aplicación</label>
+              <input type="text" id="customSubtituloApp" placeholder="Control Multimoneda (USD / Bs. / COP)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Botón "Nueva Venta"</label>
+              <input type="text" id="customBtnNuevaVenta" placeholder="Nueva Venta" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Botón "Cargar Compra"</label>
+              <input type="text" id="customBtnCargarCompra" placeholder="Cargar Compra" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Botón "Procesar Factura" (POS)</label>
+              <input type="text" id="customBtnProcesarVenta" placeholder="Procesar Factura" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Botón "Crédito" (Facturar a Crédito)</label>
+              <input type="text" id="customBtnCredito" placeholder="Crédito" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Botón "Registrar Abono" (CXC)</label>
+              <input type="text" id="customBtnAbonar" placeholder="Registrar Abono" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Botón "Sincronizar Tasas"</label>
+              <input type="text" id="customBtnSyncTasas" placeholder="Sincronizar BCV / TRM" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Acciones del Modal -->
+      <div class="border-t pt-3 flex flex-col sm:flex-row items-center justify-between gap-2">
+        <button type="button" onclick="restablecerPersonalizacionFabrica()" class="text-xs text-rose-600 hover:text-rose-700 font-semibold flex items-center py-2 px-3 hover:bg-rose-50 rounded-xl transition">
+          <i class="fa-solid fa-rotate-left mr-1.5"></i>Restablecer de Fábrica
+        </button>
+        <div class="flex items-center space-x-2 w-full sm:w-auto justify-end">
+          <button type="button" onclick="closePersonalizacionModal()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs font-medium hover:bg-slate-50 transition">
+            Cancelar
+          </button>
+          <button type="button" onclick="guardarPersonalizacion()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow transition flex items-center">
+            <i class="fa-solid fa-floppy-disk mr-1.5"></i>Guardar Personalización
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1. Modal Configuración de Tasas y Empresa -->
+  <div id="modalConfig" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800 flex items-center">
+          <i class="fa-solid fa-sliders text-indigo-600 mr-2"></i>
+          Configuración & Tasas de Cambio
+        </h3>
+        <button onclick="closeConfigModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <form id="formConfig" onsubmit="saveConfig(event)" class="space-y-4 text-sm">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Tasa Bolívar (Bs. / USD) *</label>
+            <input type="number" step="any" id="cfgTasaVes" required class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm font-bold text-amber-700">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Tasa Peso (COP / USD) *</label>
+            <input type="number" step="any" id="cfgTasaCop" required class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm font-bold text-emerald-700">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Porcentaje IVA (%) *</label>
+          <input type="number" step="any" id="cfgIva" required class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+        </div>
+        <div class="border-t pt-3 space-y-3">
+          <span class="text-xs font-bold uppercase text-slate-400">Datos para la Factura</span>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Nombre Comercial / Empresa</label>
+            <input type="text" id="cfgNombreNegocio" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">RIF / Cédula Fiscal</label>
+              <input type="text" id="cfgRif" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Teléfono Empresa</label>
+              <input type="text" id="cfgTelefono" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Dirección Fiscal</label>
+            <input type="text" id="cfgDireccion" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+          </div>
+        </div>
+        <div class="flex justify-end space-x-2 pt-2">
+          <button type="button" onclick="closeConfigModal()" class="px-4 py-2 border rounded-xl text-slate-600">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-semibold">Guardar Cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2. Modal Categoría -->
+  <div id="modalCategoria" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 m-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800" id="catModalTitle">Nueva Categoría</h3>
+        <button onclick="closeCategoryModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <form id="formCategoria" onsubmit="saveCategoria(event)" class="space-y-4 text-sm">
+        <input type="hidden" id="catId">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Nombre de la Categoría *</label>
+          <input type="text" id="catNombre" required placeholder="Ej: Telefonía, Reparaciones, Papelería..." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-indigo-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Clasificación Maestra *</label>
+          <select id="catTipo" required class="w-full bg-slate-50 border border-slate-200 py-2.5 px-3 rounded-xl text-sm focus:outline-none focus:border-indigo-500">
+            <option value="producto">Producto (Todos los ítems controlan existencia)</option>
+            <option value="servicio">Servicio (Todos los ítems NO manejan existencia)</option>
+          </select>
+          <p class="text-xs text-slate-400 mt-1">Los servicios no llevan conteo de stock físico.</p>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Descripción</label>
+          <textarea id="catDescripcion" rows="2" placeholder="Opcional..." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-indigo-500"></textarea>
+        </div>
+        <div class="flex justify-end space-x-2 pt-2">
+          <button type="button" onclick="closeCategoryModal()" class="px-4 py-2 border rounded-xl text-slate-600">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-semibold">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3. Modal Producto o Servicio -->
+  <div id="modalProducto" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 space-y-4 m-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800" id="prodModalTitle">Crear Ítem (Producto o Servicio)</h3>
+        <button onclick="closeProductoModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <form id="formProducto" onsubmit="saveProducto(event)" class="space-y-4 text-sm">
+        <input type="hidden" id="prodId">
+        
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <!-- Categoría -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Categoría *</label>
+            <select id="prodCategoriaId" onchange="onSelectCategoriaInProductForm()" required class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+              <option value="">Selecciona una categoría...</option>
+            </select>
+          </div>
+
+          <!-- Clasificación: Producto o Servicio -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Clasificación *</label>
+            <select id="prodTipo" onchange="toggleProductStockFields()" required class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm font-semibold">
+              <option value="producto">Producto (Controla existencia)</option>
+              <option value="servicio">Servicio (NO maneja existencia)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <!-- Código -->
+          <div class="sm:col-span-1">
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Código / SKU</label>
+            <input type="text" id="prodCodigo" placeholder="Auto..." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+          </div>
+          <!-- Nombre -->
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Nombre del Ítem *</label>
+            <input type="text" id="prodNombre" required placeholder="Ej: Mouse USB / Mantenimiento PC" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+          </div>
+        </div>
+
+        <!-- Precios e Impuesto (IVA 16%) -->
+        <div class="bg-indigo-50/60 p-4 rounded-xl border border-indigo-100 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase text-indigo-900 tracking-wider">Precios y Régimen Fiscal</span>
+            <span class="text-xs text-slate-500">Tasa IVA: <strong id="lblIvaPct">16%</strong></span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Régimen Fiscal *</label>
+              <select id="prodImpuestoTipo" onchange="calcularPreciosProducto()" class="w-full bg-white border border-slate-200 py-2 px-3 rounded-xl text-sm font-medium">
+                <option value="gravado">Gravado (Aplica 16% IVA)</option>
+                <option value="exento">Exento (0% IVA)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Precio Base ($ sin IVA) *</label>
+              <input type="number" step="any" min="0" id="prodPrecioBase" oninput="calcularPreciosProducto()" required value="0.00" class="w-full bg-white border border-slate-200 py-2 px-3 rounded-xl text-sm font-bold">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Precio Final ($ con IVA)</label>
+              <input type="number" step="any" min="0" id="prodPrecioTotal" readonly class="w-full bg-indigo-100/60 border border-indigo-200 py-2 px-3 rounded-xl text-sm font-extrabold text-indigo-700">
+            </div>
+          </div>
+          <!-- Indicador de IVA -->
+          <div class="flex justify-between items-center text-xs text-indigo-800">
+            <span>Monto del IVA (16%): <strong id="lblIvaCalculado">$0.00</strong></span>
+            <span class="text-slate-500" id="lblEquivalenteBs">Equiv: 0.00 Bs. | 0 COP</span>
+          </div>
+        </div>
+
+        <!-- Campos de Existencia (Solo si es Producto) -->
+        <div id="containerStockFields" class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase text-slate-700 tracking-wider flex items-center">
+              <i class="fa-solid fa-boxes-stacked mr-1.5 text-emerald-600"></i>Control de Existencias (Stock)
+            </span>
+            <span class="text-xs text-emerald-600 font-semibold">Producto físico</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Cantidad Actual (Stock) *</label>
+              <input type="number" step="any" min="0" id="prodStock" value="0" class="w-full bg-white border border-slate-200 py-2 px-3 rounded-xl text-sm font-bold text-slate-800">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Stock Mínimo (Alerta)</label>
+              <input type="number" step="any" min="0" id="prodStockMinimo" value="5" class="w-full bg-white border border-slate-200 py-2 px-3 rounded-xl text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Costo Unitario ($)</label>
+              <input type="number" step="any" min="0" id="prodCosto" value="0.00" class="w-full bg-white border border-slate-200 py-2 px-3 rounded-xl text-sm">
+            </div>
+          </div>
+        </div>
+
+        <!-- Aviso para Servicios -->
+        <div id="containerServiceNotice" class="hidden bg-purple-50 p-3.5 rounded-xl border border-purple-200 text-xs text-purple-800 flex items-center space-x-2">
+          <i class="fa-solid fa-circle-info text-base text-purple-600"></i>
+          <span><strong>Clasificado como Servicio:</strong> Este ítem no requiere manejo ni conteo de inventario. No afectará existencias al facturar.</span>
+        </div>
+
+        <!-- Imagen del Producto -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Imagen del Producto / Servicio</label>
+          <div class="flex items-center space-x-3">
+            <input type="file" id="prodImageFile" accept="image/*" onchange="previewProductImage(event)" class="text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-200 file:text-slate-700 hover:file:bg-slate-300">
+            <input type="hidden" id="prodImageBase64">
+          </div>
+          <div id="prodImagePreviewWrap" class="mt-2 hidden">
+            <img id="prodImagePreview" src="" alt="Vista previa" class="w-20 h-20 object-cover rounded-xl border border-slate-200 shadow-sm">
+          </div>
+        </div>
+
+        <!-- Descripción -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Descripción</label>
+          <textarea id="prodDescripcion" rows="2" placeholder="Detalles adicionales..." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm"></textarea>
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-2 border-t">
+          <button type="button" onclick="closeProductoModal()" class="px-4 py-2 border rounded-xl text-slate-600">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-semibold">Guardar Ítem</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 4. Modal Cliente -->
+  <div id="modalCliente" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 m-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800" id="clienteModalTitle">Registrar Cliente</h3>
+        <button onclick="closeClienteModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <form id="formCliente" onsubmit="saveCliente(event)" class="space-y-3.5 text-sm">
+        <input type="hidden" id="clienteId">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Nombre o Razón Social *</label>
+          <input type="text" id="clienteNombre" required placeholder="Ej: Pedro Gómez / Inversiones ABC" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Cédula / RIF / Documento *</label>
+          <input type="text" id="clienteCedula" required placeholder="Ej: V-12345678 o J-98765432-1" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1 flex items-center">
+            <i class="fa-brands fa-whatsapp text-emerald-500 mr-1.5 text-sm"></i>
+            Teléfono para WhatsApp *
+          </label>
+          <input type="text" id="clienteTelefono" required placeholder="Ej: +584141234567 o 04141234567" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Correo Electrónico</label>
+          <input type="email" id="clienteCorreo" placeholder="cliente@correo.com" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Dirección</label>
+          <textarea id="clienteDireccion" rows="2" placeholder="Ubicación o domicilio fiscal..." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm"></textarea>
+        </div>
+        <div class="flex justify-end space-x-2 pt-2 border-t">
+          <button type="button" onclick="closeClienteModal()" class="px-4 py-2 border rounded-xl text-slate-600">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-semibold">Guardar Cliente</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 5. Modal Proveedor -->
+  <div id="modalProveedor" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 m-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800" id="proveedorModalTitle">Registrar Proveedor</h3>
+        <button onclick="closeProveedorModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <form id="formProveedor" onsubmit="saveProveedor(event)" class="space-y-3.5 text-sm">
+        <input type="hidden" id="proveedorId">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Razón Social / Nombre *</label>
+          <input type="text" id="proveedorNombre" required placeholder="Ej: Mayorista de Repuestos C.A." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">RIF / Cédula *</label>
+          <input type="text" id="proveedorCedula" required placeholder="Ej: J-12345678-0" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1 flex items-center">
+            <i class="fa-brands fa-whatsapp text-emerald-500 mr-1.5 text-sm"></i>
+            Teléfono para WhatsApp *
+          </label>
+          <input type="text" id="proveedorTelefono" required placeholder="Ej: +584121234567" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Correo Electrónico</label>
+          <input type="email" id="proveedorCorreo" placeholder="ventas@proveedor.com" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Dirección</label>
+          <textarea id="proveedorDireccion" rows="2" placeholder="Dirección del depósito o fiscal..." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm"></textarea>
+        </div>
+        <div class="flex justify-end space-x-2 pt-2 border-t">
+          <button type="button" onclick="closeProveedorModal()" class="px-4 py-2 border rounded-xl text-slate-600">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-semibold">Guardar Proveedor</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 6. Modal Crear Ítem Nuevo Directamente desde Compras -->
+  <div id="modalCrearItemCompra" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800 flex items-center">
+          <i class="fa-solid fa-sparkles text-emerald-600 mr-2"></i>
+          Crear Nuevo Producto para la Compra
+        </h3>
+        <button onclick="cerrarModalCrearItemEnCompra()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <form id="formCrearItemCompra" onsubmit="confirmarCrearItemEnCompra(event)" class="space-y-3.5 text-sm">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Nombre del Producto *</label>
+          <input type="text" id="quickItemNombre" required placeholder="Ej: Cable HDMI 2.0 3mts" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Categoría *</label>
+            <select id="quickItemCategoria" required class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+              <!-- Se llena con categorías de tipo producto -->
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Impuesto *</label>
+            <select id="quickItemImpuesto" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
+              <option value="gravado">Gravado (16% IVA)</option>
+              <option value="exento">Exento (0% IVA)</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Cantidad Comprada *</label>
+            <input type="number" step="any" min="1" id="quickItemCantidad" required value="1" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm font-bold">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Costo Unitario ($) *</label>
+            <input type="number" step="any" min="0" id="quickItemCosto" required value="0.00" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm font-bold text-slate-800">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Precio Venta Sug. ($)</label>
+            <input type="number" step="any" min="0" id="quickItemPrecioVenta" value="0.00" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm font-bold text-emerald-700">
+          </div>
+        </div>
+        <p class="text-xs text-slate-400 italic">Este producto se agregará de inmediato a la compra y se registrará en el catálogo.</p>
+        <div class="flex justify-end space-x-2 pt-2 border-t">
+          <button type="button" onclick="cerrarModalCrearItemEnCompra()" class="px-4 py-2 border rounded-xl text-slate-600">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-emerald-600 text-white rounded-xl font-semibold">+ Agregar a la Compra</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 7. Modal de Factura / Ticket Emitido (Imprimible y Compartible) -->
+  <div id="modalFacturaEmitida" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-xl w-full p-6 space-y-4 m-4 max-h-[95vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b pb-3 no-print">
+        <h3 class="font-bold text-lg text-emerald-700 flex items-center">
+          <i class="fa-solid fa-circle-check text-xl mr-2"></i>
+          Factura Procesada con Éxito
+        </h3>
+        <button onclick="closeModalFacturaEmitida()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <!-- FORMATO IMPRIMIBLE DE LA FACTURA -->
+      <div id="printAreaFactura" class="ticket-container bg-white p-6 border border-slate-200 rounded-xl space-y-4 text-slate-800">
+        <!-- Encabezado de Factura -->
+        <div class="text-center border-b pb-4 space-y-1">
+          <h2 class="text-xl font-bold uppercase tracking-wider" id="ticketBusinessName">Mi Negocio Comercial</h2>
+          <p class="text-xs text-slate-600" id="ticketBusinessRif">RIF: J-00000000-0</p>
+          <p class="text-xs text-slate-600" id="ticketBusinessPhone">Tel: +58 412 0000000</p>
+          <p class="text-xs text-slate-500" id="ticketBusinessAddress">Dirección Comercial</p>
+          <div class="pt-2">
+            <span class="inline-block bg-slate-900 text-white text-xs font-bold px-3 py-1 rounded-full" id="ticketInvoiceNumber">FACTURA #FAC-000001</span>
+          </div>
+          <p class="text-xs text-slate-500 pt-1" id="ticketInvoiceDate">Fecha: 04/10/2026 12:00 PM</p>
+        </div>
+
+        <!-- Datos del Cliente -->
+        <div class="border-b pb-3 text-xs space-y-1">
+          <div class="flex justify-between">
+            <span class="text-slate-500 font-semibold">Cliente:</span>
+            <span class="font-bold text-slate-900" id="ticketClientName">Juan Pérez</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-500">Cédula / RIF:</span>
+            <span class="font-medium" id="ticketClientId">V-12345678</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-500">Teléfono:</span>
+            <span class="font-medium" id="ticketClientPhone">+584141234567</span>
+          </div>
+          <div class="flex justify-between pt-1 border-t border-slate-100 font-bold" id="ticketConditionRow">
+            <span class="text-slate-600">Condición de Venta:</span>
+            <span class="uppercase font-black" id="ticketCondition">CONTADO</span>
+          </div>
+          <div class="flex justify-between text-amber-800 font-bold hidden" id="ticketDueDateRow">
+            <span>Fecha de Vencimiento:</span>
+            <span id="ticketDueDate">-</span>
+          </div>
+          <div class="flex justify-between text-rose-700 font-bold hidden" id="ticketPendingRow">
+            <span>Saldo por Cobrar:</span>
+            <span id="ticketPendingBalance">$0.00</span>
+          </div>
+        </div>
+
+        <!-- Tabla de Ítems -->
+        <div class="border-b pb-3">
+          <table class="w-full text-xs text-left">
+            <thead>
+              <tr class="text-slate-500 uppercase border-b">
+                <th class="pb-1.5">Cant.</th>
+                <th class="pb-1.5">Descripción</th>
+                <th class="pb-1.5 text-right">P. Unit</th>
+                <th class="pb-1.5 text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody id="ticketItemsBody" class="divide-y divide-slate-100">
+              <!-- Renderizado de ítems -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Totales de Factura -->
+        <div class="border-b pb-3 space-y-1.5 text-xs">
+          <div class="flex justify-between text-slate-600">
+            <span>Subtotal (Base Imponible + Exento):</span>
+            <span class="font-semibold" id="ticketSubtotal">$0.00</span>
+          </div>
+          <div class="flex justify-between text-slate-600">
+            <span>IVA (16% sobre gravados):</span>
+            <span class="font-semibold" id="ticketIva">$0.00</span>
+          </div>
+          <div class="flex justify-between text-base font-bold text-slate-900 pt-1 border-t">
+            <span>TOTAL USD:</span>
+            <span class="text-indigo-700 font-extrabold" id="ticketTotalUsd">$0.00</span>
+          </div>
+          <div class="flex justify-between text-xs text-slate-700 font-medium">
+            <span>Total en Bolívares (Tasa <span id="ticketTasaVes">45.00</span>):</span>
+            <span class="font-bold" id="ticketTotalVes">0.00 Bs.</span>
+          </div>
+          <div class="flex justify-between text-xs text-slate-700 font-medium">
+            <span>Total en Pesos COP (Tasa <span id="ticketTasaCop">4100</span>):</span>
+            <span class="font-bold" id="ticketTotalCop">0 COP</span>
+          </div>
+        </div>
+
+        <!-- Desglose de Pagos Mixtos Recibidos -->
+        <div class="border-b pb-3 space-y-1 text-xs">
+          <span class="font-bold text-slate-700 block uppercase tracking-wider text-[11px]">Pagos Registrados:</span>
+          <div id="ticketPaymentsBody" class="space-y-1">
+            <!-- Detalles de pagos mixtos -->
+          </div>
+        </div>
+
+        <div class="text-center pt-2 text-[11px] text-slate-400 space-y-0.5">
+          <p>¡Gracias por su compra y confianza!</p>
+          <p>Comprobante generado electrónicamente.</p>
+        </div>
+      </div>
+
+      <!-- Botones de Acción (Imprimir y Enviar por WhatsApp) -->
+      <div class="flex flex-col sm:flex-row gap-2 justify-end pt-2 no-print">
+        <button onclick="window.print()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center transition">
+          <i class="fa-solid fa-print mr-2"></i>Imprimir Factura
+        </button>
+        <button onclick="compartirFacturaWhatsApp()" id="btnTicketWhatsApp" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center transition">
+          <i class="fa-brands fa-whatsapp text-lg mr-2"></i>Enviar por WhatsApp
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9. Modal Registrar Abono a Cuenta por Cobrar (Multimoneda) -->
+  <div id="modalAbonoCXC" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800 flex items-center">
+          <i class="fa-solid fa-money-bill-transfer text-emerald-600 mr-2"></i>
+          Registrar Abono / Pago a Cuenta
+        </h3>
+        <button onclick="closeModalAbonoCXC()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <!-- Resumen de la Deuda del Cliente -->
+      <div class="bg-amber-50/80 border border-amber-200 p-3.5 rounded-xl text-xs space-y-1.5">
+        <div class="flex justify-between">
+          <span class="text-slate-600">Cliente:</span>
+          <strong class="text-slate-900" id="abonoClienteNombre">-</strong>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-600">Factura Relacionada:</span>
+          <strong class="font-mono text-slate-900" id="abonoFacturaNumero">-</strong>
+        </div>
+        <div class="flex justify-between pt-1 border-t border-amber-200 text-sm">
+          <span class="font-bold text-slate-700">Saldo Pendiente Actual:</span>
+          <strong class="text-rose-700 font-extrabold text-base" id="abonoSaldoPendienteUsd">$0.00</strong>
+        </div>
+        <div class="flex justify-between text-[11px] text-slate-500">
+          <span>Equiv. en Bolívares: <strong id="abonoSaldoPendienteBs">0.00 Bs.</strong></span>
+          <span>Equiv. en Pesos: <strong id="abonoSaldoPendienteCop">0 COP</strong></span>
+        </div>
+      </div>
+
+      <input type="hidden" id="abonoCxcId">
+
+      <!-- Formulario Multimoneda de Pagos del Abono -->
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold uppercase text-slate-600 tracking-wider">
+            Forma de Pago del Abono (Multimoneda)
+          </span>
+          <button type="button" onclick="addAbonoPagoRow()" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg">
+            + Otra Moneda
+          </button>
+        </div>
+
+        <div id="abonoPagosList" class="space-y-2 max-h-40 overflow-y-auto">
+          <!-- Dinámico -->
+        </div>
+
+        <!-- Resumen del Abono y Saldo Resultante -->
+        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1 text-xs">
+          <div class="flex justify-between text-slate-700">
+            <span>Total a Abonar (USD):</span>
+            <strong class="font-bold text-emerald-700 text-sm" id="abonoTotalUsd">$0.00</strong>
+          </div>
+          <div class="flex justify-between text-slate-600">
+            <span>Nuevo Saldo Restante (USD):</span>
+            <strong class="font-bold text-slate-900" id="abonoNuevoSaldoUsd">$0.00</strong>
+          </div>
+        </div>
+
+        <!-- Notas -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Observación / Referencia de Pago</label>
+          <input type="text" id="abonoNotas" placeholder="Ej: Pago Móvil ref #9872 / Efectivo entregado" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-xs">
+        </div>
+
+        <!-- Botones -->
+        <div class="flex justify-end space-x-2 pt-2 border-t">
+          <button type="button" onclick="closeModalAbonoCXC()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs font-medium">Cancelar</button>
+          <button type="button" onclick="confirmarAbonoCXC()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow">
+            <i class="fa-solid fa-check mr-1.5"></i>Registrar Abono
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 10. Modal Historial de Abonos de una Cuenta -->
+  <div id="modalHistorialAbonosCXC" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800 flex items-center">
+          <i class="fa-solid fa-clock-rotate-left text-indigo-600 mr-2"></i>
+          Historial de Abonos Recibidos
+        </h3>
+        <button onclick="closeModalHistorialAbonosCXC()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <div id="historialAbonosContent" class="space-y-3">
+        <!-- Renderizado dinámico -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MODALES DE CUENTAS POR PAGAR (CXP) & VISTA PRELIMINAR
+       ======================================================== -->
+
+  <!-- 11. Modal Registrar Gasto Directo a Proveedor (Cuentas por Pagar) -->
+  <div id="modalDirectoCXP" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800 flex items-center">
+          <i class="fa-solid fa-receipt text-rose-600 mr-2"></i>
+          Registrar Saldo / Gasto Directo a Proveedor
+        </h3>
+        <button onclick="closeModalDirectoCXP()" class="text-slate-400 hover:text-slate-600">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-500">
+        Use este registro para servicios, alquileres, recibos u obligaciones que <strong>no afectan el inventario físico</strong> pero representan una cuenta por pagar comercial.
+      </p>
+
+      <form onsubmit="guardarDirectoCXP(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Proveedor Beneficiario *</label>
+          <div class="flex gap-2">
+            <select id="cxpDirectoProveedor" required class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:ring-2 focus:ring-rose-500">
+              <option value="">-- Seleccionar Proveedor --</option>
+            </select>
+            <button type="button" onclick="navigate('proveedores')" title="Crear nuevo proveedor" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition">
+              <i class="fa-solid fa-user-plus"></i>
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Concepto o Descripción del Gasto *</label>
+          <input type="text" id="cxpDirectoConcepto" required placeholder="Ej: Pago de canon de arrendamiento local mes en curso" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">N° de Factura / Control</label>
+            <input type="text" id="cxpDirectoNumFactura" placeholder="Ej: REC-00941 / FACT-102" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Monto Total ($ USD) *</label>
+            <input type="number" step="any" min="0.01" required id="cxpDirectoMonto" oninput="actualizarEquivalenciasCxpDirecto()" placeholder="0.00" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-rose-700">
+          </div>
+        </div>
+
+        <!-- Vista rápida de equivalencias con tasas actuales -->
+        <div class="bg-rose-50/60 border border-rose-100 rounded-xl p-3 text-xs space-y-1">
+          <div class="flex justify-between text-slate-600">
+            <span>Equivalente en Bolívares (BCV):</span>
+            <strong class="text-slate-900" id="cxpDirectoMontoBs">0.00 Bs.</strong>
+          </div>
+          <div class="flex justify-between text-slate-600">
+            <span>Equivalente en Pesos COP (TRM):</span>
+            <strong class="text-slate-900" id="cxpDirectoMontoCop">0 COP</strong>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Fecha de Emisión</label>
+            <input type="date" id="cxpDirectoFechaEmision" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Fecha de Vencimiento *</label>
+            <input type="date" id="cxpDirectoFechaVencimiento" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-rose-700 font-semibold">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Notas u Observaciones</label>
+          <textarea id="cxpDirectoNotas" rows="2" placeholder="Detalles de pago, acuerdo de plazo o datos bancarios..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"></textarea>
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-3 border-t">
+          <button type="button" onclick="closeModalDirectoCXP()" class="px-4 py-2 border rounded-xl text-slate-600 text-sm">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-sm shadow">
+            <i class="fa-solid fa-check mr-1.5"></i>Registrar Cuenta por Pagar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 12. Modal Registrar Abono / Pago a Cuenta por Pagar (Multimoneda) -->
+  <div id="modalAbonoCXP" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800 flex items-center">
+          <i class="fa-solid fa-money-bill-transfer text-rose-600 mr-2"></i>
+          Registrar Pago / Abono a Proveedor
+        </h3>
+        <button onclick="closeModalAbonoCXP()" class="text-slate-400 hover:text-slate-600">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <!-- Resumen de la Deuda con el Proveedor -->
+      <div class="bg-rose-50/70 border border-rose-200 p-3.5 rounded-xl text-xs space-y-1.5">
+        <div class="flex justify-between">
+          <span class="text-slate-600">Proveedor:</span>
+          <strong class="text-slate-900" id="abonoCxpProveedorNombre">-</strong>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-600">Factura / Concepto:</span>
+          <strong class="text-slate-900" id="abonoCxpFacturaConcepto">-</strong>
+        </div>
+        <div class="flex justify-between pt-1 border-t border-rose-200 text-sm">
+          <span class="font-bold text-slate-700">Saldo Pendiente Actual:</span>
+          <strong class="text-rose-700 font-extrabold text-base" id="abonoCxpSaldoPendienteUsd">$0.00</strong>
+        </div>
+        <div class="flex justify-between text-[11px] text-slate-500">
+          <span>En Bolívares (BCV):</span>
+          <strong id="abonoCxpSaldoPendienteBs">0.00 Bs.</strong>
+        </div>
+        <div class="flex justify-between text-[11px] text-slate-500">
+          <span>En Pesos COP:</span>
+          <strong id="abonoCxpSaldoPendienteCop">0 COP</strong>
+        </div>
+      </div>
+
+      <!-- Métodos de Pago Multimoneda -->
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Formas de Pago Aplicadas</label>
+          <button type="button" onclick="addAbonoPagoCxpRow()" class="text-xs bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold px-2.5 py-1 rounded-lg transition flex items-center">
+            <i class="fa-solid fa-plus mr-1"></i>Añadir Pago
+          </button>
+        </div>
+
+        <div id="abonoCxpPagosContainer" class="space-y-2.5">
+          <!-- Filas de pago dinámicas -->
+        </div>
+
+        <!-- Resumen del Abono y Saldo Resultante -->
+        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1 text-xs">
+          <div class="flex justify-between text-slate-700">
+            <span>Total a Pagar / Abonar (USD):</span>
+            <strong class="font-bold text-rose-700 text-sm" id="abonoCxpTotalUsd">$0.00</strong>
+          </div>
+          <div class="flex justify-between text-slate-600">
+            <span>Nuevo Saldo Restante (USD):</span>
+            <strong class="font-bold text-slate-900" id="abonoCxpNuevoSaldoUsd">$0.00</strong>
+          </div>
+        </div>
+
+        <!-- Notas -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Observación / Referencia de Pago</label>
+          <input type="text" id="abonoCxpNotas" placeholder="Ej: Transferencia Banesco ref #5821 / Pago en efectivo" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-xs">
+        </div>
+
+        <!-- Botones -->
+        <div class="flex justify-end space-x-2 pt-2 border-t">
+          <button type="button" onclick="closeModalAbonoCXP()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs font-medium">Cancelar</button>
+          <button type="button" onclick="confirmarAbonoCXP()" class="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow">
+            <i class="fa-solid fa-check mr-1.5"></i>Registrar Pago al Proveedor
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 13. Modal Historial de Pagos / Abonos de una Cuenta por Pagar -->
+  <div id="modalHistorialAbonosCXP" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800 flex items-center">
+          <i class="fa-solid fa-clock-rotate-left text-rose-600 mr-2"></i>
+          Historial de Pagos al Proveedor
+        </h3>
+        <button onclick="closeModalHistorialAbonosCXP()" class="text-slate-400 hover:text-slate-600">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <div id="historialAbonosCxpContent" class="space-y-3">
+        <!-- Renderizado dinámico -->
+      </div>
+    </div>
+  </div>
+
+  <!-- 14. Modal Vista Preliminar de Reportes Antes de Imprimir o Generar PDF -->
+  <div id="modalVistaPreliminarReporte" class="modal-overlay hidden">
+    <div class="bg-slate-100 rounded-2xl shadow-2xl max-w-4xl w-full p-0 m-4 max-h-[95vh] flex flex-col overflow-hidden">
+      <!-- Barra Superior de Acciones (No se imprime) -->
+      <div class="bg-slate-900 text-white px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-b border-slate-800 no-print">
+        <div class="flex items-center space-x-2">
+          <i class="fa-solid fa-file-invoice text-indigo-400 text-xl"></i>
+          <div>
+            <h3 class="font-bold text-base leading-tight">Vista Preliminar del Reporte</h3>
+            <p class="text-xs text-slate-400">Verifique los datos y totales antes de generar el documento final o PDF.</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-2 w-full sm:w-auto justify-end">
+          <button onclick="exportarReporteActualCsv()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center shadow">
+            <i class="fa-solid fa-file-excel mr-1.5"></i>Exportar CSV / Excel
+          </button>
+          <button onclick="imprimirDesdePreliminar()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition flex items-center shadow">
+            <i class="fa-solid fa-print mr-1.5"></i>Imprimir / Guardar PDF
+          </button>
+          <button onclick="cerrarVistaPreliminar()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-2 rounded-xl text-xs font-semibold transition">
+            <i class="fa-solid fa-xmark mr-1"></i>Cerrar
+          </button>
+        </div>
+      </div>
+
+      <!-- Hoja de Reporte Imprimible (Scrollable preview) -->
+      <div class="p-6 overflow-y-auto flex-1 bg-slate-200/60 flex justify-center">
+        <div id="hojaReporteImprimible" class="bg-white shadow-xl rounded-xl p-8 max-w-3xl w-full text-slate-800 space-y-6 min-h-[750px] border border-slate-300">
+          <!-- Contenido generado dinámicamente según el reporte activo -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. Modal para Ver Foto Ampliada de la Factura de Compra -->
+  <div id="modalFotoAmpliada" class="modal-overlay hidden" onclick="cerrarFotoAmpliada()">
+    <div class="bg-black/90 p-4 rounded-2xl max-w-4xl max-h-[90vh] overflow-hidden flex flex-col items-center justify-center" onclick="event.stopPropagation()">
+      <div class="w-full flex justify-between items-center text-white mb-2">
+        <h4 class="text-sm font-bold">Foto Comprobante de Compra</h4>
+        <button onclick="cerrarFotoAmpliada()" class="text-white hover:text-slate-300 text-xl"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <img id="imgFotoAmpliadaSrc" src="" alt="Comprobante" class="max-h-[80vh] max-w-full rounded-lg object-contain">
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="app.js"></script>
+</body>
+</html>

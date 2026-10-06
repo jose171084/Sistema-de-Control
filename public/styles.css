@@ -1,0 +1,301 @@
+/* styles.css - Variables de tema, navegación vertical y reglas de impresión */
+
+:root {
+  /* Variables de Color Dinámicas (Modificables por el Usuario) */
+  --color-primary: #4f46e5;
+  --color-primary-hover: #4338ca;
+  --color-primary-light: #e0e7ff;
+  --color-sidebar: #0f172a;
+  --color-sidebar-text: #f8fafc;
+  --color-sidebar-active: #4f46e5;
+  --color-bg-app: #f1f5f9;
+  --color-card-bg: #ffffff;
+  --color-text-main: #1e293b;
+  --color-btn-factura: #059669;
+  --color-btn-compra: #2563eb;
+  --color-btn-cxc: #d97706;
+  --color-btn-cxp: #e11d48;
+}
+
+body {
+  background-color: var(--color-bg-app);
+  color: var(--color-text-main);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Modal Backdrop */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  overflow-y: auto;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.modal-overlay.hidden {
+  display: none !important;
+}
+
+/* ==========================================
+   BARRA LATERAL IZQUIERDA (VERTICAL SIDEBAR)
+   ========================================== */
+#appSidebar {
+  background-color: var(--color-sidebar);
+  color: var(--color-sidebar-text);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease, color 0.2s ease;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+#appSidebar::-webkit-scrollbar {
+  width: 4px;
+}
+#appSidebar::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+/* Botones de navegación en Sidebar */
+.sidebar-nav-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-sidebar-text);
+  opacity: 0.82;
+  transition: all 0.15s ease-in-out;
+  text-align: left;
+  border: 1px solid transparent;
+}
+
+.sidebar-nav-btn:hover {
+  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.1);
+  transform: translateX(3px);
+}
+
+.sidebar-nav-btn.active-nav {
+  opacity: 1;
+  background-color: var(--color-sidebar-active) !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow: 0 4px 10px -1px rgba(0, 0, 0, 0.25);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.sidebar-nav-btn i {
+  width: 1.5rem;
+  text-align: center;
+  font-size: 1rem;
+}
+
+/* Clases dinámicas de botones configurables */
+.btn-theme-primary {
+  background-color: var(--color-primary) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-primary:hover {
+  background-color: var(--color-primary-hover) !important;
+  filter: brightness(0.95);
+}
+
+.btn-theme-factura {
+  background-color: var(--color-btn-factura) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-factura:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-compra {
+  background-color: var(--color-btn-compra) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-compra:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-cxc {
+  background-color: var(--color-btn-cxc) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-cxc:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-cxp {
+  background-color: var(--color-btn-cxp) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-cxp:hover {
+  filter: brightness(0.9);
+}
+
+/* Ocultar barra de desplazamiento */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Scrollbars Globales */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Animaciones sutiles */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+main > section:not(.hidden) {
+  animation: fadeIn 0.18s ease-out forwards;
+}
+
+/* Estilos de Ticket / Factura */
+.ticket-container {
+  font-family: 'Courier New', Courier, monospace, system-ui;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+}
+
+/* Color pickers estéticos */
+input[type="color"] {
+  -webkit-appearance: none;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  padding: 2px;
+  cursor: pointer;
+  background-color: #ffffff;
+  height: 2.5rem;
+}
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 0.35rem;
+}
+
+/* ========================================================
+   REGLAS DE IMPRESIÓN PROFESIONAL (@media print)
+   ======================================================== */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  aside, #appSidebar, header, nav, .no-print, button, input, select, textarea {
+    display: none !important;
+  }
+
+  .modal-overlay {
+    position: static !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+  }
+
+  .modal-overlay > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  #printAreaFactura {
+    display: block !important;
+    border: none !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 10px !important;
+    font-size: 11px !important;
+  }
+
+  #printAreaFactura * {
+    color: #000000 !important;
+  }
+
+  #view-reportes:not(.hidden) {
+    display: block !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #modalVistaPreliminarReporte {
+    display: block !important;
+    position: static !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #modalVistaPreliminarReporte > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #hojaReporteImprimible {
+    display: block !important;
+    border: none !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  #hojaReporteImprimible table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  #hojaReporteImprimible th,
+  #hojaReporteImprimible td {
+    padding: 6px 8px !important;
+  }
+}
