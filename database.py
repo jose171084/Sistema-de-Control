@@ -347,6 +347,73 @@ def init_db():
     )
     """)
 
+    # ==========================================
+    # MÓDULO DE DEVOLUCIONES Y NOTAS DE CRÉDITO
+    # ==========================================
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS devoluciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_devolucion TEXT UNIQUE NOT NULL,
+        factura_id INTEGER,
+        numero_factura TEXT,
+        cliente_id INTEGER NOT NULL,
+        cliente_nombre TEXT NOT NULL,
+        cliente_cedula TEXT,
+        cliente_telefono TEXT,
+        cliente_direccion TEXT,
+        fecha_emision TEXT NOT NULL,
+        fecha_factura_original TEXT,
+        tipo_devolucion TEXT NOT NULL DEFAULT 'total' CHECK(tipo_devolucion IN ('total', 'parcial', 'manual')),
+        tipo_venta_original TEXT DEFAULT 'contado',
+        motivo TEXT NOT NULL,
+        subtotal_usd REAL NOT NULL DEFAULT 0.0,
+        iva_usd REAL NOT NULL DEFAULT 0.0,
+        total_usd REAL NOT NULL DEFAULT 0.0,
+        tasa_ves REAL NOT NULL DEFAULT 0.0,
+        tasa_cop REAL NOT NULL DEFAULT 0.0,
+        total_ves REAL NOT NULL DEFAULT 0.0,
+        total_cop REAL NOT NULL DEFAULT 0.0,
+        metodo_reembolso TEXT DEFAULT 'efectivo',
+        notas TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (factura_id) REFERENCES facturas(id) ON DELETE SET NULL,
+        FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS devolucion_detalles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        devolucion_id INTEGER NOT NULL,
+        producto_id INTEGER,
+        codigo TEXT,
+        nombre_producto TEXT NOT NULL,
+        tipo TEXT NOT NULL CHECK(tipo IN ('servicio', 'producto')),
+        impuesto_tipo TEXT NOT NULL CHECK(impuesto_tipo IN ('gravado', 'exento')),
+        cantidad REAL NOT NULL,
+        precio_unitario REAL NOT NULL,
+        iva_unitario REAL NOT NULL DEFAULT 0.0,
+        subtotal REAL NOT NULL DEFAULT 0.0,
+        total REAL NOT NULL DEFAULT 0.0,
+        FOREIGN KEY (devolucion_id) REFERENCES devoluciones(id) ON DELETE CASCADE,
+        FOREIGN KEY (producto_id) REFERENCES productos(id)
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS devolucion_pagos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        devolucion_id INTEGER NOT NULL,
+        moneda TEXT NOT NULL CHECK(moneda IN ('USD', 'VES', 'COP')),
+        metodo TEXT NOT NULL,
+        monto_moneda REAL NOT NULL,
+        tasa_cambio REAL NOT NULL,
+        equivalente_usd REAL NOT NULL,
+        referencia TEXT,
+        FOREIGN KEY (devolucion_id) REFERENCES devoluciones(id) ON DELETE CASCADE
+    )
+    """)
+
     # Sembrar configuración inicial si no existe
     cursor.execute("SELECT COUNT(*) FROM configuracion")
     if cursor.fetchone()[0] == 0:

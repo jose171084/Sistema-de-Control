@@ -14,6 +14,7 @@ import ssl
 import mimetypes
 import base64
 import time
+import re
 from datetime import datetime, timedelta
 from database import get_connection, init_db
 
@@ -28,8 +29,8 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 def obtener_tasas_oficiales():
     """
     Consulta las tasas oficiales en tiempo real:
-    - BCV (Banco Central de Venezuela): ve.dolarapi.com/v1/dolares/oficial
-    - TRM Colombia (Superintendencia Financiera de Colombia / datos.gov.co)
+    - BCV (Banco Central de Venezuela): ve.dolarapi.com/v1/dolares/oficial con fallback scraping bcv.org.ve
+    - TRM Colombia: open.er-api.com y api.exchangerate-api.com
     """
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
@@ -46,55 +47,46 @@ def obtener_tasas_oficiales():
             'https://ve.dolarapi.com/v1/dolares/oficial', 
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         )
-        with urllib.request.urlopen(req_ves, timeout=8, context=ctx) as r:
+        with urllib.request.urlopen(req_ves, timeout=4, context=ctx) as r:
             data_ves = json.loads(r.read().decode('utf-8'))
             val_ves = data_ves.get('promedio')
             if val_ves:
                 tasa_ves = round(float(val_ves), 4)
                 fuentes.append("BCV Oficial")
     except Exception as e_ves:
-        errores.append(f"BCV: {str(e_ves)}")
+        errores.append(f"DolarApi: {str(e_ves)}")
         try:
-            req_ves_fb = urllib.request.Request(
-                'https://pydolarvenezuela-api.vercel.app/api/v1/dollar/page?page=bcv',
-                headers={'User-Agent': 'Mozilla/5.0'}
+            req_bcv = urllib.request.Request(
+                'https://www.bcv.org.ve',
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
             )
-            with urllib.request.urlopen(req_ves_fb, timeout=6, context=ctx) as r_fb:
-                data_fb = json.loads(r_fb.read().decode('utf-8'))
-                monitores = data_fb.get("monitors", {})
-                bcv_m = monitores.get("usd", {}) or monitores.get("bcv", {})
-                if bcv_m and bcv_m.get("price"):
-                    tasa_ves = round(float(bcv_m.get("price")), 4)
-                    fuentes.append("BCV (Fallback)")
-        except Exception:
-            pass
+            with urllib.request.urlopen(req_bcv, timeout=4, context=ctx) as r_bcv:
+                html = r_bcv.read().decode('utf-8', errors='ignore')
+                m = re.search(r'id=[\"\']dolar[\"\'].*?<strong[^>]*>\s*([0-9.,]+)\s*</strong>', html, re.DOTALL | re.IGNORECASE)
+                if m:
+                    val_str = m.group(1).strip().replace('.', '').replace(',', '.')
+                    tasa_ves = round(float(val_str), 4)
+                    fuentes.append("BCV Oficial (Web Directa)")
+        except Exception as e_bcv:
+            errores.append(f"BCV Directo: {str(e_bcv)}")
 
-    # 2. Tasa TRM Oficial (Superintendencia Financiera de Colombia / datos.gov.co)
-    try:
-        req_cop = urllib.request.Request(
-            'https://www.datos.gov.co/resource/32sa-8pi3.json?$limit=1&$order=vigenciadesde%20DESC', 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        )
-        with urllib.request.urlopen(req_cop, timeout=8, context=ctx) as r:
-            data_cop = json.loads(r.read().decode('utf-8'))
-            if data_cop and len(data_cop) > 0 and 'valor' in data_cop[0]:
-                tasa_cop = round(float(data_cop[0]['valor']), 2)
-                fuentes.append("TRM Colombia (datos.gov.co)")
-    except Exception as e_cop:
-        errores.append(f"TRM: {str(e_cop)}")
+    # 2. Tasa TRM Oficial (Colombia)
+    for url_cop in ['https://open.er-api.com/v6/latest/USD', 'https://api.exchangerate-api.com/v4/latest/USD']:
         try:
-            req_cop_fb = urllib.request.Request(
-                'https://open.er-api.com/v6/latest/USD',
-                headers={'User-Agent': 'Mozilla/5.0'}
+            req_cop = urllib.request.Request(
+                url_cop, 
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
             )
-            with urllib.request.urlopen(req_cop_fb, timeout=6, context=ctx) as r_fb:
-                data_fb = json.loads(r_fb.read().decode('utf-8'))
-                rates = data_fb.get("rates", {})
-                if "COP" in rates:
+            with urllib.request.urlopen(req_cop, timeout=4, context=ctx) as r:
+                data_cop = json.loads(r.read().decode('utf-8'))
+                rates = data_cop.get("rates", {})
+                if "COP" in rates and rates["COP"]:
                     tasa_cop = round(float(rates["COP"]), 2)
-                    fuentes.append("TRM (Fallback er-api)")
-        except Exception:
-            pass
+                    fuentes.append("TRM Colombia")
+                    break
+        except Exception as e_cop:
+            errores.append(f"TRM ({url_cop}): {str(e_cop)}")
+            continue
 
     fuente_str = " / ".join(fuentes) if fuentes else "Error de conexión"
     error_str = "; ".join(errores) if errores else None
@@ -273,7 +265,21 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 cursor.execute("SELECT COUNT(*), COALESCE(SUM(total_usd), 0) FROM facturas WHERE estado = 'pagada'")
                 facturas_row = cursor.fetchone()
                 total_facturas = facturas_row[0]
-                ventas_total_usd = facturas_row[1]
+                ventas_total_usd = round(facturas_row[1] or 0.0, 2)
+
+                # Total de Devoluciones y Ventas Netas
+                cursor.execute("SELECT COUNT(*), COALESCE(SUM(total_usd), 0) FROM devoluciones")
+                dev_row = cursor.fetchone()
+                total_devoluciones = dev_row[0]
+                total_devoluciones_usd = round(dev_row[1] or 0.0, 2)
+                ventas_netas_usd = max(0.0, round(ventas_total_usd - total_devoluciones_usd, 2))
+
+                # Ventas del día (brutas y netas restando devoluciones de hoy)
+                cursor.execute("SELECT COALESCE(SUM(total_usd), 0) FROM facturas WHERE estado != 'anulada' AND date(fecha) = date('now')")
+                ventas_hoy_brutas = round(cursor.fetchone()[0] or 0.0, 2)
+                cursor.execute("SELECT COALESCE(SUM(total_usd), 0) FROM devoluciones WHERE date(fecha_emision) = date('now')")
+                dev_hoy_usd = round(cursor.fetchone()[0] or 0.0, 2)
+                ventas_hoy_netas = max(0.0, round(ventas_hoy_brutas - dev_hoy_usd, 2))
 
                 cursor.execute("SELECT COUNT(*), COALESCE(SUM(total), 0) FROM compras")
                 compras_row = cursor.fetchone()
@@ -374,6 +380,12 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "total_proveedores": total_proveedores,
                     "total_facturas": total_facturas,
                     "ventas_total_usd": ventas_total_usd,
+                    "total_devoluciones": total_devoluciones,
+                    "total_devoluciones_usd": total_devoluciones_usd,
+                    "ventas_netas_usd": ventas_netas_usd,
+                    "ventas_hoy_brutas": ventas_hoy_brutas,
+                    "ventas_hoy_netas": ventas_hoy_netas,
+                    "dev_hoy_usd": dev_hoy_usd,
                     "total_compras": total_compras,
                     "compras_total_usd": compras_total_usd,
                     "cxc_total_usd": cxc_total_usd,
@@ -731,6 +743,47 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 res["abonos"] = abonos
                 self.send_json(res)
 
+            # 10. Devoluciones
+            elif path == "/api/devoluciones":
+                cursor.execute("""
+                    SELECT d.*, c.nombre as cliente_nombre, c.cedula as cliente_cedula, c.telefono as cliente_telefono
+                    FROM devoluciones d
+                    JOIN clientes c ON d.cliente_id = c.id
+                    ORDER BY d.id DESC
+                """)
+                rows = [dict(r) for r in cursor.fetchall()]
+                self.send_json(rows)
+
+            elif path.startswith("/api/devoluciones/"):
+                dev_id = path.split("/")[-1]
+                cursor.execute("""
+                    SELECT d.*, c.nombre as cliente_nombre, c.cedula as cliente_cedula,
+                           c.telefono as cliente_telefono, c.correo as cliente_correo, c.direccion as cliente_direccion
+                    FROM devoluciones d
+                    JOIN clientes c ON d.cliente_id = c.id
+                    WHERE d.id = ?
+                """, (dev_id,))
+                dev = cursor.fetchone()
+                if not dev:
+                    self.send_error_json("Devolución no encontrada", 404)
+                    return
+
+                res = dict(dev)
+                cursor.execute("SELECT * FROM devolucion_detalles WHERE devolucion_id = ?", (dev_id,))
+                detalles = []
+                for d in cursor.fetchall():
+                    item_dict = dict(d)
+                    if "nombre_producto" in item_dict and "nombre" not in item_dict:
+                        item_dict["nombre"] = item_dict["nombre_producto"]
+                    detalles.append(item_dict)
+                res["detalles"] = detalles
+                res["items"] = detalles
+
+                cursor.execute("SELECT * FROM devolucion_pagos WHERE devolucion_id = ?", (dev_id,))
+                res["pagos"] = [dict(p) for p in cursor.fetchall()]
+
+                self.send_json(res)
+
             # ==========================================
             # REPORTES DEL SISTEMA
             # ==========================================
@@ -852,17 +905,33 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     desglose_por_moneda[mon]["metodos"][met]["monto_usd"] = round(desglose_por_moneda[mon]["metodos"][met]["monto_usd"] + m_usd, 2)
                     desglose_por_moneda[mon]["metodos"][met]["conteo"] += p.get("transacciones", 1)
 
+                # Devoluciones registradas en el día
+                cursor.execute("""
+                    SELECT d.*, c.nombre as cliente_nombre, c.cedula as cliente_cedula
+                    FROM devoluciones d
+                    JOIN clientes c ON d.cliente_id = c.id
+                    WHERE date(d.fecha_emision) = date(?)
+                    ORDER BY d.id DESC
+                """, (fecha,))
+                devoluciones_dia = [dict(r) for r in cursor.fetchall()]
+                total_devoluciones_usd = round(sum(d["total_usd"] for d in devoluciones_dia), 2)
+                ventas_netas_usd = max(0.0, round(total_ventas_usd - total_devoluciones_usd, 2))
+
                 self.send_json({
                     "fecha": fecha,
                     "resumen": {
                         "facturas_emitidas": len(facturas_dia),
                         "total_facturado_usd": total_ventas_usd,
+                        "total_devoluciones_usd": total_devoluciones_usd,
+                        "ventas_netas_usd": ventas_netas_usd,
+                        "devoluciones_count": len(devoluciones_dia),
                         "subtotal_usd": total_subtotal_usd,
                         "iva_usd": total_iva_usd,
                         "total_cobrado_caja_usd": round(total_cobrado_usd, 2)
                     },
                     "desglose_monedas": desglose_por_moneda,
-                    "facturas": facturas_dia
+                    "facturas": facturas_dia,
+                    "devoluciones": devoluciones_dia
                 })
 
             # 12. Reporte de Ventas Mensuales
@@ -1700,6 +1769,207 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "success": True,
                     "message": "Personalización restablecida a valores originales"
                 })
+
+            # 11. Registrar Devolución (Retorno de ítems al inventario, reversión de ventas y ajuste de CXC)
+            elif path == "/api/devoluciones":
+                factura_id = body.get("factura_id")
+                cliente_id = body.get("cliente_id")
+                motivo = body.get("motivo", "").strip() or "Devolución de mercancía / solicitud de cliente"
+                tipo_devolucion = body.get("tipo_devolucion", "total")
+                metodo_reembolso = body.get("metodo_reembolso", "efectivo")
+                items = body.get("items", [])
+                pagos_reembolso = body.get("pagos_reembolso") or body.get("pagos") or []
+                notas = body.get("notas", "")
+
+                if not items or len(items) == 0:
+                    self.send_error_json("La devolución debe contener al menos un ítem", 400)
+                    return
+
+                # Si viene factura_id, obtener datos de la factura
+                factura_dict = None
+                if factura_id:
+                    cursor.execute("SELECT * FROM facturas WHERE id = ?", (factura_id,))
+                    fact_row = cursor.fetchone()
+                    if fact_row:
+                        factura_dict = dict(fact_row)
+                        if not cliente_id:
+                            cliente_id = factura_dict["cliente_id"]
+
+                if not cliente_id:
+                    self.send_error_json("Se requiere un cliente para procesar la devolución", 400)
+                    return
+
+                # Obtener datos del cliente
+                cursor.execute("SELECT * FROM clientes WHERE id = ?", (cliente_id,))
+                cli_row = cursor.fetchone()
+                if not cli_row:
+                    self.send_error_json("Cliente no encontrado", 404)
+                    return
+                cli_dict = dict(cli_row)
+
+                # Obtener tasas actuales
+                cursor.execute("SELECT tasa_ves, tasa_cop FROM configuracion WHERE id = 1")
+                cfg_row = cursor.fetchone()
+                tasa_ves = cfg_row[0] if cfg_row else 45.0
+                tasa_cop = cfg_row[1] if cfg_row else 4100.0
+
+                # Generar número correlativo DEV-000001
+                cursor.execute("SELECT COUNT(*) FROM devoluciones")
+                count_dev = cursor.fetchone()[0] + 1
+                numero_devolucion = f"DEV-{count_dev:06d}"
+
+                # Calcular montos de los ítems devueltos
+                subtotal_dev = 0.0
+                iva_dev = 0.0
+                detalles_proc = []
+
+                for itm in items:
+                    prod_id = itm.get("producto_id")
+                    cant = float(itm.get("cantidad", 0))
+                    p_unit = float(itm.get("precio_unitario", 0))
+                    imp_tipo = itm.get("impuesto_tipo", "gravado")
+                    tipo_itm = itm.get("tipo", "producto")
+                    nombre_itm = itm.get("nombre") or itm.get("nombre_producto") or "Ítem"
+                    codigo_itm = itm.get("codigo", "")
+
+                    if cant <= 0:
+                        continue
+
+                    sub_itm = round(cant * p_unit, 4)
+                    iva_itm = round(sub_itm * 0.16, 4) if imp_tipo == "gravado" else 0.0
+                    tot_itm = round(sub_itm + iva_itm, 4)
+
+                    subtotal_dev += sub_itm
+                    iva_dev += iva_itm
+
+                    detalles_proc.append({
+                        "producto_id": prod_id,
+                        "codigo": codigo_itm,
+                        "nombre": nombre_itm,
+                        "tipo": tipo_itm,
+                        "impuesto_tipo": imp_tipo,
+                        "cantidad": cant,
+                        "precio_unitario": p_unit,
+                        "iva_unitario": round(iva_itm / cant, 4) if cant > 0 else 0.0,
+                        "subtotal": sub_itm,
+                        "total": tot_itm
+                    })
+
+                if not detalles_proc:
+                    self.send_error_json("No hay ítems válidos para devolver", 400)
+                    return
+
+                total_usd = round(subtotal_dev + iva_dev, 2)
+                subtotal_usd = round(subtotal_dev, 2)
+                iva_usd = round(iva_dev, 2)
+                total_ves = round(total_usd * tasa_ves, 2)
+                total_cop = round(total_usd * tasa_cop, 2)
+
+                ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                num_fact = factura_dict["numero_factura"] if factura_dict else None
+                fecha_fact_orig = factura_dict["fecha"] if factura_dict else None
+                tipo_venta_orig = factura_dict.get("tipo_venta", "contado") if factura_dict else "contado"
+
+                # 1. Insertar devolución
+                cursor.execute("""
+                    INSERT INTO devoluciones (
+                        numero_devolucion, factura_id, numero_factura, cliente_id,
+                        cliente_nombre, cliente_cedula, cliente_telefono, cliente_direccion,
+                        fecha_emision, fecha_factura_original, tipo_devolucion, tipo_venta_original,
+                        motivo, subtotal_usd, iva_usd, total_usd,
+                        tasa_ves, tasa_cop, total_ves, total_cop,
+                        metodo_reembolso, notas
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    numero_devolucion, factura_id, num_fact, cliente_id,
+                    cli_dict["nombre"], cli_dict.get("cedula", ""), cli_dict.get("telefono", ""), cli_dict.get("direccion", ""),
+                    ahora, fecha_fact_orig, tipo_devolucion, tipo_venta_orig,
+                    motivo, subtotal_usd, iva_usd, total_usd,
+                    tasa_ves, tasa_cop, total_ves, total_cop,
+                    metodo_reembolso, notas
+                ))
+                dev_id = cursor.lastrowid
+
+                # 2. Insertar detalles y REINTEGRAR CANTIDADES AL INVENTARIO
+                for d in detalles_proc:
+                    cursor.execute("""
+                        INSERT INTO devolucion_detalles (
+                            devolucion_id, producto_id, codigo, nombre_producto, tipo,
+                            impuesto_tipo, cantidad, precio_unitario, iva_unitario, subtotal, total
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        dev_id, d["producto_id"], d["codigo"], d["nombre"], d["tipo"],
+                        d["impuesto_tipo"], d["cantidad"], d["precio_unitario"], d["iva_unitario"], d["subtotal"], d["total"]
+                    ))
+
+                    # Si es producto físico, REINTEGRAR EXISTENCIA AL INVENTARIO
+                    if d["tipo"] == "producto" and d["producto_id"]:
+                        cursor.execute("""
+                            UPDATE productos
+                            SET stock = stock + ?
+                            WHERE id = ?
+                        """, (d["cantidad"], d["producto_id"]))
+
+                # 3. Registrar pagos de reembolso si se especificaron
+                for p in pagos_reembolso:
+                    mon = p.get("moneda", "USD")
+                    met = p.get("metodo", metodo_reembolso)
+                    m_m = float(p.get("monto_moneda", 0))
+                    t_c = float(p.get("tasa_cambio") or (tasa_ves if mon == "VES" else (tasa_cop if mon == "COP" else 1.0)))
+                    eq = float(p.get("equivalente_usd") or (m_m / t_c if mon != "USD" else m_m))
+                    cursor.execute("""
+                        INSERT INTO devolucion_pagos (devolucion_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (dev_id, mon, met, m_m, t_c, round(eq, 2), p.get("referencia", "")))
+
+                # 4. Ajustar saldo de factura y Cuentas por Cobrar (CXC) si fue a crédito
+                if factura_id and factura_dict:
+                    if factura_dict.get("tipo_venta") == "credito":
+                        cursor.execute("SELECT * FROM cuentas_por_cobrar WHERE factura_id = ?", (factura_id,))
+                        cxc_row = cursor.fetchone()
+                        if cxc_row:
+                            cxc_d = dict(cxc_row)
+                            nuevo_saldo_cxc = max(0.0, round(cxc_d["saldo_pendiente"] - total_usd, 2))
+                            nuevo_estado_cxc = "pagada" if nuevo_saldo_cxc <= 0.01 else "parcial"
+                            cursor.execute("""
+                                UPDATE cuentas_por_cobrar
+                                SET saldo_pendiente = ?, estado = ?, notas = coalesce(notas, '') || ' [Devolución ' || ? || ' por $' || ? || ']'
+                                WHERE id = ?
+                            """, (nuevo_saldo_cxc, nuevo_estado_cxc, numero_devolucion, total_usd, cxc_d["id"]))
+
+                            cursor.execute("""
+                                UPDATE facturas
+                                SET saldo_pendiente = ?
+                                WHERE id = ?
+                            """, (nuevo_saldo_cxc, factura_id))
+
+                    # Si fue devolución total, marcar factura con estado o nota especial
+                    if tipo_devolucion == "total":
+                        cursor.execute("""
+                            UPDATE facturas
+                            SET estado = 'anulada', notas = coalesce(notas, '') || ' [ANULADA por Devolución Total ' || ? || ']'
+                            WHERE id = ?
+                        """, (numero_devolucion, factura_id))
+                    else:
+                        cursor.execute("""
+                            UPDATE facturas
+                            SET notas = coalesce(notas, '') || ' [Devolución Parcial ' || ? || ' por $' || ? || ']'
+                            WHERE id = ?
+                        """, (numero_devolucion, total_usd, factura_id))
+
+                conn.commit()
+
+                self.send_json({
+                    "success": True,
+                    "id": dev_id,
+                    "devolucion_id": dev_id,
+                    "numero_devolucion": numero_devolucion,
+                    "total_usd": total_usd,
+                    "total_ves": total_ves,
+                    "total_cop": total_cop,
+                    "tipo_devolucion": tipo_devolucion,
+                    "message": f"Devolución {numero_devolucion} procesada exitosamente. Las cantidades fueron reintegradas al inventario."
+                }, 201)
 
             else:
                 self.send_error_json("Endpoint no reconocido", 404)

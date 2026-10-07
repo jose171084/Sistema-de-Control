@@ -56,25 +56,29 @@
         <i class="fa-solid fa-file-invoice-dollar mr-3 text-green-400"></i>
         <span data-label-key="tab_facturacion">4. Facturación (Ventas)</span>
       </button>
+      <button onclick="navigate('devoluciones')" id="nav-devoluciones" class="sidebar-nav-btn">
+        <i class="fa-solid fa-arrow-rotate-left mr-3 text-cyan-400"></i>
+        <span data-label-key="tab_devoluciones">5. Devoluciones</span>
+      </button>
       <button onclick="navigate('compras')" id="nav-compras" class="sidebar-nav-btn">
         <i class="fa-solid fa-truck-ramp-box mr-3 text-blue-400"></i>
-        <span data-label-key="tab_compras">5. Compras</span>
+        <span data-label-key="tab_compras">6. Compras</span>
       </button>
       <button onclick="navigate('proveedores')" id="nav-proveedores" class="sidebar-nav-btn">
         <i class="fa-solid fa-building-user mr-3 text-purple-400"></i>
-        <span data-label-key="tab_proveedores">6. Proveedores</span>
+        <span data-label-key="tab_proveedores">7. Proveedores</span>
       </button>
       <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn">
         <i class="fa-solid fa-hand-holding-dollar mr-3 text-orange-400"></i>
-        <span data-label-key="tab_cxc">7. Cuentas por Cobrar</span>
+        <span data-label-key="tab_cxc">8. Cuentas por Cobrar</span>
       </button>
       <button onclick="navigate('cxp')" id="nav-cxp" class="sidebar-nav-btn">
         <i class="fa-solid fa-receipt mr-3 text-rose-400"></i>
-        <span data-label-key="tab_cxp">8. Cuentas por Pagar</span>
+        <span data-label-key="tab_cxp">9. Cuentas por Pagar</span>
       </button>
       <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn">
         <i class="fa-solid fa-chart-column mr-3 text-pink-400"></i>
-        <span data-label-key="tab_reportes">9. Reportes & Balances</span>
+        <span data-label-key="tab_reportes">10. Reportes & Balances</span>
       </button>
     </nav>
 
@@ -522,7 +526,7 @@
               <label class="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center">
                 <i class="fa-solid fa-user-tag mr-1.5 text-indigo-600"></i>Cliente Receptor *
               </label>
-              <button onclick="openClienteModal()" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800">
+              <button onclick="openClienteModal(false, 'facturacion')" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800">
                 + Crear Nuevo Cliente
               </button>
             </div>
@@ -737,6 +741,377 @@
     </section>
 
     <!-- ========================================================
+         VISTA 5: DEVOLUCIONES Y NOTAS DE CRÉDITO
+         ======================================================== -->
+    <section id="view-devoluciones" class="hidden space-y-6">
+      
+      <!-- Encabezado del Módulo -->
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800 flex items-center">
+            <i class="fa-solid fa-arrow-rotate-left mr-2.5 text-cyan-600"></i>
+            Módulo 5: Devoluciones y Notas de Crédito
+          </h2>
+          <p class="text-sm text-slate-500">
+            Trae facturas emitidas o procesa devoluciones manuales: reintegra automáticamente existencias al inventario, descuenta ventas del día y ajusta cuentas por cobrar.
+          </p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="cambiarSubtabDevoluciones('nueva')" id="btnSubtabDevNueva" class="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow transition flex items-center">
+            <i class="fa-solid fa-plus-circle mr-1.5"></i>Nueva Devolución
+          </button>
+          <button onclick="cambiarSubtabDevoluciones('historial')" id="btnSubtabDevHistorial" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-medium shadow-sm transition flex items-center">
+            <i class="fa-solid fa-clock-rotate-left mr-1.5"></i>Historial de Devoluciones
+          </button>
+        </div>
+      </div>
+
+      <!-- SUBTAB 1: FORMULARIO DE NUEVA DEVOLUCIÓN -->
+      <div id="subtabDevNuevaContainer" class="space-y-6">
+        
+        <!-- Selector de Modo de Devolución -->
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex items-center space-x-3">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Modo de Devolución:</span>
+            <div class="inline-flex bg-slate-100 p-1 rounded-xl">
+              <button type="button" onclick="setModoDevolucion('factura')" id="btnModoDevFactura" class="px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm bg-white text-cyan-700">
+                <i class="fa-solid fa-file-invoice mr-1.5"></i>Traer Factura Emitida
+              </button>
+              <button type="button" onclick="setModoDevolucion('manual')" id="btnModoDevManual" class="px-4 py-1.5 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900">
+                <i class="fa-solid fa-hand-holding-box mr-1.5"></i>Devolución Manual Libre
+              </button>
+            </div>
+          </div>
+          <div class="text-xs text-slate-400 italic">
+            * Al confirmar, las cantidades de productos físicos regresan de inmediato al inventario.
+          </div>
+        </div>
+
+        <!-- CONTENEDOR MODO A: TRAER FACTURA EMITIDA -->
+        <div id="modoDevFacturaPanel" class="space-y-4">
+          
+          <!-- Buscador y Selector Rápido de Factura -->
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-bold uppercase text-slate-600 tracking-wider flex items-center">
+                <i class="fa-solid fa-magnifying-glass mr-1.5 text-cyan-600"></i>Buscar Factura Emitida para Devolución
+              </label>
+              <span class="text-xs text-slate-400">Escribe el número de factura o nombre/cédula del cliente</span>
+            </div>
+            
+            <div class="relative">
+              <i class="fa-solid fa-file-invoice absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+              <input type="text" id="devFacturaSearchInput" oninput="buscarFacturaDevolucion(this.value)" onfocus="buscarFacturaDevolucion(this.value)" placeholder="Ej: FAC-000001, Juan Pérez o V-12345678..." autocomplete="off"
+                     class="w-full pl-10 pr-24 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-cyan-500 focus:bg-white transition">
+              <button type="button" id="btnClearFacturaDev" onclick="limpiarFacturaDevolucion()" class="hidden absolute right-2.5 top-2 text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1 rounded-lg font-medium">
+                Cambiar Factura
+              </button>
+              <!-- Menú Flotante de Resultados de Facturas -->
+              <div id="devFacturaSearchResults" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto z-30 divide-y divide-slate-100">
+              </div>
+            </div>
+          </div>
+
+          <!-- Tarjeta de Factura Seleccionada (Se muestra al seleccionar una factura) -->
+          <div id="devFacturaCargadaCard" class="hidden bg-cyan-50/70 border border-cyan-200 p-4 rounded-2xl space-y-3">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-cyan-200/60 pb-3">
+              <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-cyan-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">
+                  <i class="fa-solid fa-receipt"></i>
+                </div>
+                <div>
+                  <h3 class="font-bold text-slate-900 text-base flex items-center">
+                    <span id="devCardNumeroFactura">FAC-000000</span>
+                    <span id="devCardBadgeCondicion" class="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 uppercase">CONTADO</span>
+                  </h3>
+                  <p class="text-xs text-slate-600">
+                    Fecha de emisión original: <strong id="devCardFechaFactura">-</strong>
+                  </p>
+                </div>
+              </div>
+              <div class="text-right text-xs">
+                <span class="text-slate-500">Total Original:</span>
+                <p class="font-black text-slate-900 text-base" id="devCardTotalOriginal">$0.00</p>
+                <p class="text-[11px] text-slate-500" id="devCardSaldoPendiente"></p>
+              </div>
+            </div>
+
+            <!-- Datos del Cliente de la Factura -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-700 bg-white/70 p-3 rounded-xl border border-cyan-100">
+              <div>
+                <span class="text-slate-400 block text-[10px] uppercase font-bold">Cliente Receptor</span>
+                <strong id="devCardClienteNombre" class="text-slate-900 text-sm">-</strong>
+              </div>
+              <div>
+                <span class="text-slate-400 block text-[10px] uppercase font-bold">Cédula / RIF / Teléfono</span>
+                <span id="devCardClienteDoc">-</span>
+              </div>
+              <div>
+                <span class="text-slate-400 block text-[10px] uppercase font-bold">Forma de Pago Original</span>
+                <span id="devCardPagosDesglose" class="font-medium">-</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONTENEDOR MODO B: DEVOLUCIÓN MANUAL LIBRE -->
+        <div id="modoDevManualPanel" class="hidden space-y-4">
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+            <h3 class="font-bold text-slate-800 text-sm flex items-center">
+              <i class="fa-solid fa-user-tag mr-2 text-indigo-600"></i>Cliente para la Devolución Manual
+            </h3>
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+              <div class="sm:col-span-8">
+                <select id="devManualClienteSelect" class="w-full bg-slate-50 border border-slate-200 py-2.5 px-3 rounded-xl text-sm focus:outline-none focus:border-cyan-500">
+                  <option value="">Seleccione cliente...</option>
+                </select>
+              </div>
+              <div class="sm:col-span-4">
+                <button type="button" onclick="openClienteModal(false, 'devoluciones')" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2.5 px-3 rounded-xl text-xs transition">
+                  + Crear Cliente Nuevo
+                </button>
+              </div>
+            </div>
+
+            <!-- Selector de producto para agregar manualmente -->
+            <div class="border-t border-slate-100 pt-3 space-y-3">
+              <span class="text-xs font-bold uppercase text-slate-600 block">Agregar Producto o Servicio a Devolver:</span>
+              <div class="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                <div class="sm:col-span-6">
+                  <select id="devManualProductoSelect" onchange="onSelectDevManualProducto(this.value)" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-xs">
+                    <option value="">Seleccione ítem del catálogo...</option>
+                  </select>
+                </div>
+                <div class="sm:col-span-2">
+                  <input type="number" id="devManualItemCant" min="1" step="any" value="1" placeholder="Cant." class="w-full bg-slate-50 border border-slate-200 py-2 px-2 rounded-xl text-xs font-bold" title="Cantidad a devolver">
+                </div>
+                <div class="sm:col-span-2">
+                  <input type="number" id="devManualItemPrecio" min="0" step="any" value="0.00" placeholder="Precio $" class="w-full bg-slate-50 border border-slate-200 py-2 px-2 rounded-xl text-xs font-bold text-slate-800" title="Precio Unitario ($)">
+                </div>
+                <div class="sm:col-span-2">
+                  <button type="button" onclick="agregarItemDevolucionManual()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2 rounded-xl text-xs transition shadow-sm">
+                    + Agregar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TABLA PRINCIPAL DE ÍTEMS A DEVOLVER -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div>
+              <h3 class="font-bold text-slate-800 flex items-center">
+                <i class="fa-solid fa-boxes-packing text-cyan-600 mr-2"></i>
+                Detalle de Ítems a Devolver
+              </h3>
+              <p class="text-xs text-slate-500">
+                Indica la cantidad exacta a devolver de cada ítem. Las existencias se reintegrarán automáticamente al inventario.
+              </p>
+            </div>
+            <div id="devItemsActionsBar" class="hidden flex items-center space-x-2">
+              <button type="button" onclick="seleccionarTodosItemsDevolucion()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-bold transition">
+                Devolución Total (Todos)
+              </button>
+              <button type="button" onclick="deseleccionarTodosItemsDevolucion()" class="text-xs text-slate-400 hover:text-slate-600 px-2 py-1.5 font-medium transition">
+                Limpiar Cantidades
+              </button>
+            </div>
+          </div>
+
+          <!-- Contenedor / Tabla de Ítems -->
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+                  <th class="py-2.5 px-3">Código</th>
+                  <th class="py-2.5 px-3">Ítem / Descripción</th>
+                  <th class="py-2.5 px-3 text-center">Tipo</th>
+                  <th class="py-2.5 px-3 text-right">Cant. Facturada</th>
+                  <th class="py-2.5 px-3 text-center w-36">Cant. a Devolver</th>
+                  <th class="py-2.5 px-3 text-right">Precio Unit.</th>
+                  <th class="py-2.5 px-3 text-right">IVA (16%)</th>
+                  <th class="py-2.5 px-3 text-right">Total a Devolver</th>
+                  <th class="py-2.5 px-3 text-center w-12">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="devItemsTableBody" class="divide-y divide-slate-100">
+                <tr>
+                  <td colspan="9" class="text-center py-8 text-slate-400 italic">
+                    Selecciona una factura o agrega ítems manualmente para comenzar la devolución.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- RESUMEN FINANCIERO, MOTIVO Y CONFIRMACIÓN DE LA DEVOLUCIÓN -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          <!-- Columna Izquierda: Motivo y Forma de Reembolso (7 Cols) -->
+          <div class="lg:col-span-7 bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+            <h3 class="font-bold text-slate-800 text-sm flex items-center">
+              <i class="fa-solid fa-clipboard-question mr-2 text-indigo-600"></i>
+              Condiciones de la Devolución
+            </h3>
+
+            <!-- Motivo de la Devolución -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Motivo de la Devolución *</label>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                <button type="button" onclick="setDevMotivo('Producto defectuoso o con falla')" class="dev-motivo-chip text-left px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium hover:border-cyan-500 hover:bg-cyan-50 transition">
+                  🛠️ Producto defectuoso / con falla
+                </button>
+                <button type="button" onclick="setDevMotivo('Error en despacho / producto equivocado')" class="dev-motivo-chip text-left px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium hover:border-cyan-500 hover:bg-cyan-50 transition">
+                  📦 Error en despacho o pedido
+                </button>
+                <button type="button" onclick="setDevMotivo('Insatisfacción del cliente / solicitud')" class="dev-motivo-chip text-left px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium hover:border-cyan-500 hover:bg-cyan-50 transition">
+                  👤 Insatisfacción o solicitud cliente
+                </button>
+                <button type="button" onclick="setDevMotivo('Cambio de modelo o garantía')" class="dev-motivo-chip text-left px-3 py-2 rounded-xl border border-slate-200 text-xs font-medium hover:border-cyan-500 hover:bg-cyan-50 transition">
+                  🔄 Cambio de modelo / garantía
+                </button>
+              </div>
+              <input type="text" id="devMotivoInput" required placeholder="Escribe el motivo detallado de la devolución..." class="w-full bg-slate-50 border border-slate-200 py-2.5 px-3 rounded-xl text-xs focus:outline-none focus:border-cyan-500">
+            </div>
+
+            <!-- Método de Reembolso -->
+            <div class="border-t border-slate-100 pt-3">
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Forma de Reembolso / Compensación *</label>
+              <select id="devMetodoReembolso" onchange="onDevMetodoReembolsoChange(this.value)" class="w-full bg-slate-50 border border-slate-200 py-2.5 px-3 rounded-xl text-xs font-medium focus:outline-none focus:border-cyan-500">
+                <option value="efectivo_usd">💵 Reembolso en Efectivo (Dólares USD)</option>
+                <option value="pago_movil">📱 Reembolso por Pago Móvil (Bolívares Bs.)</option>
+                <option value="transferencia_ves">🏦 Reembolso por Transferencia Bancaria (Bs.)</option>
+                <option value="efectivo_cop">🇨🇴 Reembolso en Pesos (Efectivo COP)</option>
+                <option value="bancolombia_nequi">📲 Reembolso por Bancolombia / Nequi (COP)</option>
+                <option value="reversar_cxc" id="optDevReversarCxc">💳 Reversar Saldo Pendiente en Cuenta por Cobrar (CXC)</option>
+                <option value="nota_credito">📝 Nota de Crédito / Saldo a Favor del Cliente</option>
+              </select>
+            </div>
+
+            <!-- Observaciones adicionales -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Observaciones / Notas Adicionales</label>
+              <textarea id="devNotasInput" rows="2" placeholder="Detalles adicionales del estado del producto o entrega..." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-xs focus:outline-none focus:border-cyan-500"></textarea>
+            </div>
+          </div>
+
+          <!-- Columna Derecha: Tarjeta de Totales y Botón Procesar (5 Cols) -->
+          <div class="lg:col-span-5 bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 rounded-2xl shadow-xl space-y-5 flex flex-col justify-between">
+            <div class="space-y-4">
+              <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+                <span class="text-xs uppercase tracking-wider text-slate-400 font-bold">Resumen de Devolución</span>
+                <span class="text-[11px] bg-cyan-500/20 text-cyan-300 font-bold px-2 py-0.5 rounded-full" id="devItemsCountBadge">0 ítems</span>
+              </div>
+
+              <div class="space-y-2 text-sm">
+                <div class="flex justify-between text-slate-300">
+                  <span>Subtotal:</span>
+                  <span class="font-mono font-bold" id="devTotalSubtotalUsd">$0.00</span>
+                </div>
+                <div class="flex justify-between text-slate-300">
+                  <span>IVA Reintegrado:</span>
+                  <span class="font-mono font-bold" id="devTotalIvaUsd">$0.00</span>
+                </div>
+                <div class="border-t border-slate-700 pt-3 flex justify-between items-baseline">
+                  <span class="text-base font-bold text-white">TOTAL A DEVOLVER:</span>
+                  <span class="text-2xl font-black font-mono text-cyan-400" id="devTotalUsd">$0.00</span>
+                </div>
+              </div>
+
+              <!-- Equivalencias en Monedas Locales -->
+              <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700/60 text-xs space-y-1">
+                <div class="flex justify-between text-amber-300 font-mono">
+                  <span>Equivalente Bolívares (BCV):</span>
+                  <strong id="devTotalVes">0.00 Bs.</strong>
+                </div>
+                <div class="flex justify-between text-emerald-300 font-mono">
+                  <span>Equivalente Pesos (TRM):</span>
+                  <strong id="devTotalCop">0 COP</strong>
+                </div>
+              </div>
+            </div>
+
+            <!-- Botón de Procesar Devolución -->
+            <button type="button" onclick="procesarDevolucionConfirm()" id="btnProcesarDevolucion" class="w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black py-3 px-4 rounded-xl text-sm transition shadow-lg flex items-center justify-center space-x-2">
+              <i class="fa-solid fa-arrow-rotate-left text-base"></i>
+              <span>Procesar Devolución & Reintegrar Stock</span>
+            </button>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- SUBTAB 2: HISTORIAL DE DEVOLUCIONES REGISTRADAS -->
+      <div id="subtabDevHistorialContainer" class="hidden space-y-6">
+        
+        <!-- Tarjetas Métricas de Devoluciones -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <span class="text-xs font-bold text-slate-400 uppercase">Devoluciones Totales</span>
+            <p class="text-2xl font-black text-slate-800 mt-1" id="repDevCountTotal">0</p>
+            <span class="text-[11px] text-slate-500">Transacciones revertidas</span>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <span class="text-xs font-bold text-slate-400 uppercase">Total Devuelto ($ USD)</span>
+            <p class="text-2xl font-black text-rose-600 mt-1" id="repDevMontoTotalUsd">$0.00</p>
+            <span class="text-[11px] text-slate-500" id="repDevMontoTotalBs">0.00 Bs.</span>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <span class="text-xs font-bold text-slate-400 uppercase">Devuelto Hoy ($ USD)</span>
+            <p class="text-2xl font-black text-amber-600 mt-1" id="repDevMontoHoyUsd">$0.00</p>
+            <span class="text-[11px] text-slate-500">Descontado de ventas hoy</span>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <span class="text-xs font-bold text-slate-400 uppercase">Ítems Reintegrados</span>
+            <p class="text-2xl font-black text-emerald-600 mt-1" id="repDevItemsReintegrados">0</p>
+            <span class="text-[11px] text-slate-500">Productos devueltos a stock</span>
+          </div>
+        </div>
+
+        <!-- Buscador de Devoluciones -->
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row gap-3 items-center justify-between">
+          <div class="relative w-full sm:w-96">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+            <input type="text" id="devHistorialSearchInput" oninput="renderDevolucionesHistorial()" placeholder="Buscar por N° DEV, factura o cliente..." 
+                   class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-cyan-500 focus:bg-white transition">
+          </div>
+          <button onclick="loadDevoluciones()" class="text-xs text-slate-600 hover:text-slate-900 flex items-center font-semibold">
+            <i class="fa-solid fa-arrows-rotate mr-1.5 text-cyan-600"></i>Actualizar Lista
+          </button>
+        </div>
+
+        <!-- Tabla de Historial de Devoluciones -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th class="py-3 px-4">N° Devolución</th>
+                  <th class="py-3 px-4">Factura Origen</th>
+                  <th class="py-3 px-4">Cliente</th>
+                  <th class="py-3 px-4">Fecha y Hora</th>
+                  <th class="py-3 px-4">Motivo</th>
+                  <th class="py-3 px-4 text-right">Total Devuelto ($)</th>
+                  <th class="py-3 px-4 text-right">Total en Bs.</th>
+                  <th class="py-3 px-4 text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="devolucionesTableBody" class="divide-y divide-slate-100 text-sm">
+                <!-- Renderizado dinámico -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+    <!-- ========================================================
          VISTA 6: COMPRAS (INCREMENTO DE STOCK, FOTO DE FACTURA Y AUTO-CREAR PRODUCTO)
          ======================================================== -->
     <section id="view-compras" class="hidden space-y-6">
@@ -838,7 +1213,7 @@
                 </h3>
                 <p class="text-xs text-slate-500">Cada producto incrementará el stock en el inventario al guardar.</p>
               </div>
-              <button onclick="abrirModalCrearItemEnCompra()" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center">
+              <button onclick="openProductoModal(false, 'compras')" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center">
                 <i class="fa-solid fa-sparkles mr-1.5"></i>¿No existe el ítem? Crearlo aquí
               </button>
             </div>
@@ -2538,6 +2913,119 @@
         </button>
         <button onclick="compartirFacturaWhatsApp()" id="btnTicketWhatsApp" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center transition">
           <i class="fa-brands fa-whatsapp text-lg mr-2"></i>Enviar por WhatsApp
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. Modal Comprobante / Nota de Devolución Imprimible -->
+  <div id="modalTicketDevolucion" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-xl w-full p-6 space-y-4 m-4 max-h-[95vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b pb-3 no-print">
+        <h3 class="font-bold text-lg text-cyan-800 flex items-center">
+          <i class="fa-solid fa-file-circle-check text-xl mr-2 text-cyan-600"></i>
+          Nota de Devolución Oficial
+        </h3>
+        <button onclick="closeModalTicketDevolucion()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <div id="printAreaDevolucion" class="ticket-container bg-white p-6 border border-slate-200 rounded-xl space-y-4 text-slate-800">
+        <!-- Encabezado -->
+        <div class="text-center border-b pb-4 space-y-1">
+          <h2 class="text-xl font-bold uppercase tracking-wider" id="ticketDevBusinessName">Mi Negocio Comercial</h2>
+          <p class="text-xs text-slate-600" id="ticketDevBusinessRif">RIF: J-00000000-0</p>
+          <p class="text-xs text-slate-600" id="ticketDevBusinessPhone">Tel: +58 412 0000000</p>
+          <div class="pt-2">
+            <span class="inline-block bg-cyan-700 text-white text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider" id="ticketDevNumero">NOTA DE DEVOLUCIÓN #DEV-000001</span>
+          </div>
+          <p class="text-xs text-slate-500 pt-1" id="ticketDevFecha">Fecha: 07/10/2026 12:00 PM</p>
+        </div>
+
+        <!-- Datos de Factura y Cliente -->
+        <div class="border-b pb-3 text-xs space-y-1">
+          <div class="flex justify-between">
+            <span class="text-slate-500 font-semibold">Factura Original:</span>
+            <span class="font-bold text-slate-900" id="ticketDevFacturaRef">FAC-000001</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-500">Cliente:</span>
+            <span class="font-bold text-slate-900" id="ticketDevClienteNombre">Juan Pérez</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-500">Cédula / RIF:</span>
+            <span class="font-medium" id="ticketDevClienteDoc">V-12345678</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-500">Motivo:</span>
+            <span class="font-medium text-slate-800 italic" id="ticketDevMotivo">-</span>
+          </div>
+        </div>
+
+        <!-- Tabla de Ítems Devueltos -->
+        <table class="w-full text-xs text-left">
+          <thead>
+            <tr class="border-b border-slate-300 font-bold text-slate-700">
+              <th class="py-1">Ítem Devuelto</th>
+              <th class="py-1 text-center">Cant.</th>
+              <th class="py-1 text-right">P. Unit</th>
+              <th class="py-1 text-right">Total $</th>
+            </tr>
+          </thead>
+          <tbody id="ticketDevItemsBody" class="divide-y divide-slate-100">
+          </tbody>
+        </table>
+
+        <!-- Totales de la Devolución -->
+        <div class="border-t border-slate-300 pt-3 space-y-1 text-xs">
+          <div class="flex justify-between">
+            <span class="text-slate-600">Subtotal Devuelto:</span>
+            <span class="font-mono font-bold" id="ticketDevSubtotal">$0.00</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-600">IVA Reintegrado:</span>
+            <span class="font-mono font-bold" id="ticketDevIva">$0.00</span>
+          </div>
+          <div class="flex justify-between text-sm font-black text-slate-900 border-t pt-2">
+            <span>TOTAL REEMBOLSADO:</span>
+            <span class="font-mono text-cyan-700" id="ticketDevTotalUsd">$0.00</span>
+          </div>
+          <div class="flex justify-between text-[11px] text-slate-500 pt-1">
+            <span>Equivalente en Bolívares:</span>
+            <span class="font-mono font-bold" id="ticketDevTotalVes">0.00 Bs.</span>
+          </div>
+          <div class="flex justify-between text-[11px] text-slate-500">
+            <span>Equivalente en Pesos COP:</span>
+            <span class="font-mono font-bold" id="ticketDevTotalCop">0 COP</span>
+          </div>
+        </div>
+
+        <!-- Forma de Compensación -->
+        <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-xs">
+          <span class="text-slate-500 block text-[10px] uppercase font-bold">Compensación / Reembolso:</span>
+          <span class="font-bold text-slate-800" id="ticketDevMetodoCompensacion">-</span>
+        </div>
+
+        <!-- Firmas -->
+        <div class="pt-8 border-t border-dashed border-slate-300 grid grid-cols-2 gap-4 text-center text-[10px] text-slate-500">
+          <div>
+            <div class="border-t border-slate-400 pt-1 mx-4">Firma Almacén / Caja</div>
+            <p>Mercancía Recibida en Stock</p>
+          </div>
+          <div>
+            <div class="border-t border-slate-400 pt-1 mx-4">Firma Cliente</div>
+            <p>Reembolso Recibido Conforme</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Botones de Acción -->
+      <div class="flex flex-col sm:flex-row justify-end gap-2 pt-2 border-t no-print">
+        <button type="button" onclick="closeModalTicketDevolucion()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs font-semibold">Cerrar</button>
+        <button type="button" onclick="compartirDevolucionWhatsApp()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center">
+          <i class="fa-brands fa-whatsapp mr-1.5 text-sm"></i>Enviar WhatsApp
+        </button>
+        <button type="button" onclick="imprimirTicketDevolucion()" class="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center shadow">
+          <i class="fa-solid fa-print mr-1.5"></i>Imprimir / PDF
         </button>
       </div>
     </div>

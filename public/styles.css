@@ -15,6 +15,7 @@
   --color-btn-compra: #2563eb;
   --color-btn-cxc: #d97706;
   --color-btn-cxp: #e11d48;
+  --color-btn-devoluciones: #0891b2;
 }
 
 body {
@@ -145,6 +146,15 @@ body {
   filter: brightness(0.9);
 }
 
+.btn-theme-devoluciones {
+  background-color: var(--color-btn-devoluciones) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-devoluciones:hover {
+  filter: brightness(0.9);
+}
+
 /* Ocultar barra de desplazamiento */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
@@ -238,7 +248,8 @@ input[type="color"]::-webkit-color-swatch {
     padding: 0 !important;
   }
 
-  #printAreaFactura {
+  #printAreaFactura,
+  #printAreaDevolucion {
     display: block !important;
     border: none !important;
     box-shadow: none !important;
@@ -249,7 +260,8 @@ input[type="color"]::-webkit-color-swatch {
     font-size: 11px !important;
   }
 
-  #printAreaFactura * {
+  #printAreaFactura *,
+  #printAreaDevolucion * {
     color: #000000 !important;
   }
 
