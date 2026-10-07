@@ -57,6 +57,11 @@ const AppState = {
   devolucionFacturaSeleccionada: null,
   facturasParaDevolucion: [],
   devolucionItems: [],
+  devCart: [],
+  devPagos: [],
+  devFilterCategory: 'todos',
+  devolucionFacturaPagosOriginales: [],
+  devolucionClienteSeleccionado: null,
   devolucionSubtab: 'nueva',
   ultimaDevolucionEmitida: null,
   clienteModalOrigen: 'clientes',
@@ -212,6 +217,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const devFactResults = document.getElementById('devFacturaSearchResults');
     if (devFactResults && !devFactResults.contains(e.target) && e.target !== devFactInput) {
       devFactResults.classList.add('hidden');
+    }
+
+    const devCliInput = document.getElementById('devClienteSearchInput');
+    const devCliResults = document.getElementById('devClienteSearchResults');
+    if (devCliResults && !devCliResults.contains(e.target) && e.target !== devCliInput) {
+      devCliResults.classList.add('hidden');
     }
   });
 });
@@ -1449,8 +1460,7 @@ async function saveCliente(e) {
       } else if (AppState.clienteModalOrigen === 'devoluciones' || AppState.currentView === 'devoluciones') {
         populateDevolucionClientes();
         if (nuevoId) {
-          const sel = document.getElementById('devManualClienteSelect');
-          if (sel) sel.value = nuevoId;
+          seleccionarClienteDevolucion(nuevoId);
         }
       }
       AppState.clienteModalOrigen = 'clientes';
@@ -2281,13 +2291,26 @@ async function loadFacturas() {
 // MÓDULO 5: DEVOLUCIONES Y NOTAS DE CRÉDITO (REINTEGRO DE INVENTARIO)
 // ========================================================
 
+const METODOS_REEMBOLSO_POR_MONEDA = {
+  USD: ['Dólar Efectivo', 'Zelle', 'Binance', 'Zinli', 'Nota de Crédito'],
+  COP: ['Pesos Efectivo', 'Bancolombia', 'Nequi'],
+  VES: ['Pago Móvil', 'Transferencia', 'Punto de Venta']
+};
+
+function getMetodosReembolso(moneda) {
+  return METODOS_REEMBOLSO_POR_MONEDA[moneda] || METODOS_REEMBOLSO_POR_MONEDA.USD;
+}
+
 function initDevolucionesView() {
-  populateDevolucionClientes();
-  populateDevolucionProductos();
   loadFacturasParaDevolucion();
   if (AppState.devolucionSubtab === 'historial') {
     loadDevoluciones();
   }
+  if (!AppState.devPagos || AppState.devPagos.length === 0) {
+    initDefaultDevPago();
+  }
+  renderDevCatalog();
+  renderDevCart();
 }
 
 function cambiarSubtabDevoluciones(subtab) {
@@ -2306,6 +2329,8 @@ function cambiarSubtabDevoluciones(subtab) {
     if (btnHistorial) {
       btnHistorial.className = 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-medium shadow-sm transition flex items-center';
     }
+    renderDevCatalog();
+    renderDevCart();
   } else {
     if (containerNueva) containerNueva.classList.add('hidden');
     if (containerHistorial) containerHistorial.classList.remove('hidden');
@@ -2321,37 +2346,47 @@ function cambiarSubtabDevoluciones(subtab) {
 
 function setModoDevolucion(modo) {
   AppState.devolucionModo = modo;
-  const panelFactura = document.getElementById('modoDevFacturaPanel');
-  const panelManual = document.getElementById('modoDevManualPanel');
+  const boxFactura = document.getElementById('devBuscadorFacturaBox');
+  const boxCliente = document.getElementById('devBuscadorClienteBox');
   const btnFactura = document.getElementById('btnModoDevFactura');
   const btnManual = document.getElementById('btnModoDevManual');
+  const btnTotalAll = document.getElementById('btnDevTotalAll');
+  const noticePagos = document.getElementById('devOriginalPagosNotice');
 
   if (modo === 'factura') {
-    if (panelFactura) panelFactura.classList.remove('hidden');
-    if (panelManual) panelManual.classList.add('hidden');
+    if (boxFactura) boxFactura.classList.remove('hidden');
+    if (boxCliente) boxCliente.classList.add('hidden');
     if (btnFactura) {
       btnFactura.className = 'px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm bg-white text-cyan-700';
     }
     if (btnManual) {
       btnManual.className = 'px-4 py-1.5 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900';
     }
+    if (AppState.devolucionFacturaSeleccionada) {
+      if (btnTotalAll) btnTotalAll.classList.remove('hidden');
+      if (noticePagos) noticePagos.classList.remove('hidden');
+    } else {
+      if (btnTotalAll) btnTotalAll.classList.add('hidden');
+      if (noticePagos) noticePagos.classList.add('hidden');
+    }
   } else {
-    if (panelFactura) panelFactura.classList.add('hidden');
-    if (panelManual) panelManual.classList.remove('hidden');
+    if (boxFactura) boxFactura.classList.add('hidden');
+    if (boxCliente) boxCliente.classList.remove('hidden');
     if (btnFactura) {
       btnFactura.className = 'px-4 py-1.5 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900';
     }
     if (btnManual) {
       btnManual.className = 'px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm bg-white text-cyan-700';
     }
-    populateDevolucionClientes();
-    populateDevolucionProductos();
+    if (btnTotalAll) btnTotalAll.classList.add('hidden');
+    if (noticePagos) noticePagos.classList.add('hidden');
   }
 
-  // Reiniciar ítems al alternar modo
-  AppState.devolucionItems = [];
-  renderDevolucionItemsTable();
-  actualizarTotalesDevolucion();
+  // Reiniciar carrito y pagos para el nuevo modo
+  AppState.devCart = [];
+  initDefaultDevPago();
+  renderDevCatalog();
+  renderDevCart();
 }
 
 function populateDevolucionClientes() {
@@ -2371,14 +2406,6 @@ function populateDevolucionProductos() {
       const label = p.tipo === 'servicio' ? `[Servicio] ${p.nombre}` : `${p.nombre} (Stock: ${p.stock})`;
       return `<option value="${p.id}" data-precio="${p.precio_total}" data-impuesto="${p.impuesto_tipo}" data-tipo="${p.tipo}" data-codigo="${escapeHtml(p.codigo)}">${escapeHtml(label)}</option>`;
     }).join('');
-}
-
-function onSelectDevManualProducto(prodId) {
-  const prod = AppState.productos.find(p => p.id == prodId);
-  const inputPrecio = document.getElementById('devManualItemPrecio');
-  if (prod && inputPrecio) {
-    inputPrecio.value = parseFloat(prod.precio_base || 0).toFixed(2);
-  }
 }
 
 async function loadFacturasParaDevolucion() {
@@ -2422,7 +2449,7 @@ function buscarFacturaDevolucion(query = '') {
           <span class="font-bold text-slate-900 font-mono">${escapeHtml(f.numero_factura)}</span>
           <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${f.tipo_venta === 'credito' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}">${f.tipo_venta}</span>
         </div>
-        <p class="text-slate-600 mt-0.5">${escapeHtml(f.cliente_nombre)} &bull; <span class="font-mono">${escapeHtml(f.cliente_cedula || '')}</span></p>
+        <p class="text-slate-600 mt-0.5">${escapeHtml(f.cliente_nombre || 'Consumidor Final')} &bull; <span class="font-mono">${escapeHtml(f.cliente_cedula || '')}</span></p>
         <p class="text-[11px] text-slate-400">${formatFecha(f.fecha)}</p>
       </div>
       <div class="text-right">
@@ -2434,6 +2461,127 @@ function buscarFacturaDevolucion(query = '') {
   resultsDiv.classList.remove('hidden');
 }
 
+function formatearPagosOriginalesResumen(factura) {
+  const pagos = factura.pagos || [];
+  if (pagos.length === 0) {
+    if (factura.tipo_venta === 'credito') {
+      return `<span class="text-amber-700 font-bold"><i class="fa-solid fa-clock mr-1"></i>Venta a Crédito (Saldo pendiente CXC: $${parseFloat(factura.saldo_pendiente || factura.total_usd).toFixed(2)})</span>`;
+    }
+    return `<span class="text-slate-600 font-medium">Dólar Efectivo ($${parseFloat(factura.total_usd).toFixed(2)})</span>`;
+  }
+
+  return pagos.map(p => {
+    let montoFmt = '';
+    if (p.moneda === 'COP') {
+      montoFmt = `${Math.round(p.monto_moneda || 0).toLocaleString('es-CO')} COP`;
+    } else if (p.moneda === 'VES') {
+      montoFmt = `${parseFloat(p.monto_moneda || 0).toFixed(2)} Bs.`;
+    } else {
+      montoFmt = `$${parseFloat(p.monto_moneda || p.equivalente_usd || 0).toFixed(2)} USD`;
+    }
+    const equivFmt = p.moneda !== 'USD' ? ` <span class="text-slate-400 font-normal">(≈ $${parseFloat(p.equivalente_usd || 0).toFixed(2)})</span>` : '';
+    return `<div class="inline-flex items-center mr-2 mb-1 bg-white px-2 py-0.5 rounded border border-cyan-200">
+      <span class="font-bold text-slate-800">${escapeHtml(p.metodo)}:</span>
+      <span class="ml-1 text-cyan-800 font-mono font-semibold">${montoFmt}</span>${equivFmt}
+    </div>`;
+  }).join('');
+}
+
+function mostrarAvisoPagosOriginales(factura) {
+  const notice = document.getElementById('devOriginalPagosNotice');
+  const listEl = document.getElementById('devOriginalPagosList');
+  if (!notice || !listEl) return;
+
+  const pagos = factura.pagos || [];
+  if (pagos.length === 0 && factura.tipo_venta === 'credito') {
+    listEl.innerHTML = `<div>• Venta a Crédito: Saldo pendiente $${parseFloat(factura.saldo_pendiente || factura.total_usd).toFixed(2)} (Ajustará cuenta por cobrar)</div>`;
+    notice.classList.remove('hidden');
+    return;
+  }
+
+  if (pagos.length === 0) {
+    listEl.innerHTML = `<div>• Dólar Efectivo: $${parseFloat(factura.total_usd).toFixed(2)}</div>`;
+    notice.classList.remove('hidden');
+    return;
+  }
+
+  listEl.innerHTML = pagos.map(p => {
+    let detalle = `${p.metodo} (${p.moneda}): `;
+    if (p.moneda === 'COP') detalle += `${Math.round(p.monto_moneda || 0).toLocaleString('es-CO')} COP`;
+    else if (p.moneda === 'VES') detalle += `${parseFloat(p.monto_moneda || 0).toFixed(2)} Bs.`;
+    else detalle += `$${parseFloat(p.monto_moneda || p.equivalente_usd || 0).toFixed(2)} USD`;
+    if (p.moneda !== 'USD') detalle += ` (Equiv: $${parseFloat(p.equivalente_usd || 0).toFixed(2)})`;
+    return `<div>• ${escapeHtml(detalle)}</div>`;
+  }).join('');
+
+  notice.classList.remove('hidden');
+}
+
+function restaurarPagosOriginalesComoReembolso(factura = null) {
+  const fact = factura || AppState.devolucionFacturaSeleccionada;
+  if (!fact) {
+    initDefaultDevPago();
+    return;
+  }
+
+  const subtotal = AppState.devCart.reduce((acc, i) => acc + i.subtotal, 0);
+  const iva = AppState.devCart.reduce((acc, i) => acc + i.iva_total, 0);
+  const totalUsdDevolver = subtotal + iva;
+
+  const pagosOrig = fact.pagos || [];
+
+  if (pagosOrig.length === 0) {
+    if (fact.tipo_venta === 'credito') {
+      AppState.devPagos = [
+        {
+          id: 1,
+          moneda: 'USD',
+          metodo: 'Nota de Crédito',
+          monto: totalUsdDevolver > 0 ? Math.round(totalUsdDevolver * 100) / 100 : 0
+        }
+      ];
+    } else {
+      AppState.devPagos = [
+        {
+          id: 1,
+          moneda: 'USD',
+          metodo: 'Dólar Efectivo',
+          monto: totalUsdDevolver > 0 ? Math.round(totalUsdDevolver * 100) / 100 : 0
+        }
+      ];
+    }
+    renderDevPagos();
+    return;
+  }
+
+  const totalOrigUsd = parseFloat(fact.total_usd || 0);
+  const ratio = totalOrigUsd > 0 ? (totalUsdDevolver / totalOrigUsd) : 1.0;
+
+  AppState.devPagos = pagosOrig.map((p, idx) => {
+    const mon = p.moneda || 'USD';
+    let montoReembolso = 0;
+    if (mon === 'USD') {
+      montoReembolso = Math.round((parseFloat(p.monto_moneda || p.equivalente_usd || 0) * ratio) * 100) / 100;
+    } else if (mon === 'VES') {
+      montoReembolso = Math.round((parseFloat(p.monto_moneda || 0) * ratio) * 100) / 100;
+    } else if (mon === 'COP') {
+      montoReembolso = Math.round(parseFloat(p.monto_moneda || 0) * ratio);
+    }
+    return {
+      id: idx + 1,
+      moneda: mon,
+      metodo: p.metodo || (getMetodosReembolso(mon)[0]),
+      monto: montoReembolso
+    };
+  });
+
+  if (AppState.devPagos.length === 0) {
+    initDefaultDevPago();
+  } else {
+    renderDevPagos();
+  }
+}
+
 async function seleccionarFacturaParaDevolucion(facturaId) {
   try {
     const res = await fetch(`/api/facturas/${facturaId}`);
@@ -2443,6 +2591,13 @@ async function seleccionarFacturaParaDevolucion(facturaId) {
     }
     const data = await res.json();
     AppState.devolucionFacturaSeleccionada = data;
+    AppState.devolucionFacturaPagosOriginales = data.pagos || [];
+    AppState.devolucionClienteSeleccionado = {
+      id: data.cliente_id,
+      nombre: data.cliente_nombre || 'Consumidor Final',
+      cedula: data.cliente_cedula || '',
+      telefono: data.cliente_telefono || ''
+    };
 
     // Ocultar resultados flotantes
     const resultsDiv = document.getElementById('devFacturaSearchResults');
@@ -2466,64 +2621,68 @@ async function seleccionarFacturaParaDevolucion(facturaId) {
           ? 'ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 uppercase'
           : 'ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 uppercase';
       }
-      document.getElementById('devCardFechaFactura').textContent = formatFecha(data.fecha);
-      document.getElementById('devCardTotalOriginal').textContent = `$${parseFloat(data.total_usd).toFixed(2)}`;
-
-      const saldoPendEl = document.getElementById('devCardSaldoPendiente');
-      if (saldoPendEl) {
-        if (data.tipo_venta === 'credito' && parseFloat(data.saldo_pendiente || 0) > 0) {
-          saldoPendEl.textContent = `Saldo pendiente CXC: $${parseFloat(data.saldo_pendiente).toFixed(2)}`;
-          saldoPendEl.className = 'text-[11px] text-amber-600 font-semibold';
-        } else {
-          saldoPendEl.textContent = 'Factura pagada completamente';
-          saldoPendEl.className = 'text-[11px] text-emerald-600 font-medium';
-        }
-      }
-
       document.getElementById('devCardClienteNombre').textContent = data.cliente_nombre || 'Consumidor Final';
       document.getElementById('devCardClienteDoc').textContent = `${data.cliente_cedula || '-'} • Tel: ${data.cliente_telefono || '-'}`;
+      document.getElementById('devCardTotalOriginal').textContent = `$${parseFloat(data.total_usd).toFixed(2)}`;
 
-      const pagosTxt = (data.pagos || []).map(p => `${p.metodo.replace('_', ' ')}: $${parseFloat(p.monto_usd).toFixed(2)}`).join(', ') || (data.tipo_venta === 'credito' ? 'Crédito' : 'Efectivo');
-      document.getElementById('devCardPagosDesglose').textContent = pagosTxt;
+      // Desglose de pagos originales
+      const pagosHtml = formatearPagosOriginalesResumen(data);
+      document.getElementById('devCardPagosDesglose').innerHTML = pagosHtml;
     }
 
-    // Configurar método de reembolso: si fue a crédito con saldo, preseleccionar reversar_cxc
-    const selMetodo = document.getElementById('devMetodoReembolso');
-    if (selMetodo) {
-      if (data.tipo_venta === 'credito' && parseFloat(data.saldo_pendiente || 0) > 0) {
-        selMetodo.value = 'reversar_cxc';
-      } else {
-        selMetodo.value = 'efectivo_usd';
-      }
-    }
+    // Mostrar aviso en la columna de reembolsos
+    mostrarAvisoPagosOriginales(data);
 
-    // Cargar ítems a devolver desde la factura original
-    AppState.devolucionItems = (data.items || []).map(it => ({
-      producto_id: it.producto_id,
-      codigo: it.codigo || '',
-      nombre: it.nombre,
-      tipo: it.tipo || 'producto',
-      impuesto_tipo: it.impuesto_tipo || 'gravado',
-      precio_unitario: parseFloat(it.precio_unitario),
-      cant_facturada: parseFloat(it.cantidad),
-      cant_devolver: parseFloat(it.cantidad)
-    }));
+    // Habilitar botón Devolver Todos
+    const btnDevTotalAll = document.getElementById('btnDevTotalAll');
+    if (btnDevTotalAll) btnDevTotalAll.classList.remove('hidden');
 
-    const actionsBar = document.getElementById('devItemsActionsBar');
-    if (actionsBar) actionsBar.classList.remove('hidden');
+    // CARGAR ÍTEMS DE LA FACTURA EN EL CARRITO DE DEVOLUCIÓN
+    const rawItems = data.items || data.detalles || [];
+    const ivaPct = (AppState.config.iva_porcentaje || 16.0) / 100.0;
 
-    renderDevolucionItemsTable();
-    actualizarTotalesDevolucion();
+    AppState.devCart = rawItems.map(it => {
+      const precioUnit = parseFloat(it.precio_unitario || 0);
+      const cant = parseFloat(it.cantidad || 0);
+      const impTipo = it.impuesto_tipo || 'gravado';
+      const ivaUnit = impTipo === 'gravado' ? (precioUnit * ivaPct) : 0;
+      const subtotal = cant * precioUnit;
+      const ivaTotal = cant * ivaUnit;
+      return {
+        producto_id: it.producto_id,
+        codigo: it.codigo || '',
+        nombre: it.nombre || it.nombre_producto || 'Ítem',
+        tipo: it.tipo || 'producto',
+        impuesto_tipo: impTipo,
+        precio_unitario: precioUnit,
+        iva_unitario: ivaUnit,
+        cant_facturada: cant,
+        cantidad: cant,
+        subtotal: subtotal,
+        iva_total: ivaTotal,
+        total: subtotal + ivaTotal,
+        imagen: it.imagen || ''
+      };
+    });
+
+    // Prellenar las formas de reembolso con las originales de la factura
+    restaurarPagosOriginalesComoReembolso(data);
+
+    // Renderizar catálogo e ítems
+    renderDevCatalog();
+    renderDevCart();
 
   } catch (err) {
     console.error("Error al seleccionar factura:", err);
-    alert('Ocurrió un error al procesar los datos de la factura.');
+    alert('Ocurrió un error al cargar la factura.');
   }
 }
 
 function limpiarFacturaDevolucion() {
   AppState.devolucionFacturaSeleccionada = null;
-  AppState.devolucionItems = [];
+  AppState.devolucionFacturaPagosOriginales = [];
+  AppState.devolucionClienteSeleccionado = null;
+  AppState.devCart = [];
 
   const searchInput = document.getElementById('devFacturaSearchInput');
   if (searchInput) searchInput.value = '';
@@ -2534,203 +2693,495 @@ function limpiarFacturaDevolucion() {
   const card = document.getElementById('devFacturaCargadaCard');
   if (card) card.classList.add('hidden');
 
-  const actionsBar = document.getElementById('devItemsActionsBar');
-  if (actionsBar) actionsBar.classList.add('hidden');
+  const noticePagos = document.getElementById('devOriginalPagosNotice');
+  if (noticePagos) noticePagos.classList.add('hidden');
 
-  renderDevolucionItemsTable();
-  actualizarTotalesDevolucion();
+  const btnDevTotalAll = document.getElementById('btnDevTotalAll');
+  if (btnDevTotalAll) btnDevTotalAll.classList.add('hidden');
+
+  initDefaultDevPago();
+  renderDevCatalog();
+  renderDevCart();
 }
 
-function renderDevolucionItemsTable() {
-  const tbody = document.getElementById('devItemsTableBody');
-  if (!tbody) return;
+// Búsqueda y Selección de Cliente en Modo Manual
+function buscarClienteDevolucion(query = '') {
+  const resultsDiv = document.getElementById('devClienteSearchResults');
+  if (!resultsDiv) return;
 
-  if (AppState.devolucionItems.length === 0) {
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="9" class="text-center py-8 text-slate-400 italic">
-          ${AppState.devolucionModo === 'factura' 
-            ? 'Selecciona una factura en el buscador superior para comenzar la devolución.' 
-            : 'Agrega productos o servicios usando el selector superior para la devolución manual.'}
-        </td>
-      </tr>
-    `;
+  const q = (query || '').toLowerCase().trim();
+  let matches = AppState.clientes || [];
+  if (q) {
+    matches = matches.filter(c => 
+      c.nombre.toLowerCase().includes(q) || 
+      c.cedula.toLowerCase().includes(q) || 
+      (c.telefono && c.telefono.toLowerCase().includes(q))
+    );
+  }
+
+  if (matches.length === 0) {
+    resultsDiv.innerHTML = `<div class="p-3 text-xs text-slate-400 text-center italic">No se encontraron clientes.</div>`;
+    resultsDiv.classList.remove('hidden');
     return;
   }
 
-  const ivaPct = (AppState.config.iva_porcentaje || 16.0) / 100.0;
-
-  tbody.innerHTML = AppState.devolucionItems.map((it, idx) => {
-    const cantDev = parseFloat(it.cant_devolver) || 0;
-    const subtotal = cantDev * it.precio_unitario;
-    const iva = it.impuesto_tipo === 'gravado' ? (subtotal * ivaPct) : 0;
-    const totalItem = subtotal + iva;
-
-    const esServicio = it.tipo === 'servicio';
-    const badgeTipo = esServicio
-      ? `<span class="bg-indigo-50 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full">Servicio</span>`
-      : `<span class="bg-cyan-50 text-cyan-700 text-[10px] font-bold px-2 py-0.5 rounded-full"><i class="fa-solid fa-arrow-turn-down mr-1"></i>Reintegra Stock</span>`;
-
-    const maxAttr = it.cant_facturada ? `max="${it.cant_facturada}"` : '';
-    const facturadaText = it.cant_facturada ? it.cant_facturada : 'Manual';
-
-    return `
-      <tr class="hover:bg-slate-50 transition border-b border-slate-100">
-        <td class="py-2.5 px-3 font-mono font-semibold text-slate-600">${escapeHtml(it.codigo || '-')}</td>
-        <td class="py-2.5 px-3">
-          <p class="font-bold text-slate-800">${escapeHtml(it.nombre)}</p>
-          ${!esServicio ? '<p class="text-[10px] text-emerald-600 font-semibold">&bull; Regresará al inventario</p>' : ''}
-        </td>
-        <td class="py-2.5 px-3 text-center">${badgeTipo}</td>
-        <td class="py-2.5 px-3 text-right font-mono font-medium text-slate-600">${facturadaText}</td>
-        <td class="py-2.5 px-3 text-center">
-          <div class="inline-flex items-center space-x-1">
-            <button type="button" onclick="ajustarCantDevolver(${idx}, -1)" class="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs flex items-center justify-center">-</button>
-            <input type="number" step="any" min="0" ${maxAttr} value="${cantDev}" onchange="onCantDevolverChange(${idx}, this.value)" 
-                   class="w-16 text-center py-1 bg-white border border-slate-200 rounded text-xs font-bold focus:outline-none focus:border-cyan-500">
-            <button type="button" onclick="ajustarCantDevolver(${idx}, 1)" class="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs flex items-center justify-center">+</button>
-          </div>
-        </td>
-        <td class="py-2.5 px-3 text-right font-mono text-slate-700">$${it.precio_unitario.toFixed(2)}</td>
-        <td class="py-2.5 px-3 text-right font-mono text-slate-500">$${iva.toFixed(2)}</td>
-        <td class="py-2.5 px-3 text-right font-mono font-bold text-cyan-700">$${totalItem.toFixed(2)}</td>
-        <td class="py-2.5 px-3 text-center">
-          <button type="button" onclick="eliminarItemDevolucion(${idx})" class="text-rose-500 hover:text-rose-700 p-1" title="Quitar de devolución">
-            <i class="fa-solid fa-trash text-xs"></i>
-          </button>
-        </td>
-      </tr>
-    `;
-  }).join('');
+  resultsDiv.innerHTML = matches.slice(0, 8).map(c => `
+    <div onclick="seleccionarClienteDevolucion(${c.id})" class="p-2.5 hover:bg-cyan-50 cursor-pointer flex items-center justify-between text-xs transition">
+      <div>
+        <p class="font-bold text-slate-800">${escapeHtml(c.nombre)}</p>
+        <p class="text-slate-500 font-mono text-[11px]">${escapeHtml(c.cedula)} &bull; Tel: ${escapeHtml(c.telefono || '-')}</p>
+      </div>
+      <span class="text-cyan-600 text-xs font-bold">Seleccionar &rarr;</span>
+    </div>
+  `).join('');
+  resultsDiv.classList.remove('hidden');
 }
 
-function onCantDevolverChange(idx, val) {
-  let c = parseFloat(val) || 0;
-  if (c < 0) c = 0;
-  if (AppState.devolucionItems[idx].cant_facturada && c > AppState.devolucionItems[idx].cant_facturada) {
-    c = AppState.devolucionItems[idx].cant_facturada;
-    alert(`La cantidad máxima a devolver de este ítem es ${AppState.devolucionItems[idx].cant_facturada}`);
-  }
-  AppState.devolucionItems[idx].cant_devolver = c;
-  renderDevolucionItemsTable();
-  actualizarTotalesDevolucion();
+function seleccionarClienteDevolucion(clienteId) {
+  const c = AppState.clientes.find(cli => cli.id === clienteId);
+  if (!c) return;
+
+  AppState.devolucionClienteSeleccionado = c;
+  const inputHidden = document.getElementById('devClienteSelect');
+  if (inputHidden) inputHidden.value = c.id;
+
+  const elNombre = document.getElementById('devSelectedClienteNombre');
+  if (elNombre) elNombre.textContent = c.nombre;
+
+  const elCedula = document.getElementById('devSelectedClienteCedula');
+  if (elCedula) elCedula.textContent = c.cedula;
+
+  const elTel = document.getElementById('devSelectedClienteTelefono');
+  if (elTel) elTel.textContent = c.telefono || '-';
+
+  const card = document.getElementById('devClienteSelectedCard');
+  if (card) card.classList.remove('hidden');
+
+  const resultsDiv = document.getElementById('devClienteSearchResults');
+  if (resultsDiv) resultsDiv.classList.add('hidden');
+
+  const inputSearch = document.getElementById('devClienteSearchInput');
+  if (inputSearch) inputSearch.value = `${c.nombre} (${c.cedula})`;
+
+  const btnClear = document.getElementById('btnClearClienteDev');
+  if (btnClear) btnClear.classList.remove('hidden');
 }
 
-function ajustarCantDevolver(idx, delta) {
-  const it = AppState.devolucionItems[idx];
-  let c = (parseFloat(it.cant_devolver) || 0) + delta;
-  if (c < 0) c = 0;
-  if (it.cant_facturada && c > it.cant_facturada) c = it.cant_facturada;
-  it.cant_devolver = c;
-  renderDevolucionItemsTable();
-  actualizarTotalesDevolucion();
-}
+function limpiarClienteDevolucion() {
+  AppState.devolucionClienteSeleccionado = null;
+  const inputHidden = document.getElementById('devClienteSelect');
+  if (inputHidden) inputHidden.value = '';
 
-function seleccionarTodosItemsDevolucion() {
-  AppState.devolucionItems.forEach(it => {
-    it.cant_devolver = it.cant_facturada || 1;
-  });
-  renderDevolucionItemsTable();
-  actualizarTotalesDevolucion();
-}
+  const card = document.getElementById('devClienteSelectedCard');
+  if (card) card.classList.add('hidden');
 
-function deseleccionarTodosItemsDevolucion() {
-  AppState.devolucionItems.forEach(it => {
-    it.cant_devolver = 0;
-  });
-  renderDevolucionItemsTable();
-  actualizarTotalesDevolucion();
-}
+  const resultsDiv = document.getElementById('devClienteSearchResults');
+  if (resultsDiv) resultsDiv.classList.add('hidden');
 
-function eliminarItemDevolucion(idx) {
-  AppState.devolucionItems.splice(idx, 1);
-  renderDevolucionItemsTable();
-  actualizarTotalesDevolucion();
-}
-
-function agregarItemDevolucionManual() {
-  const prodSelect = document.getElementById('devManualProductoSelect');
-  const prodId = parseInt(prodSelect.value);
-  if (!prodId) {
-    alert('Selecciona un producto o servicio del catálogo.');
-    return;
+  const inputSearch = document.getElementById('devClienteSearchInput');
+  if (inputSearch) {
+    inputSearch.value = '';
+    inputSearch.focus();
   }
 
-  const prod = AppState.productos.find(p => p.id === prodId);
-  if (!prod) return;
-
-  const cant = parseFloat(document.getElementById('devManualItemCant').value) || 1;
-  const precio = parseFloat(document.getElementById('devManualItemPrecio').value) || parseFloat(prod.precio_base || 0);
-
-  if (cant <= 0) {
-    alert('La cantidad a devolver debe ser mayor a 0.');
-    return;
-  }
-
-  // Verificar si ya está en la lista
-  const existente = AppState.devolucionItems.find(it => it.producto_id === prod.id);
-  if (existente) {
-    existente.cant_devolver += cant;
-  } else {
-    AppState.devolucionItems.push({
-      producto_id: prod.id,
-      codigo: prod.codigo || '',
-      nombre: prod.nombre,
-      tipo: prod.tipo || 'producto',
-      impuesto_tipo: prod.impuesto_tipo || 'gravado',
-      precio_unitario: precio,
-      cant_facturada: null,
-      cant_devolver: cant
-    });
-  }
-
-  document.getElementById('devManualItemCant').value = 1;
-  renderDevolucionItemsTable();
-  actualizarTotalesDevolucion();
+  const btnClear = document.getElementById('btnClearClienteDev');
+  if (btnClear) btnClear.classList.add('hidden');
 }
 
-function setDevMotivo(motivo) {
-  const input = document.getElementById('devMotivoInput');
-  if (input) input.value = motivo;
-}
-
-function onDevMetodoReembolsoChange(metodo) {
-  // Manejador opcional para cambios de método de reembolso
-}
-
-function actualizarTotalesDevolucion() {
-  const ivaPct = (AppState.config.iva_porcentaje || 16.0) / 100.0;
-  let subtotalUsd = 0;
-  let ivaUsd = 0;
-  let itemsContados = 0;
-
-  (AppState.devolucionItems || []).forEach(it => {
-    const cant = parseFloat(it.cant_devolver) || 0;
-    if (cant > 0) {
-      itemsContados++;
-      const st = cant * it.precio_unitario;
-      subtotalUsd += st;
-      if (it.impuesto_tipo === 'gravado') {
-        ivaUsd += st * ivaPct;
+// Filtros y Renderizado de Catálogo en Devoluciones (Idéntico a Facturación POS)
+function setDevFilterCategory(tipo) {
+  AppState.devFilterCategory = tipo;
+  ['todos', 'producto', 'servicio'].forEach(t => {
+    const btn = document.getElementById(`devCat-${t}`);
+    if (btn) {
+      if (t === tipo) {
+        btn.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 text-white';
+      } else {
+        btn.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200';
       }
     }
   });
+  renderDevCatalog();
+}
 
-  const totalUsd = subtotalUsd + ivaUsd;
-  const tasaVes = parseFloat(AppState.config.tasa_ves) || 45.0;
-  const tasaCop = parseFloat(AppState.config.tasa_cop) || 4100.0;
+function renderDevCatalog() {
+  const grid = document.getElementById('devCatalogGrid');
+  const headerNotice = document.getElementById('devCatalogHeaderNotice');
+  if (!grid) return;
 
-  const totalVes = totalUsd * tasaVes;
-  const totalCop = Math.round(totalUsd * tasaCop);
+  const search = document.getElementById('devSearchProduct')?.value.toLowerCase().trim() || '';
 
+  if (AppState.devolucionModo === 'factura') {
+    if (!AppState.devolucionFacturaSeleccionada) {
+      if (headerNotice) headerNotice.textContent = 'Busca y selecciona una factura emitida arriba para ver sus ítems.';
+      grid.innerHTML = `
+        <div class="col-span-full py-12 text-center text-slate-400 text-xs italic">
+          <i class="fa-solid fa-file-invoice text-3xl mb-2 block text-slate-300"></i>
+          Ingresa el número de factura o cliente en el buscador superior para cargar los ítems facturados.
+        </div>
+      `;
+      return;
+    }
+
+    if (headerNotice) {
+      headerNotice.textContent = `Ítems facturados en ${AppState.devolucionFacturaSeleccionada.numero_factura} (haz clic para agregar o ajustar en la devolución):`;
+    }
+
+    const rawItems = AppState.devolucionFacturaSeleccionada.items || AppState.devolucionFacturaSeleccionada.detalles || [];
+    let filtrados = rawItems;
+
+    if (AppState.devFilterCategory !== 'todos') {
+      filtrados = filtrados.filter(it => (it.tipo || 'producto') === AppState.devFilterCategory);
+    }
+    if (search) {
+      filtrados = filtrados.filter(it => 
+        (it.nombre || it.nombre_producto || '').toLowerCase().includes(search) || 
+        (it.codigo || '').toLowerCase().includes(search)
+      );
+    }
+
+    if (filtrados.length === 0) {
+      grid.innerHTML = `<div class="col-span-full py-8 text-center text-slate-400 text-xs">No se encontraron ítems en esta factura que coincidan.</div>`;
+      return;
+    }
+
+    grid.innerHTML = filtrados.map(it => {
+      const prodId = it.producto_id;
+      const nombre = it.nombre || it.nombre_producto || 'Ítem';
+      const codigo = it.codigo || '-';
+      const cantFacturada = parseFloat(it.cantidad || 0);
+      const precioUnit = parseFloat(it.precio_unitario || 0);
+      const esProducto = (it.tipo || 'producto') === 'producto';
+      const inCart = AppState.devCart.find(c => c.producto_id === prodId);
+      const cantInCart = inCart ? inCart.cantidad : 0;
+      const alcanzadoMax = cantInCart >= cantFacturada;
+
+      const imgTag = it.imagen
+        ? `<img src="${it.imagen}" alt="${escapeHtml(nombre)}" class="w-12 h-12 object-cover rounded-xl shadow-xs">`
+        : `<div class="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 text-lg">
+             <i class="fa-solid ${esProducto ? 'fa-box' : 'fa-wrench'}"></i>
+           </div>`;
+
+      return `
+        <div onclick="addDevCartItemFromInvoice(${prodId})" 
+             class="bg-slate-50 hover:bg-cyan-50/70 border border-slate-200 hover:border-cyan-300 p-3 rounded-xl transition cursor-pointer flex flex-col justify-between space-y-2 select-none group ${alcanzadoMax ? 'opacity-70' : ''}">
+          <div class="flex items-start space-x-2.5">
+            ${imgTag}
+            <div class="flex-1 min-w-0">
+              <p class="font-bold text-xs text-slate-800 truncate group-hover:text-cyan-700">${escapeHtml(nombre)}</p>
+              <p class="text-[11px] text-slate-400 font-mono">${escapeHtml(codigo)}</p>
+              <div class="flex items-center space-x-1 mt-1">
+                <span class="text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded">Facturado: ${cantFacturada} uds</span>
+                ${inCart ? `<span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">Devolviendo: ${cantInCart}</span>` : ''}
+              </div>
+            </div>
+          </div>
+          <div class="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+            <div>
+              <span class="text-xs font-extrabold text-cyan-700 block">$${precioUnit.toFixed(2)}</span>
+              <span class="text-[10px] text-slate-400">${(precioUnit * AppState.config.tasa_ves).toFixed(2)} Bs.</span>
+            </div>
+            <button class="w-6 h-6 rounded-lg bg-cyan-600 text-white flex items-center justify-center text-xs group-hover:scale-110 transition" title="Agregar a devolución">
+              <i class="fa-solid fa-plus"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+  } else {
+    // MODO MANUAL: Catálogo completo exactamente idéntico a Facturación POS
+    if (headerNotice) {
+      headerNotice.textContent = 'Catálogo completo de productos y servicios (haz clic para agregar a la devolución):';
+    }
+
+    let filtrados = AppState.productos || [];
+    if (AppState.devFilterCategory !== 'todos') {
+      filtrados = filtrados.filter(p => p.tipo === AppState.devFilterCategory);
+    }
+    if (search) {
+      filtrados = filtrados.filter(p => p.nombre.toLowerCase().includes(search) || p.codigo.toLowerCase().includes(search));
+    }
+
+    if (filtrados.length === 0) {
+      grid.innerHTML = `<div class="col-span-full py-8 text-center text-slate-400 text-xs">No hay ítems para mostrar.</div>`;
+      return;
+    }
+
+    grid.innerHTML = filtrados.map(p => {
+      const esProducto = p.tipo === 'producto';
+      const imgTag = p.imagen
+        ? `<img src="${p.imagen}" alt="${escapeHtml(p.nombre)}" class="w-12 h-12 object-cover rounded-xl shadow-xs">`
+        : `<div class="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 text-lg">
+             <i class="fa-solid ${esProducto ? 'fa-box' : 'fa-wrench'}"></i>
+           </div>`;
+
+      const badgeStock = esProducto
+        ? `<span class="text-[10px] font-bold text-slate-600">Stock actual: ${p.stock}</span>`
+        : `<span class="text-[10px] font-medium text-purple-600">Servicio</span>`;
+
+      const badgeImpuesto = p.impuesto_tipo === 'gravado'
+        ? `<span class="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-medium">+16% IVA</span>`
+        : `<span class="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">Exento</span>`;
+
+      return `
+        <div onclick="addDevCartItemManual(${p.id})" 
+             class="bg-slate-50 hover:bg-cyan-50/70 border border-slate-200 hover:border-cyan-300 p-3 rounded-xl transition cursor-pointer flex flex-col justify-between space-y-2 select-none group">
+          <div class="flex items-start space-x-2.5">
+            ${imgTag}
+            <div class="flex-1 min-w-0">
+              <p class="font-bold text-xs text-slate-800 truncate group-hover:text-cyan-700">${escapeHtml(p.nombre)}</p>
+              <p class="text-[11px] text-slate-400 font-mono">${escapeHtml(p.codigo)}</p>
+              <div class="flex items-center space-x-1 mt-1">
+                ${badgeStock}
+                ${badgeImpuesto}
+              </div>
+            </div>
+          </div>
+          <div class="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+            <div>
+              <span class="text-xs font-extrabold text-cyan-700 block">$${parseFloat(p.precio_total).toFixed(2)}</span>
+              <span class="text-[10px] text-slate-400">${(p.precio_total * AppState.config.tasa_ves).toFixed(2)} Bs.</span>
+            </div>
+            <button class="w-6 h-6 rounded-lg bg-cyan-600 text-white flex items-center justify-center text-xs group-hover:scale-110 transition">
+              <i class="fa-solid fa-plus"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+}
+
+// Operaciones del Carrito de Devoluciones (Exacto a Facturación POS)
+function addDevCartItemFromInvoice(productoId) {
+  if (!AppState.devolucionFacturaSeleccionada) return;
+  const rawItems = AppState.devolucionFacturaSeleccionada.items || AppState.devolucionFacturaSeleccionada.detalles || [];
+  const itOrig = rawItems.find(it => it.producto_id === productoId);
+  if (!itOrig) return;
+
+  const existing = AppState.devCart.find(i => i.producto_id === productoId);
+  const cantFacturada = parseFloat(itOrig.cantidad || 0);
+
+  if (existing) {
+    if (existing.cantidad + 1 > cantFacturada) {
+      alert(`No puedes devolver más de las ${cantFacturada} unidades facturadas.`);
+      return;
+    }
+    existing.cantidad += 1;
+    existing.subtotal = existing.precio_unitario * existing.cantidad;
+    existing.iva_total = existing.iva_unitario * existing.cantidad;
+    existing.total = existing.subtotal + existing.iva_total;
+  } else {
+    const precioUnit = parseFloat(itOrig.precio_unitario || 0);
+    const ivaPct = (AppState.config.iva_porcentaje || 16.0) / 100.0;
+    const impTipo = itOrig.impuesto_tipo || 'gravado';
+    const ivaUnit = impTipo === 'gravado' ? (precioUnit * ivaPct) : 0;
+
+    AppState.devCart.push({
+      producto_id: itOrig.producto_id,
+      codigo: itOrig.codigo || '',
+      nombre: itOrig.nombre || itOrig.nombre_producto || 'Ítem',
+      tipo: itOrig.tipo || 'producto',
+      impuesto_tipo: impTipo,
+      precio_unitario: precioUnit,
+      iva_unitario: ivaUnit,
+      cant_facturada: cantFacturada,
+      cantidad: 1,
+      subtotal: precioUnit,
+      iva_total: ivaUnit,
+      total: precioUnit + ivaUnit,
+      imagen: itOrig.imagen || ''
+    });
+  }
+
+  renderDevCart();
+  renderDevCatalog();
+}
+
+function addDevCartItemManual(productoId) {
+  const prod = AppState.productos.find(p => p.id === productoId);
+  if (!prod) return;
+
+  const existing = AppState.devCart.find(i => i.producto_id === productoId);
+  const ivaPct = (AppState.config.iva_porcentaje || 16.0) / 100.0;
+  const ivaUnitario = prod.impuesto_tipo === 'gravado' ? (prod.precio_base * ivaPct) : 0;
+
+  if (existing) {
+    existing.cantidad += 1;
+    existing.subtotal = existing.precio_unitario * existing.cantidad;
+    existing.iva_total = existing.iva_unitario * existing.cantidad;
+    existing.total = existing.subtotal + existing.iva_total;
+  } else {
+    AppState.devCart.push({
+      producto_id: prod.id,
+      nombre: prod.nombre,
+      codigo: prod.codigo,
+      tipo: prod.tipo,
+      impuesto_tipo: prod.impuesto_tipo,
+      precio_unitario: prod.precio_base,
+      iva_unitario: ivaUnitario,
+      cantidad: 1,
+      cant_facturada: null,
+      subtotal: prod.precio_base,
+      iva_total: ivaUnitario,
+      total: prod.precio_base + ivaUnitario,
+      imagen: prod.imagen || ''
+    });
+  }
+
+  renderDevCart();
+}
+
+function updateDevCartItemCant(productoId, delta) {
+  const item = AppState.devCart.find(i => i.producto_id === productoId);
+  if (!item) return;
+
+  const newCant = item.cantidad + delta;
+  if (newCant <= 0) {
+    removeDevCartItem(productoId);
+    return;
+  }
+
+  if (AppState.devolucionModo === 'factura' && item.cant_facturada !== null && item.cant_facturada !== undefined) {
+    if (newCant > item.cant_facturada) {
+      alert(`No puedes devolver más de ${item.cant_facturada} unidades facturadas.`);
+      return;
+    }
+  }
+
+  item.cantidad = newCant;
+  item.subtotal = item.precio_unitario * item.cantidad;
+  item.iva_total = item.iva_unitario * item.cantidad;
+  item.total = item.subtotal + item.iva_total;
+
+  renderDevCart();
+  renderDevCatalog();
+}
+
+function removeDevCartItem(productoId) {
+  AppState.devCart = AppState.devCart.filter(i => i.producto_id !== productoId);
+  renderDevCart();
+  renderDevCatalog();
+}
+
+function devolverTodosFactura() {
+  if (!AppState.devolucionFacturaSeleccionada) return;
+  const rawItems = AppState.devolucionFacturaSeleccionada.items || AppState.devolucionFacturaSeleccionada.detalles || [];
+  const ivaPct = (AppState.config.iva_porcentaje || 16.0) / 100.0;
+
+  AppState.devCart = rawItems.map(it => {
+    const cant = parseFloat(it.cantidad || 0);
+    const precio = parseFloat(it.precio_unitario || 0);
+    const impTipo = it.impuesto_tipo || 'gravado';
+    const ivaUnit = impTipo === 'gravado' ? (precio * ivaPct) : 0;
+    const subtotal = cant * precio;
+    const ivaTotal = cant * ivaUnit;
+    return {
+      producto_id: it.producto_id,
+      codigo: it.codigo || '',
+      nombre: it.nombre || it.nombre_producto || 'Ítem',
+      tipo: it.tipo || 'producto',
+      impuesto_tipo: impTipo,
+      precio_unitario: precio,
+      iva_unitario: ivaUnit,
+      cant_facturada: cant,
+      cantidad: cant,
+      subtotal: subtotal,
+      iva_total: ivaTotal,
+      total: subtotal + ivaTotal,
+      imagen: it.imagen || ''
+    };
+  });
+
+  renderDevCart();
+  renderDevCatalog();
+}
+
+function limpiarDevCart() {
+  AppState.devCart = [];
+  renderDevCart();
+  renderDevCatalog();
+}
+
+function renderDevCart() {
+  const container = document.getElementById('devCartItemsList');
   const countBadge = document.getElementById('devItemsCountBadge');
-  if (countBadge) countBadge.textContent = `${itemsContados} ítem${itemsContados === 1 ? '' : 's'}`;
 
-  const elSubtotal = document.getElementById('devTotalSubtotalUsd');
-  if (elSubtotal) elSubtotal.textContent = `$${subtotalUsd.toFixed(2)}`;
+  if (!container) return;
 
-  const elIva = document.getElementById('devTotalIvaUsd');
-  if (elIva) elIva.textContent = `$${ivaUsd.toFixed(2)}`;
+  const totalCount = AppState.devCart.reduce((acc, i) => acc + i.cantidad, 0);
+  if (countBadge) countBadge.textContent = `${totalCount} ${totalCount === 1 ? 'ítem' : 'ítems'}`;
+
+  if (AppState.devCart.length === 0) {
+    container.innerHTML = `<p class="text-sm text-slate-400 text-center py-8">No hay ítems en la devolución. Selecciona de la izquierda.</p>`;
+    updateDevTotals();
+    return;
+  }
+
+  container.innerHTML = AppState.devCart.map(item => {
+    const esServicio = item.tipo === 'servicio';
+    const badgeReintegro = !esServicio 
+      ? `<span class="text-[10px] text-emerald-600 font-semibold">&bull; Regresa a stock</span>`
+      : `<span class="text-[10px] text-purple-600 font-semibold">&bull; Servicio</span>`;
+
+    const facturadaBadge = item.cant_facturada 
+      ? `<span class="text-[10px] text-slate-400">Facturado: ${item.cant_facturada}</span>`
+      : '';
+
+    return `
+      <div class="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+        <div class="flex-1 pr-2 min-w-0">
+          <p class="font-bold text-slate-800 truncate">${escapeHtml(item.nombre)}</p>
+          <div class="flex items-center space-x-1.5 text-[11px] text-slate-400">
+            <span>$${item.precio_unitario.toFixed(2)} c/u</span>
+            <span>&bull;</span>
+            <span class="${item.impuesto_tipo === 'gravado' ? 'text-blue-600 font-medium' : 'text-slate-500'}">
+              ${item.impuesto_tipo === 'gravado' ? 'Gravado (16%)' : 'Exento'}
+            </span>
+            ${facturadaBadge ? `<span>&bull;</span> ${facturadaBadge}` : ''}
+          </div>
+          <div>${badgeReintegro}</div>
+        </div>
+
+        <!-- Controles de Cantidad -->
+        <div class="flex items-center space-x-1.5">
+          <button type="button" onclick="updateDevCartItemCant(${item.producto_id}, -1)" class="w-6 h-6 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 flex items-center justify-center font-bold text-slate-600">
+            -
+          </button>
+          <span class="w-6 text-center font-bold text-slate-800">${item.cantidad}</span>
+          <button type="button" onclick="updateDevCartItemCant(${item.producto_id}, 1)" class="w-6 h-6 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 flex items-center justify-center font-bold text-slate-600">
+            +
+          </button>
+        </div>
+
+        <!-- Total del Ítem y Quitar -->
+        <div class="text-right pl-3">
+          <span class="font-bold text-slate-900 block">$${item.total.toFixed(2)}</span>
+          <button type="button" onclick="removeDevCartItem(${item.producto_id})" class="text-[11px] text-rose-500 hover:underline">
+            Quitar
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  updateDevTotals();
+}
+
+function updateDevTotals() {
+  const subtotal = AppState.devCart.reduce((acc, i) => acc + i.subtotal, 0);
+  const iva = AppState.devCart.reduce((acc, i) => acc + i.iva_total, 0);
+  const totalUsd = subtotal + iva;
+
+  const totalVes = totalUsd * AppState.config.tasa_ves;
+  const totalCop = Math.round(totalUsd * AppState.config.tasa_cop);
+
+  const elSubtotal = document.getElementById('devSubtotalUsd');
+  if (elSubtotal) elSubtotal.textContent = `$${subtotal.toFixed(2)}`;
+
+  const elIva = document.getElementById('devIvaUsd');
+  if (elIva) elIva.textContent = `$${iva.toFixed(2)}`;
 
   const elTotal = document.getElementById('devTotalUsd');
   if (elTotal) elTotal.textContent = `$${totalUsd.toFixed(2)}`;
@@ -2741,13 +3192,202 @@ function actualizarTotalesDevolucion() {
   const elCop = document.getElementById('devTotalCop');
   if (elCop) elCop.textContent = `${totalCop.toLocaleString('es-CO')} COP`;
 
-  return { subtotalUsd, ivaUsd, totalUsd, totalVes, totalCop, itemsContados };
+  recalcularDevPagosMixtos();
 }
 
+// Reembolsos Mixtos Multimoneda (USD, VES, COP)
+function calcularSaldoPendienteParaDevFila(filaIdExcluida = null) {
+  const subtotal = AppState.devCart.reduce((acc, i) => acc + i.subtotal, 0);
+  const iva = AppState.devCart.reduce((acc, i) => acc + i.iva_total, 0);
+  const totalUsd = subtotal + iva;
+
+  let reembolsadoUSD = 0;
+  (AppState.devPagos || []).forEach(p => {
+    if (filaIdExcluida !== null && p.id === filaIdExcluida) return;
+    let equiv = 0;
+    if (p.moneda === 'USD') equiv = parseFloat(p.monto) || 0;
+    else if (p.moneda === 'VES') equiv = AppState.config.tasa_ves > 0 ? ((parseFloat(p.monto) || 0) / AppState.config.tasa_ves) : 0;
+    else if (p.moneda === 'COP') equiv = AppState.config.tasa_cop > 0 ? ((parseFloat(p.monto) || 0) / AppState.config.tasa_cop) : 0;
+    reembolsadoUSD += equiv;
+  });
+
+  return Math.max(0, totalUsd - reembolsadoUSD);
+}
+
+function initDefaultDevPago() {
+  const subtotal = AppState.devCart.reduce((acc, i) => acc + i.subtotal, 0);
+  const iva = AppState.devCart.reduce((acc, i) => acc + i.iva_total, 0);
+  const totalUsd = subtotal + iva;
+
+  AppState.devPagos = [
+    {
+      id: 1,
+      moneda: 'USD',
+      metodo: 'Dólar Efectivo',
+      monto: totalUsd > 0 ? Math.round(totalUsd * 100) / 100 : 0
+    }
+  ];
+  renderDevPagos();
+}
+
+function addDevPagoRow() {
+  const nextId = (AppState.devPagos || []).length > 0 ? Math.max(...AppState.devPagos.map(p => p.id)) + 1 : 1;
+  const saldoRestanteUSD = calcularSaldoPendienteParaDevFila();
+  const defaultMoneda = AppState.devPagos.length === 1 && AppState.devPagos[0].moneda === 'USD' ? 'VES' : 'USD';
+  const montoAuto = convertirUsdAMoneda(saldoRestanteUSD, defaultMoneda);
+  const metodosDisponibles = getMetodosReembolso(defaultMoneda);
+
+  AppState.devPagos.push({
+    id: nextId,
+    moneda: defaultMoneda,
+    metodo: metodosDisponibles[0],
+    monto: montoAuto
+  });
+  renderDevPagos();
+}
+
+function removeDevPagoRow(id) {
+  AppState.devPagos = (AppState.devPagos || []).filter(p => p.id !== id);
+  if (AppState.devPagos.length === 0) {
+    initDefaultDevPago();
+  } else {
+    renderDevPagos();
+  }
+}
+
+function renderDevPagos() {
+  const container = document.getElementById('devPagosList');
+  if (!container) return;
+
+  container.innerHTML = (AppState.devPagos || []).map(p => {
+    const metodosDisponibles = getMetodosReembolso(p.moneda);
+    if (!metodosDisponibles.includes(p.metodo)) {
+      p.metodo = metodosDisponibles[0];
+    }
+
+    const metodosOptions = metodosDisponibles.map(m => `
+      <option value="${m}" ${p.metodo === m ? 'selected' : ''}>${m}</option>
+    `).join('');
+
+    return `
+      <div class="flex items-center space-x-2 bg-slate-50 p-2 rounded-xl border border-slate-200 text-xs">
+        <!-- Moneda -->
+        <select onchange="updateDevPagoMoneda(${p.id}, this.value)" class="bg-white border border-slate-200 rounded-lg py-1 px-2 font-bold text-slate-700">
+          <option value="USD" ${p.moneda === 'USD' ? 'selected' : ''}>USD ($)</option>
+          <option value="VES" ${p.moneda === 'VES' ? 'selected' : ''}>VES (Bs.)</option>
+          <option value="COP" ${p.moneda === 'COP' ? 'selected' : ''}>COP (Pesos)</option>
+        </select>
+
+        <!-- Método dinámico por moneda -->
+        <select onchange="updateDevPagoMetodo(${p.id}, this.value)" class="bg-white border border-slate-200 rounded-lg py-1 px-2 font-medium text-slate-700">
+          ${metodosOptions}
+        </select>
+
+        <!-- Monto en esa moneda -->
+        <div class="relative flex-1">
+          <input type="number" step="any" min="0" value="${p.monto !== undefined && p.monto !== null ? p.monto : ''}" placeholder="Monto"
+                 oninput="updateDevPagoMonto(${p.id}, this.value)"
+                 class="w-full bg-white border border-slate-200 rounded-lg py-1 px-2 text-xs font-bold text-slate-900 text-right">
+        </div>
+
+        <!-- Quitar fila -->
+        <button type="button" onclick="removeDevPagoRow(${p.id})" class="text-rose-500 hover:text-rose-700 p-1" title="Quitar reembolso">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  recalcularDevPagosMixtos();
+}
+
+function updateDevPagoMoneda(id, nuevaMoneda) {
+  const p = (AppState.devPagos || []).find(x => x.id === id);
+  if (p) {
+    p.moneda = nuevaMoneda;
+    p.metodo = getMetodosReembolso(nuevaMoneda)[0];
+    const saldoPendienteUSD = calcularSaldoPendienteParaDevFila(id);
+    p.monto = convertirUsdAMoneda(saldoPendienteUSD, nuevaMoneda);
+    renderDevPagos();
+  }
+}
+
+function updateDevPagoMetodo(id, metodo) {
+  const p = (AppState.devPagos || []).find(x => x.id === id);
+  if (p) p.metodo = metodo;
+}
+
+function updateDevPagoMonto(id, val) {
+  const p = (AppState.devPagos || []).find(x => x.id === id);
+  if (p) {
+    p.monto = parseFloat(val) || 0;
+    recalcularDevPagosMixtos();
+  }
+}
+
+function recalcularDevPagosMixtos() {
+  const subtotal = AppState.devCart.reduce((acc, i) => acc + i.subtotal, 0);
+  const iva = AppState.devCart.reduce((acc, i) => acc + i.iva_total, 0);
+  const totalDevUsd = subtotal + iva;
+
+  let totalReembolsadoUSD = 0;
+  const desgloseMonedas = [];
+
+  (AppState.devPagos || []).forEach(p => {
+    let equivUSD = 0;
+    const monto = parseFloat(p.monto) || 0;
+    if (p.moneda === 'USD') {
+      equivUSD = monto;
+      if (monto > 0) desgloseMonedas.push(`$${monto.toFixed(2)} USD`);
+    } else if (p.moneda === 'VES') {
+      equivUSD = AppState.config.tasa_ves > 0 ? (monto / AppState.config.tasa_ves) : 0;
+      if (monto > 0) desgloseMonedas.push(`${monto.toFixed(2)} Bs.`);
+    } else if (p.moneda === 'COP') {
+      equivUSD = AppState.config.tasa_cop > 0 ? (monto / AppState.config.tasa_cop) : 0;
+      if (monto > 0) desgloseMonedas.push(`${Math.round(monto).toLocaleString('es-CO')} COP`);
+    }
+    totalReembolsadoUSD += equivUSD;
+  });
+
+  const diffUSD = Math.round((totalDevUsd - totalReembolsadoUSD) * 100) / 100;
+
+  const elReembolsadoUsd = document.getElementById('devReembolsadoUsd');
+  if (elReembolsadoUsd) elReembolsadoUsd.textContent = `$${totalReembolsadoUSD.toFixed(2)}`;
+
+  const elDetalle = document.getElementById('devReembolsadoDetalle');
+  if (elDetalle) elDetalle.textContent = desgloseMonedas.join(' + ') || '0 pagos asignados';
+
+  const elBalanceLabel = document.getElementById('devBalanceLabel');
+  const elBalanceVal = document.getElementById('devBalanceVal');
+
+  if (elBalanceVal) {
+    if (Math.abs(diffUSD) < 0.01) {
+      if (elBalanceLabel) elBalanceLabel.textContent = 'Estado de Cuadre:';
+      elBalanceVal.textContent = 'Cuadrado exacto';
+      elBalanceVal.className = 'text-sm font-bold text-emerald-600';
+    } else if (diffUSD > 0) {
+      if (elBalanceLabel) elBalanceLabel.textContent = 'Falta por asignar:';
+      elBalanceVal.textContent = `$${diffUSD.toFixed(2)}`;
+      elBalanceVal.className = 'text-sm font-bold text-amber-600';
+    } else {
+      if (elBalanceLabel) elBalanceLabel.textContent = 'Excedente:';
+      elBalanceVal.textContent = `+$${Math.abs(diffUSD).toFixed(2)}`;
+      elBalanceVal.className = 'text-sm font-bold text-rose-600';
+    }
+  }
+
+  return { totalDevUsd, totalReembolsadoUSD, diffUSD };
+}
+
+function setDevMotivo(motivo) {
+  const input = document.getElementById('devMotivoInput');
+  if (input) input.value = motivo;
+}
+
+// Procesar Devolución (Reintegro de stock, deducción de ventas y ticket)
 async function procesarDevolucionConfirm() {
-  const totales = actualizarTotalesDevolucion();
-  if (totales.itemsContados === 0 || totales.totalUsd <= 0) {
-    alert('Debes indicar al menos una cantidad mayor a 0 para devolver.');
+  if (AppState.devCart.length === 0) {
+    alert('Debes agregar al menos un ítem al carrito de devolución.');
     return;
   }
 
@@ -2769,48 +3409,67 @@ async function procesarDevolucionConfirm() {
     facturaId = AppState.devolucionFacturaSeleccionada.id;
     clienteId = AppState.devolucionFacturaSeleccionada.cliente_id;
   } else {
-    const selCliente = document.getElementById('devManualClienteSelect');
-    clienteId = parseInt(selCliente?.value) || null;
-    if (!clienteId) {
-      alert('Por favor selecciona el cliente para la devolución manual.');
+    if (!AppState.devolucionClienteSeleccionado) {
+      alert('Por favor selecciona o crea el cliente receptor de la devolución manual.');
+      document.getElementById('devClienteSearchInput')?.focus();
       return;
     }
+    clienteId = AppState.devolucionClienteSeleccionado.id;
   }
 
-  const metodoReembolso = document.getElementById('devMetodoReembolso')?.value || 'efectivo_usd';
-  const notas = (document.getElementById('devNotasInput')?.value || '').trim();
+  const subtotal = AppState.devCart.reduce((acc, i) => acc + i.subtotal, 0);
+  const iva = AppState.devCart.reduce((acc, i) => acc + i.iva_total, 0);
+  const totalDevUsd = subtotal + iva;
 
-  // Filtrar ítems con cant > 0
-  const itemsParaDevolver = AppState.devolucionItems
-    .filter(it => (parseFloat(it.cant_devolver) || 0) > 0)
-    .map(it => ({
-      producto_id: it.producto_id,
-      tipo: it.tipo || 'producto',
-      codigo: it.codigo,
-      nombre: it.nombre,
-      cantidad: parseFloat(it.cant_devolver),
-      precio_unitario: it.precio_unitario,
-      impuesto_tipo: it.impuesto_tipo
-    }));
+  if (totalDevUsd <= 0) {
+    alert('El total de la devolución debe ser mayor a 0.');
+    return;
+  }
+
+  if (!AppState.devPagos || AppState.devPagos.length === 0) {
+    initDefaultDevPago();
+  }
+
+  const pagosPayload = (AppState.devPagos || []).map(p => {
+    let equivUSD = 0;
+    const monto = parseFloat(p.monto) || 0;
+    if (p.moneda === 'USD') equivUSD = monto;
+    else if (p.moneda === 'VES') equivUSD = AppState.config.tasa_ves > 0 ? (monto / AppState.config.tasa_ves) : 0;
+    else if (p.moneda === 'COP') equivUSD = AppState.config.tasa_cop > 0 ? (monto / AppState.config.tasa_cop) : 0;
+
+    return {
+      moneda: p.moneda,
+      metodo: p.metodo,
+      monto: monto,
+      monto_moneda: monto,
+      tasa_cambio: p.moneda === 'VES' ? AppState.config.tasa_ves : (p.moneda === 'COP' ? AppState.config.tasa_cop : 1.0),
+      equivalente_usd: Math.round(equivUSD * 100) / 100,
+      referencia: `Devolución - ${motivo}`
+    };
+  });
+
+  const metodoPrincipal = pagosPayload.length > 0 ? pagosPayload[0].metodo : 'Dólar Efectivo';
+
+  const itemsPayload = AppState.devCart.map(it => ({
+    producto_id: it.producto_id,
+    tipo: it.tipo || 'producto',
+    codigo: it.codigo,
+    nombre: it.nombre,
+    cantidad: parseFloat(it.cantidad),
+    precio_unitario: it.precio_unitario,
+    impuesto_tipo: it.impuesto_tipo
+  }));
 
   const payload = {
     factura_id: facturaId,
     cliente_id: clienteId,
     motivo: motivo,
-    notas: notas,
-    metodo_reembolso: metodoReembolso,
+    notas: `Devolución ${AppState.devolucionModo === 'factura' ? 'de Factura' : 'Libre'} - ${motivo}`,
+    metodo_reembolso: metodoPrincipal,
     tasa_ves: AppState.config.tasa_ves,
     tasa_cop: AppState.config.tasa_cop,
-    items: itemsParaDevolver,
-    pagos: [
-      {
-        metodo: metodoReembolso,
-        monto_usd: totales.totalUsd,
-        monto_ves: totales.totalVes,
-        monto_cop: totales.totalCop,
-        referencia: `Devolución - ${motivo}`
-      }
-    ]
+    items: itemsPayload,
+    pagos: pagosPayload
   };
 
   const btnProcesar = document.getElementById('btnProcesarDevolucion');
@@ -2844,8 +3503,10 @@ async function procesarDevolucionConfirm() {
 
     // Resetear formulario
     limpiarFacturaDevolucion();
-    document.getElementById('devMotivoInput').value = '';
-    document.getElementById('devNotasInput').value = '';
+    limpiarClienteDevolucion();
+    limpiarDevCart();
+    const motivoInp = document.getElementById('devMotivoInput');
+    if (motivoInp) motivoInp.value = '';
 
     // Abrir comprobante / ticket de devolución
     abrirTicketDevolucion(data.id);
@@ -2856,11 +3517,12 @@ async function procesarDevolucionConfirm() {
   } finally {
     if (btnProcesar) {
       btnProcesar.disabled = false;
-      btnProcesar.innerHTML = `<i class="fa-solid fa-arrow-rotate-left text-base mr-2"></i><span>Procesar Devolución & Reintegrar Stock</span>`;
+      btnProcesar.innerHTML = `<i class="fa-solid fa-arrow-rotate-left text-lg mr-2"></i><span>Procesar Devolución & Reintegrar Stock</span>`;
     }
   }
 }
 
+// Historial y Reportes de Devoluciones
 async function loadDevoluciones() {
   try {
     const res = await fetch('/api/devoluciones');
@@ -2876,7 +3538,7 @@ async function loadDevoluciones() {
     devoluciones.forEach(d => {
       const monto = parseFloat(d.total_usd) || 0;
       totalUsd += monto;
-      if (d.fecha && d.fecha.startsWith(hoyStr)) {
+      if (d.fecha_emision && d.fecha_emision.startsWith(hoyStr)) {
         devHoyUsd += monto;
       }
     });
@@ -2912,7 +3574,7 @@ function renderDevolucionesHistorial() {
   if (search) {
     list = list.filter(d => 
       d.numero_devolucion.toLowerCase().includes(search) ||
-      (d.factura_numero && d.factura_numero.toLowerCase().includes(search)) ||
+      (d.numero_factura && d.numero_factura.toLowerCase().includes(search)) ||
       (d.cliente_nombre && d.cliente_nombre.toLowerCase().includes(search)) ||
       (d.motivo && d.motivo.toLowerCase().includes(search))
     );
@@ -2926,12 +3588,12 @@ function renderDevolucionesHistorial() {
   tbody.innerHTML = list.map(d => `
     <tr class="hover:bg-slate-50 transition border-b border-slate-100">
       <td class="py-3 px-4 font-mono font-bold text-cyan-700">${escapeHtml(d.numero_devolucion)}</td>
-      <td class="py-3 px-4 font-mono text-xs text-slate-600 font-semibold">${escapeHtml(d.factura_numero || 'Manual (Sin Factura)')}</td>
+      <td class="py-3 px-4 font-mono text-xs text-slate-600 font-semibold">${escapeHtml(d.numero_factura || 'Manual (Sin Factura)')}</td>
       <td class="py-3 px-4">
         <p class="font-bold text-slate-900">${escapeHtml(d.cliente_nombre || 'Consumidor Final')}</p>
         <p class="text-[11px] text-slate-400 font-mono">${escapeHtml(d.cliente_cedula || '-')}</p>
       </td>
-      <td class="py-3 px-4 text-xs text-slate-500">${formatFecha(d.fecha)}</td>
+      <td class="py-3 px-4 text-xs text-slate-500">${formatFecha(d.fecha_emision)}</td>
       <td class="py-3 px-4 text-xs text-slate-700 max-w-xs truncate">${escapeHtml(d.motivo)}</td>
       <td class="py-3 px-4 text-right font-black text-rose-600 font-mono">$${parseFloat(d.total_usd).toFixed(2)}</td>
       <td class="py-3 px-4 text-right font-mono text-xs text-slate-600">${parseFloat(d.total_ves || 0).toFixed(2)} Bs.</td>
@@ -2944,6 +3606,7 @@ function renderDevolucionesHistorial() {
   `).join('');
 }
 
+// Modal Comprobante / Ticket Oficial de Devolución
 async function abrirTicketDevolucion(devId) {
   try {
     const res = await fetch(`/api/devoluciones/${devId}`);
@@ -2960,23 +3623,23 @@ async function abrirTicketDevolucion(devId) {
     document.getElementById('ticketDevBusinessPhone').textContent = `Tel: ${cfg.telefono}`;
 
     document.getElementById('ticketDevNumero').textContent = `NOTA DE DEVOLUCIÓN #${dev.numero_devolucion}`;
-    document.getElementById('ticketDevFecha').textContent = `Fecha: ${formatFecha(dev.fecha)}`;
-    document.getElementById('ticketDevFacturaRef').textContent = dev.factura_numero ? `Factura ${dev.factura_numero}` : 'Devolución Libre / Manual';
+    document.getElementById('ticketDevFecha').textContent = `Fecha: ${formatFecha(dev.fecha_emision)}`;
+    document.getElementById('ticketDevFacturaRef').textContent = dev.numero_factura ? `Factura ${dev.numero_factura}` : 'Devolución Libre / Manual';
     document.getElementById('ticketDevClienteNombre').textContent = dev.cliente_nombre || 'Consumidor Final';
     document.getElementById('ticketDevClienteDoc').textContent = dev.cliente_cedula || '-';
     document.getElementById('ticketDevMotivo').textContent = dev.motivo || '-';
 
     const itemsBody = document.getElementById('ticketDevItemsBody');
     if (itemsBody) {
-      itemsBody.innerHTML = (dev.items || []).map(it => `
+      itemsBody.innerHTML = (dev.items || dev.detalles || []).map(it => `
         <tr class="border-b border-slate-100">
           <td class="py-1">
-            <span class="font-bold text-slate-900">${escapeHtml(it.nombre)}</span>
+            <span class="font-bold text-slate-900">${escapeHtml(it.nombre || it.nombre_producto)}</span>
             ${it.codigo ? `<span class="block text-[10px] text-slate-400 font-mono">${escapeHtml(it.codigo)}</span>` : ''}
           </td>
           <td class="py-1 text-center font-mono font-bold">${parseFloat(it.cantidad)}</td>
           <td class="py-1 text-right font-mono">$${parseFloat(it.precio_unitario).toFixed(2)}</td>
-          <td class="py-1 text-right font-mono font-bold">$${parseFloat(it.total_usd).toFixed(2)}</td>
+          <td class="py-1 text-right font-mono font-bold">$${parseFloat(it.total || it.subtotal).toFixed(2)}</td>
         </tr>
       `).join('');
     }
@@ -2987,7 +3650,13 @@ async function abrirTicketDevolucion(devId) {
     document.getElementById('ticketDevTotalVes').textContent = `${parseFloat(dev.total_ves || 0).toFixed(2)} Bs.`;
     document.getElementById('ticketDevTotalCop').textContent = `${Math.round(dev.total_cop || 0).toLocaleString('es-CO')} COP`;
 
-    const metodoReembolso = dev.metodo_reembolso ? dev.metodo_reembolso.replace(/_/g, ' ').toUpperCase() : 'EFECTIVO USD';
+    // Métodos de compensación desglosados
+    const pagosList = (dev.pagos || []).map(p => {
+      let mFmt = p.moneda === 'COP' ? `${Math.round(p.monto_moneda).toLocaleString('es-CO')} COP` : (p.moneda === 'VES' ? `${parseFloat(p.monto_moneda).toFixed(2)} Bs.` : `$${parseFloat(p.monto_moneda).toFixed(2)}`);
+      return `${p.metodo} (${mFmt})`;
+    }).join(', ');
+
+    const metodoReembolso = pagosList || (dev.metodo_reembolso ? dev.metodo_reembolso.replace(/_/g, ' ').toUpperCase() : 'EFECTIVO USD');
     document.getElementById('ticketDevMetodoCompensacion').textContent = metodoReembolso;
 
     document.getElementById('modalTicketDevolucion').classList.remove('hidden');
@@ -3009,14 +3678,14 @@ function compartirDevolucionWhatsApp() {
   const dev = AppState.ultimaDevolucionEmitida;
   if (!dev) return;
 
-  const itemsTxt = (dev.items || []).map(it => `• ${it.nombre} x${it.cantidad} = $${parseFloat(it.total_usd).toFixed(2)}`).join('\n');
+  const itemsTxt = (dev.items || dev.detalles || []).map(it => `• ${it.nombre || it.nombre_producto} x${it.cantidad} = $${parseFloat(it.total || it.subtotal).toFixed(2)}`).join('\n');
   const msg = 
 `*${AppState.config.nombre_negocio}*
 *COMPROBANTE DE DEVOLUCIÓN: ${dev.numero_devolucion}*
 ----------------------------------------
 Cliente: ${dev.cliente_nombre || 'Cliente'}
-Factura de Origen: ${dev.factura_numero || 'Manual'}
-Fecha: ${formatFecha(dev.fecha)}
+Factura de Origen: ${dev.numero_factura || 'Manual'}
+Fecha: ${formatFecha(dev.fecha_emision)}
 Motivo: ${dev.motivo}
 
 *Ítems Devueltos:*

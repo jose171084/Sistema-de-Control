@@ -520,9 +520,21 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 res = dict(factura)
-                # Obtener detalles
-                cursor.execute("SELECT * FROM factura_detalles WHERE factura_id = ?", (f_id,))
-                res["detalles"] = [dict(d) for d in cursor.fetchall()]
+                # Obtener detalles con código e imagen del producto
+                cursor.execute("""
+                    SELECT fd.*, fd.nombre_producto as nombre, p.codigo, p.imagen, p.costo
+                    FROM factura_detalles fd
+                    LEFT JOIN productos p ON fd.producto_id = p.id
+                    WHERE fd.factura_id = ?
+                """, (f_id,))
+                detalles = []
+                for d in cursor.fetchall():
+                    item_dict = dict(d)
+                    if "nombre" not in item_dict or not item_dict["nombre"]:
+                        item_dict["nombre"] = item_dict.get("nombre_producto", "")
+                    detalles.append(item_dict)
+                res["detalles"] = detalles
+                res["items"] = detalles
 
                 # Obtener pagos
                 cursor.execute("SELECT * FROM factura_pagos WHERE factura_id = ?", (f_id,))
