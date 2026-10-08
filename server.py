@@ -1076,6 +1076,646 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     }
                 })
 
+            # 15. Reporte de Kardex de Inventario (Entradas, Salidas y Saldos Valorizados)
+            elif path == "/api/reportes/kardex":
+                producto_id = query.get("producto_id", [None])[0]
+                desde = query.get("desde", [None])[0]
+                hasta = query.get("hasta", [None])[0]
+
+                cursor.execute("""
+                    SELECT id, codigo, nombre, tipo, stock, costo, precio_total 
+                    FROM productos 
+                    WHERE tipo = 'producto' 
+                    ORDER BY nombre ASC
+                """)
+                todos_productos = [dict(r) for r in cursor.fetchall()]
+
+                if not producto_id and todos_productos:
+                    producto_id = str(todos_productos[0]["id"])
+
+                if not producto_id:
+                    self.send_json({"productos": [], "producto": None, "movimientos": [], "resumen": {}})
+                    return
+
+                cursor.execute("""
+                    SELECT p.*, c.nombre as categoria_nombre
+                    FROM productos p
+                    JOIN categorias c ON p.categoria_id = c.id
+                    WHERE p.id = ?
+                """, (producto_id,))
+                prod_row = cursor.fetchone()
+                if not prod_row:
+                    self.send_error_json("Producto no encontrado", 404)
+                    return
+                prod = dict(prod_row)
+
+                # Compras (Entradas)
+                cursor.execute("""
+                    SELECT cd.id, cd.cantidad, cd.costo_unitario as valor_unitario, cd.total as valor_total,
+                           coalesce(c.fecha, date('now')) as fecha,
+                           coalesce(c.numero_control, 'COM-0000') as documento,
+                           c.numero_factura as referencia,
+                           p.nombre as tercero,
+                           'COMPRA' as tipo_movimiento,
+                           'Entrada por compra de mercancía' as concepto
+                    FROM compra_detalles cd
+                    JOIN compras c ON cd.compra_id = c.id
+                    JOIN proveedores p ON c.proveedor_id = p.id
+                    WHERE cd.producto_id = ?
+                """, (producto_id,))
+                compras_list = [dict(r) for r in cursor.fetchall()]
+
+                # Ventas (Salidas)
+                cursor.execute("""
+                    SELECT fd.id, fd.cantidad, fd.precio_unitario as valor_unitario, fd.total as valor_total,
+                           f.fecha,
+                           f.numero_factura as documento,
+                           '' as referencia,
+                           cl.nombre as tercero,
+                           'VENTA' as tipo_movimiento,
+                           'Salida por facturación al cliente' as concepto
+                    FROM factura_detalles fd
+                    JOIN facturas f ON fd.factura_id = f.id
+                    JOIN clientes cl ON f.cliente_id = cl.id
+                    WHERE fd.producto_id = ? AND f.estado != 'anulada'
+                """, (producto_id,))
+                ventas_list = [dict(r) for r in cursor.fetchall()]
+
+                # Devoluciones de clientes (Entradas / Reintegro a Stock)
+                cursor.execute("""
+                    SELECT dd.id, dd.cantidad, dd.precio_unitario as valor_unitario, dd.total as valor_total,
+                           d.fecha_emision as fecha,
+                           d.numero_devolucion as documento,
+                           d.numero_factura as referencia,
+                           d.cliente_nombre as tercero,
+                           'DEVOLUCION' as tipo_movimiento,
+                           'Entrada por reintegro de devolución de cliente' as concepto
+                    FROM devolucion_detalles dd
+                    JOIN devoluciones d ON dd.devolucion_id = d.id
+                    WHERE dd.producto_id = ?
+                """, (producto_id,))
+                devoluciones_list = [dict(r) for r in cursor.fetchall()]
+
+                todos_movimientos = compras_list + ventas_list + devoluciones_list
+                todos_movimientos.sort(key=lambda x: str(x.get("fecha") or ""))
+
+                stock_actual = float(prod.get("stock") or 0.0)
+                costo_u = float(prod.get("costo") or 0.0)
+
+                total_entradas_hist = sum(float(m["cantidad"]) for m in todos_movimientos if m["tipo_movimiento"] in ('COMPRA', 'DEVOLUCION'))
+                total_salidas_hist = sum(float(m["cantidad"]) for m in todos_movimientos if m["tipo_movimiento"] == 'VENTA')
+
+                stock_inicial_base = round(max(0.0, stock_actual - total_entradas_hist + total_salidas_hist), 2)
+                saldo_cant = stock_inicial_base
+                movimientos_calculados = []
+
+                for m in todos_movimientos:
+                    cant = float(m["cantidad"])
+                    v_unit = float(m["valor_unitario"] or costo_u)
+                    v_tot = float(m["valor_total"] or (cant * v_unit))
+
+                    if m["tipo_movimiento"] in ('COMPRA', 'DEVOLUCION'):
+                        entrada_cant = cant
+                        entrada_valor = v_tot
+                        salida_cant = 0.0
+                        salida_valor = 0.0
+                        saldo_cant = round(saldo_cant + cant, 2)
+                    else:
+                        entrada_cant = 0.0
+                        entrada_valor = 0.0
+                        salida_cant = cant
+                        salida_valor = v_tot
+                        saldo_cant = round(saldo_cant - cant, 2)
+
+                    saldo_valor = round(saldo_cant * costo_u, 2)
+
+                    m_obj = dict(m)
+                    m_obj["entrada_cant"] = entrada_cant
+                    m_obj["entrada_valor"] = entrada_valor
+                    m_obj["salida_cant"] = salida_cant
+                    m_obj["salida_valor"] = salida_valor
+                    m_obj["saldo_cant"] = saldo_cant
+                    m_obj["saldo_valor"] = saldo_valor
+                    movimientos_calculados.append(m_obj)
+
+                movimientos_filtrados = []
+                saldo_anterior_cant = stock_inicial_base
+                for m in movimientos_calculados:
+                    f_str = str(m.get("fecha") or "")[:10]
+                    if desde and f_str < desde:
+                        saldo_anterior_cant = m["saldo_cant"]
+                        continue
+                    if hasta and f_str > hasta:
+                        continue
+                    movimientos_filtrados.append(m)
+
+                resumen = {
+                    "stock_inicial": saldo_anterior_cant,
+                    "valor_inicial": round(saldo_anterior_cant * costo_u, 2),
+                    "total_entradas_cant": sum(m["entrada_cant"] for m in movimientos_filtrados),
+                    "total_entradas_valor": round(sum(m["entrada_valor"] for m in movimientos_filtrados), 2),
+                    "total_salidas_cant": sum(m["salida_cant"] for m in movimientos_filtrados),
+                    "total_salidas_valor": round(sum(m["salida_valor"] for m in movimientos_filtrados), 2),
+                    "stock_actual": stock_actual,
+                    "valor_stock_actual": round(stock_actual * costo_u, 2),
+                    "costo_unitario": costo_u
+                }
+
+                self.send_json({
+                    "productos": todos_productos,
+                    "producto": prod,
+                    "movimientos": movimientos_filtrados,
+                    "resumen": resumen
+                })
+
+            # 16. Reporte de Inventario Simple (Código, Nombre y Stock Actual con Filtro de Categoría)
+            elif path == "/api/reportes/inventario-simple":
+                cat_id = query.get("categoria_id", [None])[0]
+                search = (query.get("q", [None])[0] or "").strip().lower()
+
+                sql = """
+                    SELECT p.id, p.codigo, p.nombre, p.stock, p.stock_minimo, p.tipo,
+                           p.precio_total, p.costo, c.id as categoria_id, c.nombre as categoria_nombre
+                    FROM productos p
+                    JOIN categorias c ON p.categoria_id = c.id
+                    WHERE p.tipo = 'producto'
+                """
+                params = []
+                if cat_id and cat_id != "todos":
+                    sql += " AND p.categoria_id = ?"
+                    params.append(cat_id)
+                if search:
+                    sql += " AND (LOWER(p.nombre) LIKE ? OR LOWER(p.codigo) LIKE ?)"
+                    params.append(f"%{search}%")
+                    params.append(f"%{search}%")
+
+                sql += " ORDER BY c.nombre ASC, p.nombre ASC"
+                cursor.execute(sql, tuple(params))
+                items = [dict(r) for r in cursor.fetchall()]
+
+                cursor.execute("SELECT id, nombre FROM categorias WHERE tipo = 'producto' ORDER BY nombre ASC")
+                categorias = [dict(r) for r in cursor.fetchall()]
+
+                self.send_json({
+                    "items": items,
+                    "productos": items,
+                    "categorias": categorias,
+                    "total_items": len(items),
+                    "total_unidades": sum(float(i["stock"] or 0) for i in items),
+                    "total_stock_unidades": sum(float(i["stock"] or 0) for i in items)
+                })
+
+            # 17. Libro de Ventas Fiscal SENIAT (Venezuela)
+            elif path == "/api/reportes/seniat/libro-ventas":
+                mes = query.get("mes", [None])[0] or datetime.now().strftime("%Y-%m")
+                desde = query.get("desde", [None])[0]
+                hasta = query.get("hasta", [None])[0]
+
+                cursor.execute("SELECT nombre_negocio, documento_fiscal, tasa_ves FROM configuracion WHERE id = 1")
+                cfg_row = cursor.fetchone()
+                cfg = dict(cfg_row) if cfg_row else {"nombre_negocio": "Comercio", "documento_fiscal": "J-00000000-0", "tasa_ves": 45.0}
+                t_ves = float(cfg.get("tasa_ves") or 45.0)
+
+                sql_fac = """
+                    SELECT f.*, cl.nombre as cliente_nombre, cl.cedula as cliente_cedula
+                    FROM facturas f
+                    JOIN clientes cl ON f.cliente_id = cl.id
+                    WHERE f.estado != 'anulada'
+                """
+                params_fac = []
+                if desde and hasta:
+                    sql_fac += " AND date(f.fecha) BETWEEN ? AND ?"
+                    params_fac.extend([desde, hasta])
+                else:
+                    sql_fac += " AND strftime('%Y-%m', f.fecha) = ?"
+                    params_fac.append(mes)
+                sql_fac += " ORDER BY f.fecha ASC, f.id ASC"
+
+                cursor.execute(sql_fac, tuple(params_fac))
+                facturas_raw = [dict(r) for r in cursor.fetchall()]
+
+                sql_dev = """
+                    SELECT d.*
+                    FROM devoluciones d
+                    WHERE 1=1
+                """
+                params_dev = []
+                if desde and hasta:
+                    sql_dev += " AND date(d.fecha_emision) BETWEEN ? AND ?"
+                    params_dev.extend([desde, hasta])
+                else:
+                    sql_dev += " AND strftime('%Y-%m', d.fecha_emision) = ?"
+                    params_dev.append(mes)
+                sql_dev += " ORDER BY d.fecha_emision ASC, d.id ASC"
+
+                cursor.execute(sql_dev, tuple(params_dev))
+                devoluciones_raw = [dict(r) for r in cursor.fetchall()]
+
+                registros = []
+                num_op = 1
+
+                for f in facturas_raw:
+                    cursor.execute("""
+                        SELECT 
+                            SUM(CASE WHEN impuesto_tipo = 'exento' THEN total ELSE 0 END) as exento,
+                            SUM(CASE WHEN impuesto_tipo = 'gravado' THEN subtotal ELSE 0 END) as base_gravada,
+                            SUM(CASE WHEN impuesto_tipo = 'gravado' THEN (iva_unitario * cantidad) ELSE 0 END) as iva_gravado
+                        FROM factura_detalles
+                        WHERE factura_id = ?
+                    """, (f["id"],))
+                    det_row = cursor.fetchone()
+                    exento_usd = float(det_row[0] or 0.0)
+                    base_usd = float(det_row[1] or 0.0)
+                    iva_usd = float(det_row[2] or f.get("iva_total", 0.0))
+                    tot_usd = float(f.get("total_usd") or (exento_usd + base_usd + iva_usd))
+                    t_ves_fac = float(f.get("tasa_ves") or t_ves)
+
+                    registros.append({
+                        "operacion_num": num_op,
+                        "fecha": str(f.get("fecha") or "")[:10],
+                        "cliente_rif": f.get("cliente_cedula") or "V-00000000",
+                        "cliente_nombre": f.get("cliente_nombre") or "Consumidor Final",
+                        "numero_factura": f.get("numero_factura"),
+                        "numero_control": f.get("numero_factura"),
+                        "nota_debito": "",
+                        "nota_credito": "",
+                        "factura_afectada": "",
+                        "tipo_transaccion": "01-Reg",
+                        "total_ventas_usd": round(tot_usd, 2),
+                        "ventas_exentas_usd": round(exento_usd, 2),
+                        "base_imponible_usd": round(base_usd, 2),
+                        "alicuota": 16.0,
+                        "iva_causado_usd": round(iva_usd, 2),
+                        "total_ventas_ves": round(tot_usd * t_ves_fac, 2),
+                        "ventas_exentas_ves": round(exento_usd * t_ves_fac, 2),
+                        "base_imponible_ves": round(base_usd * t_ves_fac, 2),
+                        "iva_causado_ves": round(iva_usd * t_ves_fac, 2),
+                        "iva_retenido_ves": 0.0
+                    })
+                    num_op += 1
+
+                for d in devoluciones_raw:
+                    tot_usd = float(d.get("total_usd") or 0.0)
+                    sub_usd = float(d.get("subtotal_usd") or 0.0)
+                    iva_usd = float(d.get("iva_usd") or 0.0)
+                    exento_usd = max(0.0, round(tot_usd - sub_usd - iva_usd, 2))
+                    t_ves_dev = float(d.get("tasa_ves") or t_ves)
+
+                    registros.append({
+                        "operacion_num": num_op,
+                        "fecha": str(d.get("fecha_emision") or "")[:10],
+                        "cliente_rif": d.get("cliente_cedula") or "V-00000000",
+                        "cliente_nombre": d.get("cliente_nombre") or "Cliente Devolución",
+                        "numero_factura": "",
+                        "numero_control": d.get("numero_devolucion"),
+                        "nota_debito": "",
+                        "nota_credito": d.get("numero_devolucion"),
+                        "factura_afectada": d.get("numero_factura") or "",
+                        "tipo_transaccion": "03-NC",
+                        "total_ventas_usd": round(-tot_usd, 2),
+                        "ventas_exentas_usd": round(-exento_usd, 2),
+                        "base_imponible_usd": round(-sub_usd, 2),
+                        "alicuota": 16.0,
+                        "iva_causado_usd": round(-iva_usd, 2),
+                        "total_ventas_ves": round(-tot_usd * t_ves_dev, 2),
+                        "ventas_exentas_ves": round(-exento_usd * t_ves_dev, 2),
+                        "base_imponible_ves": round(-sub_usd * t_ves_dev, 2),
+                        "iva_causado_ves": round(-iva_usd * t_ves_dev, 2),
+                        "iva_retenido_ves": 0.0
+                    })
+                    num_op += 1
+
+                registros.sort(key=lambda r: r["fecha"])
+                for i, r in enumerate(registros):
+                    r["operacion_num"] = i + 1
+
+                bruto_usd = sum(r["total_ventas_usd"] for r in registros if r["tipo_transaccion"] == "01-Reg")
+                nc_usd = abs(sum(r["total_ventas_usd"] for r in registros if r["tipo_transaccion"] == "03-NC"))
+                neto_usd = sum(r["total_ventas_usd"] for r in registros)
+                exento_usd = sum(r["ventas_exentas_usd"] for r in registros)
+                base_usd = sum(r["base_imponible_usd"] for r in registros)
+                iva_usd = sum(r["iva_causado_usd"] for r in registros)
+
+                bruto_ves = sum(r["total_ventas_ves"] for r in registros if r["tipo_transaccion"] == "01-Reg")
+                nc_ves = abs(sum(r["total_ventas_ves"] for r in registros if r["tipo_transaccion"] == "03-NC"))
+                neto_ves = sum(r["total_ventas_ves"] for r in registros)
+                exento_ves = sum(r["ventas_exentas_ves"] for r in registros)
+                base_ves = sum(r["base_imponible_ves"] for r in registros)
+                iva_ves = sum(r["iva_causado_ves"] for r in registros)
+
+                items_ventas = [
+                    {
+                        **r,
+                        "operacion_nro": r["operacion_num"],
+                        "es_devolucion": r["tipo_transaccion"] == "03-NC",
+                        "numero_nota_credito": r.get("nota_credito", ""),
+                        "iva_debito_ves": r.get("iva_causado_ves", 0.0),
+                        "iva_debito_usd": r.get("iva_causado_usd", 0.0)
+                    }
+                    for r in registros
+                ]
+
+                mes_part = mes.split("-")[1] if "-" in mes else mes
+                anio_part = mes.split("-")[0] if "-" in mes else ""
+
+                self.send_json({
+                    "contribuyente": cfg,
+                    "empresa": {
+                        "nombre": cfg.get("nombre_negocio"),
+                        "rif": cfg.get("documento_fiscal")
+                    },
+                    "periodo": mes,
+                    "mes": mes_part,
+                    "anio": anio_part,
+                    "tasa_bcv_cierre": t_ves,
+                    "registros": registros,
+                    "items": items_ventas,
+                    "totales": {
+                        "total_ventas_brutas_usd": round(bruto_usd, 2),
+                        "total_notas_credito_usd": round(nc_usd, 2),
+                        "total_ventas_netas_usd": round(neto_usd, 2),
+                        "total_exentas_usd": round(exento_usd, 2),
+                        "total_base_imponible_usd": round(base_usd, 2),
+                        "total_iva_debito_usd": round(iva_usd, 2),
+                        "total_ventas_brutas_ves": round(bruto_ves, 2),
+                        "total_notas_credito_ves": round(nc_ves, 2),
+                        "total_ventas_netas_ves": round(neto_ves, 2),
+                        "total_exentas_ves": round(exento_ves, 2),
+                        "total_base_imponible_ves": round(base_ves, 2),
+                        "total_iva_debito_ves": round(iva_ves, 2)
+                    },
+                    "resumen": {
+                        "total_ventas_ves": round(neto_ves, 2),
+                        "total_ventas_usd": round(neto_usd, 2),
+                        "total_base_imponible_ves": round(base_ves, 2),
+                        "total_base_imponible_usd": round(base_usd, 2),
+                        "total_iva_ves": round(iva_ves, 2),
+                        "total_iva_usd": round(iva_usd, 2),
+                        "total_exento_ves": round(exento_ves, 2),
+                        "total_exento_usd": round(exento_usd, 2)
+                    }
+                })
+
+            # 18. Libro de Compras Fiscal SENIAT (Venezuela)
+            elif path == "/api/reportes/seniat/libro-compras":
+                mes = query.get("mes", [None])[0] or datetime.now().strftime("%Y-%m")
+                desde = query.get("desde", [None])[0]
+                hasta = query.get("hasta", [None])[0]
+
+                cursor.execute("SELECT nombre_negocio, documento_fiscal, tasa_ves FROM configuracion WHERE id = 1")
+                cfg_row = cursor.fetchone()
+                cfg = dict(cfg_row) if cfg_row else {"nombre_negocio": "Comercio", "documento_fiscal": "J-00000000-0", "tasa_ves": 45.0}
+                t_ves = float(cfg.get("tasa_ves") or 45.0)
+
+                sql_com = """
+                    SELECT c.*, p.nombre as proveedor_nombre, p.cedula as proveedor_cedula
+                    FROM compras c
+                    JOIN proveedores p ON c.proveedor_id = p.id
+                    WHERE 1=1
+                """
+                params_com = []
+                if desde and hasta:
+                    sql_com += " AND date(c.fecha) BETWEEN ? AND ?"
+                    params_com.extend([desde, hasta])
+                else:
+                    sql_com += " AND strftime('%Y-%m', c.fecha) = ?"
+                    params_com.append(mes)
+                sql_com += " ORDER BY c.fecha ASC, c.id ASC"
+
+                cursor.execute(sql_com, tuple(params_com))
+                compras_raw = [dict(r) for r in cursor.fetchall()]
+
+                registros = []
+                num_op = 1
+
+                for c in compras_raw:
+                    cursor.execute("""
+                        SELECT 
+                            SUM(CASE WHEN impuesto_tipo = 'exento' THEN total ELSE 0 END) as exento,
+                            SUM(CASE WHEN impuesto_tipo = 'gravado' THEN (costo_unitario * cantidad) ELSE 0 END) as base_gravada,
+                            SUM(CASE WHEN impuesto_tipo = 'gravado' THEN (iva_unitario * cantidad) ELSE 0 END) as iva_gravado
+                        FROM compra_detalles
+                        WHERE compra_id = ?
+                    """, (c["id"],))
+                    det_row = cursor.fetchone()
+                    exento_usd = float(det_row[0] or 0.0)
+                    base_usd = float(det_row[1] or c.get("subtotal", 0.0))
+                    iva_usd = float(det_row[2] or c.get("iva_total", 0.0))
+                    tot_usd = float(c.get("total") or (exento_usd + base_usd + iva_usd))
+
+                    registros.append({
+                        "operacion_num": num_op,
+                        "fecha": str(c.get("fecha") or "")[:10],
+                        "proveedor_rif": c.get("proveedor_cedula") or "J-00000000-0",
+                        "proveedor_nombre": c.get("proveedor_nombre") or "Proveedor",
+                        "numero_factura": c.get("numero_factura") or c.get("numero_control"),
+                        "numero_control": c.get("numero_control"),
+                        "nota_debito": "",
+                        "nota_credito": "",
+                        "tipo_transaccion": "01-Reg",
+                        "total_compras_usd": round(tot_usd, 2),
+                        "compras_exentas_usd": round(exento_usd, 2),
+                        "base_imponible_usd": round(base_usd, 2),
+                        "alicuota": 16.0,
+                        "iva_credito_usd": round(iva_usd, 2),
+                        "total_compras_ves": round(tot_usd * t_ves, 2),
+                        "compras_exentas_ves": round(exento_usd * t_ves, 2),
+                        "base_imponible_ves": round(base_usd * t_ves, 2),
+                        "iva_credito_ves": round(iva_usd * t_ves, 2),
+                        "iva_retenido_ves": 0.0
+                    })
+                    num_op += 1
+
+                tot_compras_usd = sum(r["total_compras_usd"] for r in registros)
+                tot_exentas_usd = sum(r["compras_exentas_usd"] for r in registros)
+                tot_base_usd = sum(r["base_imponible_usd"] for r in registros)
+                tot_iva_usd = sum(r["iva_credito_usd"] for r in registros)
+
+                tot_compras_ves = sum(r["total_compras_ves"] for r in registros)
+                tot_exentas_ves = sum(r["compras_exentas_ves"] for r in registros)
+                tot_base_ves = sum(r["base_imponible_ves"] for r in registros)
+                tot_iva_ves = sum(r["iva_credito_ves"] for r in registros)
+
+                items_compras = [
+                    {
+                        **r,
+                        "operacion_nro": r["operacion_num"],
+                        "numero_nota_deb_cred": r.get("nota_credito") or r.get("nota_debito") or "",
+                        "factura_afectada": ""
+                    }
+                    for r in registros
+                ]
+
+                mes_part = mes.split("-")[1] if "-" in mes else mes
+                anio_part = mes.split("-")[0] if "-" in mes else ""
+
+                self.send_json({
+                    "contribuyente": cfg,
+                    "empresa": {
+                        "nombre": cfg.get("nombre_negocio"),
+                        "rif": cfg.get("documento_fiscal")
+                    },
+                    "periodo": mes,
+                    "mes": mes_part,
+                    "anio": anio_part,
+                    "tasa_bcv_cierre": t_ves,
+                    "registros": registros,
+                    "items": items_compras,
+                    "totales": {
+                        "total_compras_usd": round(tot_compras_usd, 2),
+                        "total_exentas_usd": round(tot_exentas_usd, 2),
+                        "total_base_imponible_usd": round(tot_base_usd, 2),
+                        "total_iva_credito_usd": round(tot_iva_usd, 2),
+                        "total_compras_ves": round(tot_compras_ves, 2),
+                        "total_exentas_ves": round(tot_exentas_ves, 2),
+                        "total_base_imponible_ves": round(tot_base_ves, 2),
+                        "total_iva_credito_ves": round(tot_iva_ves, 2)
+                    },
+                    "resumen": {
+                        "total_compras_ves": round(tot_compras_ves, 2),
+                        "total_compras_usd": round(tot_compras_usd, 2),
+                        "total_base_imponible_ves": round(tot_base_ves, 2),
+                        "total_base_imponible_usd": round(tot_base_usd, 2),
+                        "total_iva_ves": round(tot_iva_ves, 2),
+                        "total_iva_usd": round(tot_iva_usd, 2),
+                        "total_exento_ves": round(tot_exentas_ves, 2),
+                        "total_exento_usd": round(tot_exentas_usd, 2)
+                    }
+                })
+
+            # 19. Libro de Movimiento de Inventario según Artículo 177 R-LISLR (Venezuela)
+            elif path == "/api/reportes/seniat/libro-inventario-art177":
+                mes = query.get("mes", [None])[0] or datetime.now().strftime("%Y-%m")
+                cursor.execute("SELECT nombre_negocio, documento_fiscal, tasa_ves FROM configuracion WHERE id = 1")
+                cfg_row = cursor.fetchone()
+                cfg = dict(cfg_row) if cfg_row else {"nombre_negocio": "Comercio", "documento_fiscal": "J-00000000-0", "tasa_ves": 45.0}
+                t_ves = float(cfg.get("tasa_ves") or 45.0)
+
+                cursor.execute("""
+                    SELECT p.id, p.codigo, p.nombre, p.costo, p.stock, c.nombre as categoria_nombre
+                    FROM productos p
+                    JOIN categorias c ON p.categoria_id = c.id
+                    WHERE p.tipo = 'producto'
+                    ORDER BY c.nombre ASC, p.nombre ASC
+                """)
+                productos = [dict(r) for r in cursor.fetchall()]
+
+                articulos = []
+                tot_val_inicial = 0.0
+                tot_val_entradas = 0.0
+                tot_val_salidas = 0.0
+                tot_val_final = 0.0
+
+                for p in productos:
+                    p_id = p["id"]
+                    costo_u = float(p.get("costo") or 0.0)
+                    stock_db = float(p.get("stock") or 0.0)
+
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(cd.cantidad), 0)
+                        FROM compra_detalles cd
+                        JOIN compras c ON cd.compra_id = c.id
+                        WHERE cd.producto_id = ? AND strftime('%Y-%m', c.fecha) = ?
+                    """, (p_id, mes))
+                    cant_compras = float(cursor.fetchone()[0] or 0.0)
+
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(dd.cantidad), 0)
+                        FROM devolucion_detalles dd
+                        JOIN devoluciones d ON dd.devolucion_id = d.id
+                        WHERE dd.producto_id = ? AND strftime('%Y-%m', d.fecha_emision) = ?
+                    """, (p_id, mes))
+                    cant_devoluciones = float(cursor.fetchone()[0] or 0.0)
+
+                    total_entradas = cant_compras + cant_devoluciones
+
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(fd.cantidad), 0)
+                        FROM factura_detalles fd
+                        JOIN facturas f ON fd.factura_id = f.id
+                        WHERE fd.producto_id = ? AND strftime('%Y-%m', f.fecha) = ? AND f.estado != 'anulada'
+                    """, (p_id, mes))
+                    cant_ventas = float(cursor.fetchone()[0] or 0.0)
+                    total_salidas = cant_ventas
+
+                    inv_final_cant = stock_db
+                    inv_inicial_cant = max(0.0, inv_final_cant - total_entradas + total_salidas)
+
+                    val_inicial_usd = round(inv_inicial_cant * costo_u, 2)
+                    val_entradas_usd = round(total_entradas * costo_u, 2)
+                    val_salidas_usd = round(total_salidas * costo_u, 2)
+                    val_final_usd = round(inv_final_cant * costo_u, 2)
+
+                    tot_val_inicial += val_inicial_usd
+                    tot_val_entradas += val_entradas_usd
+                    tot_val_salidas += val_salidas_usd
+                    tot_val_final += val_final_usd
+
+                    articulos.append({
+                        "producto_id": p_id,
+                        "codigo": p.get("codigo") or "-",
+                        "nombre": p.get("nombre"),
+                        "categoria": p.get("categoria_nombre"),
+                        "costo_unitario": costo_u,
+                        "inicial_cant": inv_inicial_cant,
+                        "inicial_valor_usd": val_inicial_usd,
+                        "inicial_valor_ves": round(val_inicial_usd * t_ves, 2),
+                        "entradas_cant": total_entradas,
+                        "entradas_valor_usd": val_entradas_usd,
+                        "entradas_valor_ves": round(val_entradas_usd * t_ves, 2),
+                        "salidas_cant": total_salidas,
+                        "salidas_valor_usd": val_salidas_usd,
+                        "salidas_valor_ves": round(val_salidas_usd * t_ves, 2),
+                        "final_cant": inv_final_cant,
+                        "final_valor_usd": val_final_usd,
+                        "final_valor_ves": round(val_final_usd * t_ves, 2)
+                    })
+
+                items_art177 = [
+                    {
+                        **a,
+                        "costo_unit_usd": a["costo_unitario"],
+                        "inicial_total_ves": a["inicial_valor_ves"],
+                        "entradas_total_ves": a["entradas_valor_ves"],
+                        "salidas_total_ves": a["salidas_valor_ves"],
+                        "final_total_ves": a["final_valor_ves"]
+                    }
+                    for a in articulos
+                ]
+
+                self.send_json({
+                    "contribuyente": cfg,
+                    "empresa": {
+                        "nombre": cfg.get("nombre_negocio"),
+                        "rif": cfg.get("documento_fiscal")
+                    },
+                    "periodo_mes": mes,
+                    "periodo": mes,
+                    "tasa_bcv": t_ves,
+                    "articulos": articulos,
+                    "items": items_art177,
+                    "totales": {
+                        "inicial_valor_usd": round(tot_val_inicial, 2),
+                        "entradas_valor_usd": round(tot_val_entradas, 2),
+                        "salidas_valor_usd": round(tot_val_salidas, 2),
+                        "final_valor_usd": round(tot_val_final, 2),
+                        "inicial_valor_ves": round(tot_val_inicial * t_ves, 2),
+                        "entradas_valor_ves": round(tot_val_entradas * t_ves, 2),
+                        "salidas_valor_ves": round(tot_val_salidas * t_ves, 2),
+                        "final_valor_ves": round(tot_val_final * t_ves, 2)
+                    },
+                    "resumen": {
+                        "total_inicial_usd": round(tot_val_inicial, 2),
+                        "total_inicial_ves": round(tot_val_inicial * t_ves, 2),
+                        "total_entradas_usd": round(tot_val_entradas, 2),
+                        "total_entradas_ves": round(tot_val_entradas * t_ves, 2),
+                        "total_salidas_usd": round(tot_val_salidas, 2),
+                        "total_salidas_ves": round(tot_val_salidas * t_ves, 2),
+                        "total_final_usd": round(tot_val_final, 2),
+                        "total_final_ves": round(tot_val_final * t_ves, 2)
+                    }
+                })
+
             else:
                 self.send_error_json("Endpoint no reconocido", 404)
 

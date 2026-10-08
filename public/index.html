@@ -15,10 +15,10 @@
   <!-- ========================================================
        BARRA LATERAL IZQUIERDA VERTICAL (SIDEBAR)
        ======================================================== -->
-  <aside id="appSidebar" class="w-64 min-w-[16rem] bg-slate-900 text-slate-100 flex flex-col shrink-0 min-h-screen border-r border-slate-800 z-40 transition-transform duration-300 md:translate-x-0 -translate-x-full fixed md:static inset-y-0 left-0 shadow-2xl md:shadow-none">
+  <aside id="appSidebar" class="w-64 min-w-[16rem] bg-slate-900 text-slate-100 flex flex-col shrink-0 h-screen max-h-screen sticky top-0 border-r border-slate-800 z-40 transition-transform duration-300 md:translate-x-0 -translate-x-full fixed md:sticky inset-y-0 left-0 shadow-2xl md:shadow-none overflow-hidden">
     
     <!-- Encabezado / Marca en Sidebar -->
-    <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+    <div class="p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
       <div class="flex items-center space-x-3 cursor-pointer" onclick="navigate('dashboard')">
         <div class="bg-indigo-600 p-2.5 rounded-xl shadow-inner text-white flex items-center justify-center">
           <i class="fa-solid fa-boxes-stacked text-xl"></i>
@@ -34,7 +34,7 @@
       </button>
     </div>
 
-    <!-- Navegación Vertical con Pestañas -->
+    <!-- Navegación Vertical con Pestañas (Con Barra de Desplazamiento Propia e Independiente) -->
     <nav class="flex-1 p-3 space-y-1.5 overflow-y-auto" id="sidebarNavList">
       <button onclick="navigate('dashboard')" id="nav-dashboard" class="sidebar-nav-btn active-nav">
         <i class="fa-solid fa-chart-pie mr-3 text-indigo-400"></i>
@@ -79,6 +79,18 @@
       <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn">
         <i class="fa-solid fa-chart-column mr-3 text-pink-400"></i>
         <span data-label-key="tab_reportes">10. Reportes & Balances</span>
+      </button>
+      <button onclick="navigate('reportes'); setReportTab('kardex')" id="nav-kardex" class="sidebar-nav-btn">
+        <i class="fa-solid fa-timeline mr-3 text-cyan-400"></i>
+        <span data-label-key="tab_kardex">11. Kardex de Inventario</span>
+      </button>
+      <button onclick="navigate('reportes'); setReportTab('inv_simple')" id="nav-inv-simple" class="sidebar-nav-btn">
+        <i class="fa-solid fa-list-check mr-3 text-emerald-400"></i>
+        <span data-label-key="tab_inv_simple">12. Inventario Rápido</span>
+      </button>
+      <button onclick="navigate('reportes'); setReportTab('libro_ventas')" id="nav-fiscal" class="sidebar-nav-btn">
+        <i class="fa-solid fa-scale-balanced mr-3 text-sky-400"></i>
+        <span data-label-key="tab_fiscal">13. Libros Fiscales SENIAT</span>
       </button>
     </nav>
 
@@ -129,7 +141,7 @@
   <div class="flex-1 flex flex-col min-w-0 min-h-screen">
     
     <!-- Barra Superior (Header) -->
-    <header class="bg-white border-b border-slate-200 sticky top-0 z-20 px-4 sm:px-6 py-3 flex items-center justify-between shadow-sm">
+    <header class="app-header bg-white border-b border-slate-200 sticky top-0 z-20 px-4 sm:px-6 py-3 flex items-center justify-between shadow-sm">
       <div class="flex items-center space-x-3">
         <!-- Botón Toggle Menú Móvil -->
         <button onclick="toggleMobileSidebar()" class="md:hidden p-2 text-slate-600 hover:text-slate-900 rounded-lg border border-slate-200">
@@ -1654,20 +1666,35 @@
 
       <!-- Pestañas internas de reportes -->
       <div class="flex space-x-2 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
-        <button onclick="setReportTab('inventario')" id="btn-subtab-rep-inventario" class="px-4 py-2 rounded-xl text-sm font-bold bg-indigo-600 text-white shadow-xs transition">
+        <button onclick="setReportTab('inventario')" id="btn-subtab-rep-inventario" class="px-4 py-2 rounded-xl text-sm font-bold bg-indigo-600 text-white shadow-xs transition whitespace-nowrap">
           <i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario & Valoración
         </button>
-        <button onclick="setReportTab('diarias')" id="btn-subtab-rep-diarias" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">
+        <button onclick="setReportTab('diarias')" id="btn-subtab-rep-diarias" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
           <i class="fa-solid fa-calendar-day mr-1.5"></i>Ventas Diarias (Monedas)
         </button>
-        <button onclick="setReportTab('mensuales')" id="btn-subtab-rep-mensuales" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">
+        <button onclick="setReportTab('mensuales')" id="btn-subtab-rep-mensuales" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
           <i class="fa-solid fa-calendar-days mr-1.5"></i>Ventas Mensuales
         </button>
-        <button onclick="setReportTab('cxc')" id="btn-subtab-rep-cxc" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">
-          <i class="fa-solid fa-hand-holding-dollar mr-1.5"></i>Cuentas por Cobrar Detalle
+        <button onclick="setReportTab('kardex')" id="btn-subtab-rep-kardex" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-timeline mr-1.5 text-cyan-600"></i>Kardex de Inventario
         </button>
-        <button onclick="setReportTab('cxp')" id="btn-subtab-rep-cxp" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">
-          <i class="fa-solid fa-file-invoice-dollar mr-1.5"></i>Cuentas por Pagar Detalle
+        <button onclick="setReportTab('inv_simple')" id="btn-subtab-rep-inv_simple" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-list-check mr-1.5 text-emerald-600"></i>Stock Rápido (3 Col.)
+        </button>
+        <button onclick="setReportTab('libro_ventas')" id="btn-subtab-rep-libro_ventas" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-book mr-1.5 text-sky-600"></i>Libro Ventas SENIAT
+        </button>
+        <button onclick="setReportTab('libro_compras')" id="btn-subtab-rep-libro_compras" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-book-open mr-1.5 text-amber-600"></i>Libro Compras SENIAT
+        </button>
+        <button onclick="setReportTab('art177')" id="btn-subtab-rep-art177" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-scale-balanced mr-1.5 text-indigo-600"></i>Libro Inv. Art. 177 LISLR
+        </button>
+        <button onclick="setReportTab('cxc')" id="btn-subtab-rep-cxc" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-hand-holding-dollar mr-1.5"></i>Cuentas por Cobrar
+        </button>
+        <button onclick="setReportTab('cxp')" id="btn-subtab-rep-cxp" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-file-invoice-dollar mr-1.5"></i>Cuentas por Pagar
         </button>
       </div>
 
@@ -1786,49 +1813,89 @@
         </div>
 
         <!-- Tarjetas de Resumen del Día -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
-            <div>
-              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Facturas Emitidas</p>
-              <h3 class="text-2xl font-bold text-slate-800 mt-1" id="repDiaFacturasCount">0</h3>
-              <p class="text-xs text-slate-500 mt-0.5">Comprobantes generados</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
+            <div class="flex items-center justify-between text-slate-400">
+              <span class="text-[11px] font-semibold uppercase tracking-wider">Facturas</span>
+              <i class="fa-solid fa-receipt text-indigo-500"></i>
             </div>
-            <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
-              <i class="fa-solid fa-receipt"></i>
-            </div>
-          </div>
-
-          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
-            <div>
-              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Facturado</p>
-              <h3 class="text-2xl font-bold text-indigo-700 mt-1" id="repDiaTotalFacturadoUsd">$0.00</h3>
-              <p class="text-xs text-slate-500 mt-0.5">Ventas del día</p>
-            </div>
-            <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
-              <i class="fa-solid fa-file-invoice-dollar"></i>
+            <div class="mt-2">
+              <h3 class="text-2xl font-bold text-slate-800" id="repDiaFacturasCount">0</h3>
+              <p class="text-[11px] text-slate-500 mt-0.5">Emitidas hoy</p>
             </div>
           </div>
 
-          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
-            <div>
-              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">IVA Recaudado</p>
-              <h3 class="text-2xl font-bold text-slate-800 mt-1" id="repDiaIvaUsd">$0.00</h3>
-              <p class="text-xs text-slate-500 mt-0.5" id="repDiaSubtotalUsd">Subtotal: $0.00</p>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
+            <div class="flex items-center justify-between text-slate-400">
+              <span class="text-[11px] font-semibold uppercase tracking-wider">Venta Bruta</span>
+              <i class="fa-solid fa-file-invoice-dollar text-indigo-500"></i>
             </div>
-            <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center text-xl">
-              <i class="fa-solid fa-percent"></i>
+            <div class="mt-2">
+              <h3 class="text-2xl font-bold text-indigo-700" id="repDiaTotalFacturadoUsd">$0.00</h3>
+              <p class="text-[11px] text-slate-500 mt-0.5" id="repDiaSubtotalUsd">Subtotal: $0.00</p>
             </div>
           </div>
 
-          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
-            <div>
-              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Dinero Cobrado</p>
-              <h3 class="text-2xl font-black text-emerald-600 mt-1" id="repDiaTotalCobradoUsd">$0.00</h3>
-              <p class="text-xs text-emerald-600 font-medium mt-0.5">Ingreso real a caja (Consolidado)</p>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-rose-200 bg-rose-50/20 flex flex-col justify-between">
+            <div class="flex items-center justify-between text-rose-500">
+              <span class="text-[11px] font-bold uppercase tracking-wider">Devoluciones (-)</span>
+              <i class="fa-solid fa-arrow-rotate-left text-rose-600"></i>
             </div>
-            <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
-              <i class="fa-solid fa-cash-register"></i>
+            <div class="mt-2">
+              <h3 class="text-2xl font-bold text-rose-600" id="repDiaTotalDevolucionesUsd">-$0.00</h3>
+              <p class="text-[11px] text-rose-600 font-medium mt-0.5" id="repDiaDevolucionesBadge">0 devoluciones</p>
             </div>
+          </div>
+
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-emerald-300 bg-emerald-50/30 flex flex-col justify-between">
+            <div class="flex items-center justify-between text-emerald-600">
+              <span class="text-[11px] font-bold uppercase tracking-wider">Venta Neta Real</span>
+              <i class="fa-solid fa-scale-balanced text-emerald-600"></i>
+            </div>
+            <div class="mt-2">
+              <h3 class="text-2xl font-black text-emerald-700" id="repDiaVentasNetasUsd">$0.00</h3>
+              <p class="text-[11px] text-emerald-600 font-semibold mt-0.5">Venta Bruta - Devoluciones</p>
+            </div>
+          </div>
+
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
+            <div class="flex items-center justify-between text-slate-400">
+              <span class="text-[11px] font-semibold uppercase tracking-wider">IVA Recaudado</span>
+              <i class="fa-solid fa-percent text-slate-500"></i>
+            </div>
+            <div class="mt-2">
+              <h3 class="text-2xl font-bold text-slate-800" id="repDiaIvaUsd">$0.00</h3>
+              <p class="text-[11px] text-slate-500 mt-0.5">16% gravados</p>
+            </div>
+          </div>
+
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
+            <div class="flex items-center justify-between text-slate-400">
+              <span class="text-[11px] font-semibold uppercase tracking-wider">Ingreso a Caja</span>
+              <i class="fa-solid fa-cash-register text-emerald-600"></i>
+            </div>
+            <div class="mt-2">
+              <h3 class="text-2xl font-black text-emerald-600" id="repDiaTotalCobradoUsd">$0.00</h3>
+              <p class="text-[11px] text-emerald-600 font-medium mt-0.5">Cobrado hoy</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fórmula Visual de Ventas Netas con Devolución Restando -->
+        <div class="bg-slate-900 text-white p-3.5 rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+          <div class="flex flex-wrap items-center gap-2 font-bold">
+            <span class="text-slate-300">Total Facturado:</span>
+            <span class="text-indigo-300 bg-slate-800 px-2 py-0.5 rounded-lg font-mono text-sm" id="repDiaFormulaFacturado">$0.00</span>
+            <span class="text-rose-400 text-base font-extrabold">-</span>
+            <span class="text-rose-300">Devoluciones:</span>
+            <span class="text-rose-300 bg-slate-800 px-2 py-0.5 rounded-lg font-mono text-sm" id="repDiaFormulaDevoluciones">$0.00</span>
+            <span class="text-emerald-400 text-base font-extrabold">=</span>
+            <span class="text-emerald-300">VENTA NETA DEL DÍA:</span>
+            <span class="text-emerald-300 bg-emerald-950 border border-emerald-500/50 px-2.5 py-0.5 rounded-lg font-mono text-base font-black" id="repDiaFormulaNeto">$0.00</span>
+          </div>
+          <div class="text-[11px] text-slate-400 flex items-center">
+            <i class="fa-solid fa-circle-check text-emerald-400 mr-1.5"></i>
+            Devoluciones reintegran inventario y restan de la facturación diaria.
           </div>
         </div>
 
@@ -1924,6 +1991,39 @@
                 </tr>
               </thead>
               <tbody id="repDiaFacturasTableBody" class="divide-y divide-slate-100">
+                <!-- Dinámico -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tabla de Devoluciones del Día (Restando Ventas) -->
+        <div class="bg-white rounded-2xl shadow-sm border border-rose-200 overflow-hidden space-y-2">
+          <div class="p-4 bg-rose-50/70 border-b border-rose-100 flex justify-between items-center">
+            <div>
+              <h4 class="font-bold text-rose-900 text-sm flex items-center">
+                <i class="fa-solid fa-arrow-rotate-left mr-2 text-rose-600"></i>
+                Devoluciones del Día (Restando a las Ventas)
+              </h4>
+              <p class="text-xs text-rose-600 mt-0.5">Notas de crédito y reintegros procesados que deducen la venta diaria</p>
+            </div>
+            <span class="text-xs font-bold px-2.5 py-1 bg-rose-100 text-rose-800 rounded-lg" id="repDiaDevolucionesSubtitle">0 devoluciones</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr class="bg-rose-50/30 border-b border-rose-100 text-xs font-semibold text-rose-800 uppercase tracking-wider">
+                  <th class="py-2.5 px-4">N° Devolución</th>
+                  <th class="py-2.5 px-4">Factura Origen</th>
+                  <th class="py-2.5 px-4">Cliente</th>
+                  <th class="py-2.5 px-4">Motivo</th>
+                  <th class="py-2.5 px-4 text-right font-bold text-rose-700">Monto Restado ($)</th>
+                  <th class="py-2.5 px-4 text-right text-rose-600">Restado en Bs.</th>
+                  <th class="py-2.5 px-4 text-right text-rose-600">Restado en COP</th>
+                  <th class="py-2.5 px-4 text-center">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="repDiaDevolucionesTableBody" class="divide-y divide-rose-50">
                 <!-- Dinámico -->
               </tbody>
             </table>
@@ -2189,6 +2289,458 @@
           </div>
         </div>
       </div>
+
+      <!-- ============================================== -->
+      <!-- SUB-REPORTE 6: KARDEX DE INVENTARIO -->
+      <!-- ============================================== -->
+      <div id="subview-rep-kardex" class="hidden space-y-6">
+        <!-- Barra de Filtros de Kardex -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-center justify-between">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full md:w-auto flex-1">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Producto a Consultar *</label>
+              <select id="kardexProductoSelect" onchange="loadReporteKardex()" class="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:border-cyan-500">
+                <!-- Se llena dinámicamente -->
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Fecha Desde</label>
+              <input type="date" id="kardexDesdeInput" onchange="loadReporteKardex()" class="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:border-cyan-500">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Fecha Hasta</label>
+              <input type="date" id="kardexHastaInput" onchange="loadReporteKardex()" class="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-semibold text-slate-800 focus:outline-none focus:border-cyan-500">
+            </div>
+          </div>
+          <div class="flex items-center gap-2 self-end">
+            <button onclick="loadReporteKardex()" class="btn-theme-kardex font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm flex items-center">
+              <i class="fa-solid fa-arrows-rotate mr-1.5"></i>Consultar
+            </button>
+            <button onclick="imprimirKardex()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm flex items-center">
+              <i class="fa-solid fa-print mr-1.5"></i>Imprimir Kardex
+            </button>
+          </div>
+        </div>
+
+        <!-- Tarjetas de Información del Producto y Saldos -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Stock Inicial (Histórico)</p>
+            <h3 class="text-2xl font-bold text-slate-800 mt-1" id="kardexStockInicial">0</h3>
+            <p class="text-xs text-slate-500" id="kardexCodigoItem">-</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-emerald-200 bg-emerald-50/20">
+            <p class="text-[11px] font-bold uppercase text-emerald-600">Total Entradas (Compras + Dev.)</p>
+            <h3 class="text-2xl font-bold text-emerald-700 mt-1" id="kardexTotalEntradas">0</h3>
+            <p class="text-xs text-emerald-600" id="kardexValorEntradas">$0.00</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-rose-200 bg-rose-50/20">
+            <p class="text-[11px] font-bold uppercase text-rose-600">Total Salidas (Ventas)</p>
+            <h3 class="text-2xl font-bold text-rose-700 mt-1" id="kardexTotalSalidas">0</h3>
+            <p class="text-xs text-rose-600" id="kardexValorSalidas">$0.00</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-cyan-300 bg-cyan-50/30">
+            <p class="text-[11px] font-bold uppercase text-cyan-800">Existencia Actual (Kardex)</p>
+            <h3 class="text-2xl font-black text-cyan-700 mt-1" id="kardexStockFinal">0</h3>
+            <p class="text-xs text-cyan-700 font-semibold" id="kardexValorSaldo">$0.00 valor total</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Costo Unitario Registrado</p>
+            <h3 class="text-2xl font-bold text-slate-800 mt-1" id="kardexCostoUnitario">$0.00</h3>
+            <p class="text-xs text-slate-500" id="kardexPrecioVenta">Precio: $0.00</p>
+          </div>
+        </div>
+
+        <!-- Tabla Cronológica del Kardex -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden" id="kardexPrintSection">
+          <div class="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+            <div>
+              <h4 class="font-bold text-slate-800 text-sm flex items-center">
+                <i class="fa-solid fa-timeline text-cyan-600 mr-2"></i>
+                Movimientos Cronológicos del Producto: <span id="kardexProductoNombreHeader" class="ml-1 text-cyan-700 font-extrabold">-</span>
+              </h4>
+              <p class="text-xs text-slate-400">Detalle de cada compra, venta y devolución con afectación de existencia paso a paso.</p>
+            </div>
+            <span class="text-xs font-mono font-bold bg-slate-100 text-slate-700 px-3 py-1 rounded-lg" id="kardexMovimientosCount">0 movimientos</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase tracking-wider font-bold">
+                  <th class="py-2.5 px-3" rowspan="2">Fecha</th>
+                  <th class="py-2.5 px-3" rowspan="2">Tipo</th>
+                  <th class="py-2.5 px-3" rowspan="2">Documento / Ref</th>
+                  <th class="py-2.5 px-3" rowspan="2">Tercero (Cliente / Prov)</th>
+                  <th class="py-2.5 px-3" rowspan="2">Concepto</th>
+                  <th class="py-1 px-3 text-center bg-emerald-100/70 border-x border-emerald-200 text-emerald-800" colspan="3">ENTRADAS</th>
+                  <th class="py-1 px-3 text-center bg-rose-100/70 border-r border-rose-200 text-rose-800" colspan="3">SALIDAS</th>
+                  <th class="py-1 px-3 text-center bg-slate-200/80 text-slate-900" colspan="3">SALDO EXISTENCIA</th>
+                </tr>
+                <tr class="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold">
+                  <th class="py-1 px-2 text-right bg-emerald-50 text-emerald-900">Cant.</th>
+                  <th class="py-1 px-2 text-right bg-emerald-50 text-emerald-900">V. Unit</th>
+                  <th class="py-1 px-2 text-right bg-emerald-50 text-emerald-900 border-r border-emerald-200">Total $</th>
+                  <th class="py-1 px-2 text-right bg-rose-50 text-rose-900">Cant.</th>
+                  <th class="py-1 px-2 text-right bg-rose-50 text-rose-900">V. Unit</th>
+                  <th class="py-1 px-2 text-right bg-rose-50 text-rose-900 border-r border-rose-200">Total $</th>
+                  <th class="py-1 px-2 text-right bg-slate-100 text-slate-900 font-extrabold">Stock</th>
+                  <th class="py-1 px-2 text-right bg-slate-100 text-slate-900">Costo U.</th>
+                  <th class="py-1 px-2 text-right bg-slate-100 text-slate-900 font-extrabold">Total $</th>
+                </tr>
+              </thead>
+              <tbody id="kardexTableBody" class="divide-y divide-slate-100">
+                <!-- Filas cronológicas dinámicas -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================== -->
+      <!-- SUB-REPORTE 7: INVENTARIO RÁPIDO (CÓDIGO, NOMBRE, STOCK) -->
+      <!-- ============================================== -->
+      <div id="subview-rep-inv_simple" class="hidden space-y-6">
+        <!-- Filtros -->
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-3 items-center justify-between">
+          <div class="flex flex-col sm:flex-row gap-3 w-full md:w-auto flex-1">
+            <div class="relative flex-1">
+              <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+              <input type="text" id="invSimpleSearchInput" oninput="renderReporteInventarioSimple()" placeholder="Buscar por código o nombre..." 
+                     class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-emerald-500 focus:bg-white transition">
+            </div>
+            <div class="w-full sm:w-64">
+              <select id="invSimpleCategoriaSelect" onchange="renderReporteInventarioSimple()" class="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-sm font-semibold text-slate-800 focus:outline-none focus:border-emerald-500">
+                <option value="">Todas las Categorías</option>
+              </select>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="loadReporteInventarioSimple()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs py-2 px-3 rounded-xl transition flex items-center">
+              <i class="fa-solid fa-rotate-right mr-1.5"></i>Refrescar
+            </button>
+            <button onclick="imprimirInventarioSimple()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 px-3.5 rounded-xl shadow-sm transition flex items-center">
+              <i class="fa-solid fa-print mr-1.5"></i>Imprimir Listado
+            </button>
+          </div>
+        </div>
+
+        <!-- Tabla Simplificada: Código, Nombre y Cantidad Actual -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden" id="invSimplePrintSection">
+          <div class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <div>
+              <h4 class="font-bold text-slate-800 text-sm flex items-center">
+                <i class="fa-solid fa-list-check text-emerald-600 mr-2"></i>
+                Informe Simplificado de Existencia en Almacén
+              </h4>
+              <p class="text-xs text-slate-400">Listado directo de existencias operativas por código y nombre.</p>
+            </div>
+            <span class="text-xs font-bold text-emerald-800 bg-emerald-100 px-3 py-1 rounded-xl" id="invSimpleCountBadge">0 ítems</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr class="bg-slate-100 border-b border-slate-200 text-xs font-bold text-slate-600 uppercase tracking-wider">
+                  <th class="py-3 px-6 w-36">Código del Ítem</th>
+                  <th class="py-3 px-6">Nombre del Ítem / Descripción</th>
+                  <th class="py-3 px-6 w-48 text-slate-500">Categoría</th>
+                  <th class="py-3 px-6 w-44 text-right font-black text-slate-900 bg-slate-200/50">Cantidad Actual (Stock)</th>
+                </tr>
+              </thead>
+              <tbody id="invSimpleTableBody" class="divide-y divide-slate-100">
+                <!-- Dinámico -->
+              </tbody>
+              <tfoot id="invSimpleTableFoot" class="bg-slate-50 font-bold border-t-2 border-slate-300 text-xs text-slate-800">
+                <!-- Total unidades -->
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================== -->
+      <!-- SUB-REPORTE 8: LIBRO DE VENTAS (NORMATIVA SENIAT) -->
+      <!-- ============================================== -->
+      <div id="subview-rep-libro_ventas" class="hidden space-y-6">
+        <!-- Barra de Período y Exportación -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Período Fiscal (Mes / Año)</label>
+              <input type="month" id="libroVentasMesInput" onchange="loadLibroVentasSeniat()" class="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-800 focus:outline-none focus:border-sky-500">
+            </div>
+            <button onclick="loadLibroVentasSeniat()" class="mt-4 btn-theme-fiscal font-bold text-xs py-2 px-4 rounded-xl shadow-sm">
+              <i class="fa-solid fa-arrows-rotate mr-1.5"></i>Generar Libro
+            </button>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="imprimirLibroVentasSeniat()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm flex items-center">
+              <i class="fa-solid fa-print mr-1.5"></i>Imprimir Formato SENIAT
+            </button>
+            <button onclick="exportarLibroVentasCSV()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm flex items-center">
+              <i class="fa-solid fa-file-csv mr-1.5"></i>Exportar CSV
+            </button>
+          </div>
+        </div>
+
+        <!-- Resumen SENIAT Ventas -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Total Ventas con IVA (Bs.)</p>
+            <h3 class="text-xl font-bold text-slate-900 mt-1" id="seniatVentasTotalBs">0.00 Bs.</h3>
+            <p class="text-xs text-slate-500" id="seniatVentasTotalUsd">≈ $0.00 USD</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Base Imponible (16% IVA)</p>
+            <h3 class="text-xl font-bold text-indigo-700 mt-1" id="seniatVentasBaseBs">0.00 Bs.</h3>
+            <p class="text-xs text-slate-500" id="seniatVentasBaseUsd">≈ $0.00 USD</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Débito Fiscal IVA (16%)</p>
+            <h3 class="text-xl font-bold text-rose-700 mt-1" id="seniatVentasDebitoBs">0.00 Bs.</h3>
+            <p class="text-xs text-slate-500" id="seniatVentasDebitoUsd">≈ $0.00 USD</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Ventas Exentas / Exoneradas</p>
+            <h3 class="text-xl font-bold text-slate-700 mt-1" id="seniatVentasExentoBs">0.00 Bs.</h3>
+            <p class="text-xs text-slate-500" id="seniatVentasExentoUsd">≈ $0.00 USD</p>
+          </div>
+        </div>
+
+        <!-- Tabla Formato Legal SENIAT Ventas -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden" id="libroVentasPrintSection">
+          <div class="p-4 bg-slate-50 border-b border-slate-200 text-center">
+            <h3 class="text-sm font-black uppercase text-slate-900">LIBRO DE VENTAS SEGÚN LA NORMATIVA DEL SENIAT (VENEZUELA)</h3>
+            <p class="text-xs text-slate-600 mt-0.5">
+              Contribuyente: <strong id="seniatVentasEmpresaNombre">-</strong> | RIF: <strong id="seniatVentasEmpresaRif">-</strong> | Período: <strong id="seniatVentasPeriodoLabel">-</strong>
+            </p>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-[11px]">
+              <thead>
+                <tr class="bg-slate-100 border-b border-slate-300 font-bold text-slate-700 uppercase tracking-tight">
+                  <th class="py-2 px-2 text-center">N° Op.</th>
+                  <th class="py-2 px-2">Fecha</th>
+                  <th class="py-2 px-2">RIF / Cédula</th>
+                  <th class="py-2 px-3">Nombre / Razón Social</th>
+                  <th class="py-2 px-2">N° Factura</th>
+                  <th class="py-2 px-2">N° Control</th>
+                  <th class="py-2 px-2">N° Nota Créd.</th>
+                  <th class="py-2 px-2">Fact. Afectada</th>
+                  <th class="py-2 px-2 text-center">Tipo Trans.</th>
+                  <th class="py-2 px-2 text-right">Total Ventas (Bs.)</th>
+                  <th class="py-2 px-2 text-right">Exento (Bs.)</th>
+                  <th class="py-2 px-2 text-right">Base Imponible</th>
+                  <th class="py-2 px-2 text-right">IVA (16%)</th>
+                  <th class="py-2 px-2 text-right text-slate-400">Total USD</th>
+                </tr>
+              </thead>
+              <tbody id="libroVentasTableBody" class="divide-y divide-slate-100">
+                <!-- Dinámico -->
+              </tbody>
+              <tfoot id="libroVentasTableFoot" class="bg-slate-100 font-bold border-t-2 border-slate-400 text-slate-900">
+                <!-- Totales fiscales -->
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================== -->
+      <!-- SUB-REPORTE 9: LIBRO DE COMPRAS (NORMATIVA SENIAT) -->
+      <!-- ============================================== -->
+      <div id="subview-rep-libro_compras" class="hidden space-y-6">
+        <!-- Barra de Período y Exportación -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Período Fiscal (Mes / Año)</label>
+              <input type="month" id="libroComprasMesInput" onchange="loadLibroComprasSeniat()" class="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-800 focus:outline-none focus:border-amber-500">
+            </div>
+            <button onclick="loadLibroComprasSeniat()" class="mt-4 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs py-2 px-4 rounded-xl shadow-sm">
+              <i class="fa-solid fa-arrows-rotate mr-1.5"></i>Generar Libro
+            </button>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="imprimirLibroComprasSeniat()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm flex items-center">
+              <i class="fa-solid fa-print mr-1.5"></i>Imprimir Formato SENIAT
+            </button>
+            <button onclick="exportarLibroComprasCSV()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm flex items-center">
+              <i class="fa-solid fa-file-csv mr-1.5"></i>Exportar CSV
+            </button>
+          </div>
+        </div>
+
+        <!-- Resumen SENIAT Compras -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Total Compras con IVA (Bs.)</p>
+            <h3 class="text-xl font-bold text-slate-900 mt-1" id="seniatComprasTotalBs">0.00 Bs.</h3>
+            <p class="text-xs text-slate-500" id="seniatComprasTotalUsd">≈ $0.00 USD</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Base Imponible (16% IVA)</p>
+            <h3 class="text-xl font-bold text-indigo-700 mt-1" id="seniatComprasBaseBs">0.00 Bs.</h3>
+            <p class="text-xs text-slate-500" id="seniatComprasBaseUsd">≈ $0.00 USD</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Crédito Fiscal IVA (16%)</p>
+            <h3 class="text-xl font-bold text-emerald-700 mt-1" id="seniatComprasCreditoBs">0.00 Bs.</h3>
+            <p class="text-xs text-slate-500" id="seniatComprasCreditoUsd">≈ $0.00 USD</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Compras Exentas / Exoneradas</p>
+            <h3 class="text-xl font-bold text-slate-700 mt-1" id="seniatComprasExentoBs">0.00 Bs.</h3>
+            <p class="text-xs text-slate-500" id="seniatComprasExentoUsd">≈ $0.00 USD</p>
+          </div>
+        </div>
+
+        <!-- Tabla Formato Legal SENIAT Compras -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden" id="libroComprasPrintSection">
+          <div class="p-4 bg-slate-50 border-b border-slate-200 text-center">
+            <h3 class="text-sm font-black uppercase text-slate-900">LIBRO DE COMPRAS SEGÚN LA NORMATIVA DEL SENIAT (VENEZUELA)</h3>
+            <p class="text-xs text-slate-600 mt-0.5">
+              Contribuyente: <strong id="seniatComprasEmpresaNombre">-</strong> | RIF: <strong id="seniatComprasEmpresaRif">-</strong> | Período: <strong id="seniatComprasPeriodoLabel">-</strong>
+            </p>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-[11px]">
+              <thead>
+                <tr class="bg-slate-100 border-b border-slate-300 font-bold text-slate-700 uppercase tracking-tight">
+                  <th class="py-2 px-2 text-center">N° Op.</th>
+                  <th class="py-2 px-2">Fecha Emisión</th>
+                  <th class="py-2 px-2">RIF Proveedor</th>
+                  <th class="py-2 px-3">Nombre / Razón Social</th>
+                  <th class="py-2 px-2">N° Factura</th>
+                  <th class="py-2 px-2">N° Control</th>
+                  <th class="py-2 px-2">N° Nota Déb/Créd</th>
+                  <th class="py-2 px-2">Fact. Afectada</th>
+                  <th class="py-2 px-2 text-center">Tipo Trans.</th>
+                  <th class="py-2 px-2 text-right">Total Compras (Bs.)</th>
+                  <th class="py-2 px-2 text-right">Exento (Bs.)</th>
+                  <th class="py-2 px-2 text-right">Base Imponible</th>
+                  <th class="py-2 px-2 text-right">IVA (16%)</th>
+                  <th class="py-2 px-2 text-right text-slate-400">Total USD</th>
+                </tr>
+              </thead>
+              <tbody id="libroComprasTableBody" class="divide-y divide-slate-100">
+                <!-- Dinámico -->
+              </tbody>
+              <tfoot id="libroComprasTableFoot" class="bg-slate-100 font-bold border-t-2 border-slate-400 text-slate-900">
+                <!-- Totales fiscales -->
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================== -->
+      <!-- SUB-REPORTE 10: LIBRO DE INVENTARIO ARTÍCULO 177 R-LISLR -->
+      <!-- ============================================== -->
+      <div id="subview-rep-art177" class="hidden space-y-6">
+        <!-- Barra de Período y Exportación -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Período Mensual (Mes / Año)</label>
+              <input type="month" id="art177MesInput" onchange="loadLibroInventarioArt177()" class="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-800 focus:outline-none focus:border-indigo-500">
+            </div>
+            <button onclick="loadLibroInventarioArt177()" class="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2 px-4 rounded-xl shadow-sm">
+              <i class="fa-solid fa-arrows-rotate mr-1.5"></i>Generar Libro Art. 177
+            </button>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="imprimirLibroInventarioArt177()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm flex items-center">
+              <i class="fa-solid fa-print mr-1.5"></i>Imprimir Libro Art. 177
+            </button>
+            <button onclick="exportarLibroArt177CSV()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-sm flex items-center">
+              <i class="fa-solid fa-file-csv mr-1.5"></i>Exportar CSV
+            </button>
+          </div>
+        </div>
+
+        <!-- Banner Explicativo de la Norma Legal -->
+        <div class="bg-slate-900 text-slate-200 p-4 rounded-2xl border border-slate-800 text-xs space-y-1">
+          <div class="flex items-center font-bold text-amber-400 text-sm">
+            <i class="fa-solid fa-scale-balanced mr-2"></i>
+            Artículo 177 del Reglamento de la Ley de Impuesto Sobre la Renta (R-LISLR)
+          </div>
+          <p class="text-slate-400 leading-relaxed">
+            Exigencia taxativa para contribuyentes con ventas de mercancías: Registro detallado mensual de entradas y salidas de bienes en <strong>unidades físicas</strong> y <strong>valores monetarios</strong>, determinando con exactitud la existencia inicial, los incrementos por compras, las disminuciones por ventas y el saldo final al cierre del período impositivo.
+          </p>
+        </div>
+
+        <!-- Resumen de Valoración del Mes -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Inventario Inicial Total</p>
+            <h3 class="text-xl font-bold text-slate-900 mt-1" id="art177TotalInicialBs">0.00 Bs.</h3>
+            <p class="text-xs text-slate-500" id="art177TotalInicialUsd">≈ $0.00 USD</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Entradas del Mes (Compras/Dev.)</p>
+            <h3 class="text-xl font-bold text-emerald-700 mt-1" id="art177TotalEntradasBs">0.00 Bs.</h3>
+            <p class="text-xs text-slate-500" id="art177TotalEntradasUsd">≈ $0.00 USD</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <p class="text-[11px] font-semibold uppercase text-slate-400">Salidas del Mes (Ventas)</p>
+            <h3 class="text-xl font-bold text-rose-700 mt-1" id="art177TotalSalidasBs">0.00 Bs.</h3>
+            <p class="text-xs text-slate-500" id="art177TotalSalidasUsd">≈ $0.00 USD</p>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-indigo-200 bg-indigo-50/20">
+            <p class="text-[11px] font-bold uppercase text-indigo-700">Inventario Final al Cierre</p>
+            <h3 class="text-xl font-black text-indigo-900 mt-1" id="art177TotalFinalBs">0.00 Bs.</h3>
+            <p class="text-xs text-indigo-700 font-semibold" id="art177TotalFinalUsd">≈ $0.00 USD</p>
+          </div>
+        </div>
+
+        <!-- Tabla Libro de Inventario Art. 177 -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden" id="art177PrintSection">
+          <div class="p-4 bg-slate-50 border-b border-slate-200 text-center">
+            <h3 class="text-sm font-black uppercase text-slate-900">REGISTRO MENSUAL DE MOVIMIENTO DE INVENTARIO DE MERCANCÍAS</h3>
+            <p class="text-xs text-slate-600 mt-0.5">
+              En cumplimiento del Artículo 177 del Reglamento de la LISLR | Período: <strong id="art177PeriodoLabel">-</strong> | Tasa BCV: <strong id="art177TasaBcvLabel">- Bs.</strong>
+            </p>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="bg-slate-100 border-b border-slate-300 font-bold text-slate-800 uppercase tracking-tight">
+                  <th class="py-2.5 px-3" rowspan="2">Código</th>
+                  <th class="py-2.5 px-3" rowspan="2">Descripción de la Mercancía</th>
+                  <th class="py-1 px-3 text-center bg-slate-200/70 border-x border-slate-300" colspan="3">INVENTARIO INICIAL</th>
+                  <th class="py-1 px-3 text-center bg-emerald-100/70 border-r border-emerald-200 text-emerald-900" colspan="3">ENTRADAS DEL MES</th>
+                  <th class="py-1 px-3 text-center bg-rose-100/70 border-r border-rose-200 text-rose-900" colspan="3">SALIDAS DEL MES</th>
+                  <th class="py-1 px-3 text-center bg-indigo-100/70 text-indigo-900 font-black" colspan="3">INVENTARIO FINAL</th>
+                </tr>
+                <tr class="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-600">
+                  <!-- Inicial -->
+                  <th class="py-1 px-2 text-right">Cant.</th>
+                  <th class="py-1 px-2 text-right">C. Unit ($)</th>
+                  <th class="py-1 px-2 text-right border-r border-slate-300">Total Bs.</th>
+                  <!-- Entradas -->
+                  <th class="py-1 px-2 text-right bg-emerald-50 text-emerald-900">Cant.</th>
+                  <th class="py-1 px-2 text-right bg-emerald-50 text-emerald-900">C. Unit ($)</th>
+                  <th class="py-1 px-2 text-right bg-emerald-50 text-emerald-900 border-r border-emerald-200">Total Bs.</th>
+                  <!-- Salidas -->
+                  <th class="py-1 px-2 text-right bg-rose-50 text-rose-900">Cant.</th>
+                  <th class="py-1 px-2 text-right bg-rose-50 text-rose-900">C. Unit ($)</th>
+                  <th class="py-1 px-2 text-right bg-rose-50 text-rose-900 border-r border-rose-200">Total Bs.</th>
+                  <!-- Final -->
+                  <th class="py-1 px-2 text-right bg-indigo-50 text-indigo-950 font-black">Cant.</th>
+                  <th class="py-1 px-2 text-right bg-indigo-50 text-indigo-950">C. Unit ($)</th>
+                  <th class="py-1 px-2 text-right bg-indigo-50 text-indigo-950 font-black">Total Bs.</th>
+                </tr>
+              </thead>
+              <tbody id="art177TableBody" class="divide-y divide-slate-100">
+                <!-- Dinámico -->
+              </tbody>
+              <tfoot id="art177TableFoot" class="bg-slate-100 font-bold border-t-2 border-slate-400 text-slate-900">
+                <!-- Totales del libro -->
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
 </div>
@@ -2331,6 +2883,38 @@
                 </div>
                 <input type="color" id="pickerBtnCxp" oninput="previewColorChange('btnCxp', this.value)" class="w-12 h-8 rounded cursor-pointer">
               </div>
+
+              <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div>
+                  <span class="font-semibold text-slate-700 block">Fondo de la Barra Superior</span>
+                  <span class="text-[10px] text-slate-500">Color del encabezado (Header)</span>
+                </div>
+                <input type="color" id="pickerHeaderBg" oninput="previewColorChange('headerBg', this.value)" class="w-12 h-8 rounded cursor-pointer">
+              </div>
+
+              <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div>
+                  <span class="font-semibold text-slate-700 block">Botón Devoluciones & NC</span>
+                  <span class="text-[10px] text-slate-500">Color módulo devoluciones</span>
+                </div>
+                <input type="color" id="pickerBtnDevoluciones" oninput="previewColorChange('btnDevoluciones', this.value)" class="w-12 h-8 rounded cursor-pointer">
+              </div>
+
+              <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div>
+                  <span class="font-semibold text-slate-700 block">Botón Kardex de Inventario</span>
+                  <span class="text-[10px] text-slate-500">Color de reportes de Kardex</span>
+                </div>
+                <input type="color" id="pickerBtnKardex" oninput="previewColorChange('btnKardex', this.value)" class="w-12 h-8 rounded cursor-pointer">
+              </div>
+
+              <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div>
+                  <span class="font-semibold text-slate-700 block">Botón Libros Fiscales SENIAT</span>
+                  <span class="text-[10px] text-slate-500">Color de libros de ventas y compras</span>
+                </div>
+                <input type="color" id="pickerBtnFiscal" oninput="previewColorChange('btnFiscal', this.value)" class="w-12 h-8 rounded cursor-pointer">
+              </div>
             </div>
           </div>
         </div>
@@ -2360,24 +2944,40 @@
               <input type="text" id="customTabFacturacion" placeholder="4. Facturación (Ventas)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 5 (Compras)</label>
-              <input type="text" id="customTabCompras" placeholder="5. Compras" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 5 (Devoluciones)</label>
+              <input type="text" id="customTabDevoluciones" placeholder="5. Devoluciones & NC" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 6 (Proveedores)</label>
-              <input type="text" id="customTabProveedores" placeholder="6. Proveedores" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 6 (Compras)</label>
+              <input type="text" id="customTabCompras" placeholder="6. Compras" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 7 (Cuentas por Cobrar)</label>
-              <input type="text" id="customTabCxc" placeholder="7. Cuentas por Cobrar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 7 (Proveedores)</label>
+              <input type="text" id="customTabProveedores" placeholder="7. Proveedores" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 8 (Cuentas por Pagar)</label>
-              <input type="text" id="customTabCxp" placeholder="8. Cuentas por Pagar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 8 (Cuentas por Cobrar)</label>
+              <input type="text" id="customTabCxc" placeholder="8. Cuentas por Cobrar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 9 (Reportes & Balances)</label>
-              <input type="text" id="customTabReportes" placeholder="9. Reportes & Balances" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 9 (Cuentas por Pagar)</label>
+              <input type="text" id="customTabCxp" placeholder="9. Cuentas por Pagar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 10 (Reportes & Balances)</label>
+              <input type="text" id="customTabReportes" placeholder="10. Reportes & Balances" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 11 (Kardex de Inventario)</label>
+              <input type="text" id="customTabKardex" placeholder="11. Kardex de Inventario" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 12 (Inventario Rápido)</label>
+              <input type="text" id="customTabInvSimple" placeholder="12. Inventario Rápido" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 13 (Libros Fiscales SENIAT)</label>
+              <input type="text" id="customTabFiscal" placeholder="13. Libros Fiscales SENIAT" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
           </div>
         </div>
@@ -2417,6 +3017,14 @@
             <div>
               <label class="block font-semibold text-slate-700 mb-1">Botón "Sincronizar Tasas"</label>
               <input type="text" id="customBtnSyncTasas" placeholder="Sincronizar BCV / TRM" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Botón "Nueva Devolución"</label>
+              <input type="text" id="customBtnNuevaDevolucion" placeholder="Nueva Devolución" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Botón "Consultar Kardex"</label>
+              <input type="text" id="customBtnKardex" placeholder="Consultar Kardex" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
           </div>
         </div>

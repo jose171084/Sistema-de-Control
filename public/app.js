@@ -82,11 +82,14 @@ const THEME_PRESETS = {
     primaryColor: '#4f46e5',
     primaryHover: '#4338ca',
     bgApp: '#f1f5f9',
+    headerBg: '#ffffff',
     btnFactura: '#059669',
     btnCompra: '#2563eb',
     btnCxc: '#d97706',
     btnCxp: '#e11d48',
-    btnDevoluciones: '#0891b2'
+    btnDevoluciones: '#0891b2',
+    btnKardex: '#4f46e5',
+    btnFiscal: '#0284c7'
   },
   esmeralda: {
     sidebarBg: '#064e3b',
@@ -94,11 +97,14 @@ const THEME_PRESETS = {
     primaryColor: '#059669',
     primaryHover: '#047857',
     bgApp: '#f0fdf4',
+    headerBg: '#ffffff',
     btnFactura: '#059669',
     btnCompra: '#0d9488',
     btnCxc: '#d97706',
     btnCxp: '#e11d48',
-    btnDevoluciones: '#0891b2'
+    btnDevoluciones: '#0891b2',
+    btnKardex: '#059669',
+    btnFiscal: '#0284c7'
   },
   azul: {
     sidebarBg: '#1e3a8a',
@@ -106,11 +112,14 @@ const THEME_PRESETS = {
     primaryColor: '#2563eb',
     primaryHover: '#1d4ed8',
     bgApp: '#f8fafc',
+    headerBg: '#ffffff',
     btnFactura: '#10b981',
     btnCompra: '#2563eb',
     btnCxc: '#f59e0b',
     btnCxp: '#e11d48',
-    btnDevoluciones: '#0891b2'
+    btnDevoluciones: '#0891b2',
+    btnKardex: '#2563eb',
+    btnFiscal: '#0284c7'
   },
   violeta: {
     sidebarBg: '#2e1065',
@@ -118,11 +127,14 @@ const THEME_PRESETS = {
     primaryColor: '#7c3aed',
     primaryHover: '#6d28d9',
     bgApp: '#faf5ff',
+    headerBg: '#ffffff',
     btnFactura: '#059669',
     btnCompra: '#7c3aed',
     btnCxc: '#d97706',
     btnCxp: '#e11d48',
-    btnDevoluciones: '#0891b2'
+    btnDevoluciones: '#0891b2',
+    btnKardex: '#7c3aed',
+    btnFiscal: '#0284c7'
   },
   oscuro: {
     sidebarBg: '#020617',
@@ -130,11 +142,14 @@ const THEME_PRESETS = {
     primaryColor: '#38bdf8',
     primaryHover: '#0284c7',
     bgApp: '#0f172a',
+    headerBg: '#1e293b',
     btnFactura: '#10b981',
     btnCompra: '#0284c7',
     btnCxc: '#f59e0b',
     btnCxp: '#e11d48',
-    btnDevoluciones: '#0891b2'
+    btnDevoluciones: '#0891b2',
+    btnKardex: '#38bdf8',
+    btnFiscal: '#0284c7'
   },
   sunset: {
     sidebarBg: '#451a03',
@@ -142,11 +157,14 @@ const THEME_PRESETS = {
     primaryColor: '#ea580c',
     primaryHover: '#c2410c',
     bgApp: '#fff7ed',
+    headerBg: '#ffffff',
     btnFactura: '#059669',
     btnCompra: '#ea580c',
     btnCxc: '#b45309',
     btnCxp: '#e11d48',
-    btnDevoluciones: '#0891b2'
+    btnDevoluciones: '#0891b2',
+    btnKardex: '#ea580c',
+    btnFiscal: '#0284c7'
   }
 };
 
@@ -166,6 +184,9 @@ const DEFAULT_LABELS = {
   tab_cxc: "8. Cuentas por Cobrar",
   tab_cxp: "9. Cuentas por Pagar",
   tab_reportes: "10. Reportes & Balances",
+  tab_kardex: "11. Kardex de Inventario",
+  tab_inv_simple: "12. Inventario Rápido",
+  tab_fiscal: "13. Libros Fiscales SENIAT",
   btn_nueva_venta: "Nueva Venta",
   btn_cargar_compra: "Cargar Compra",
   btn_procesar_venta: "Completar Facturación",
@@ -173,7 +194,10 @@ const DEFAULT_LABELS = {
   btn_abonar: "Registrar Abono",
   btn_cxp: "Registrar Pago / Gasto",
   btn_guardar_producto: "Guardar Ítem",
-  btn_sincronizar_tasas: "Sincronizar BCV / TRM"
+  btn_sincronizar_tasas: "Sincronizar BCV / TRM",
+  btn_nueva_devolucion: "Nueva Devolución",
+  btn_kardex: "Consultar Kardex",
+  btn_seniat: "Generar Libros SENIAT"
 };
 
 // ========================================================
@@ -279,11 +303,14 @@ function aplicarTema(tema) {
   }
   if (tema.primaryHover) root.style.setProperty('--color-primary-hover', tema.primaryHover);
   if (tema.bgApp) root.style.setProperty('--color-bg-app', tema.bgApp);
+  if (tema.headerBg) root.style.setProperty('--color-header-bg', tema.headerBg);
   if (tema.btnFactura) root.style.setProperty('--color-btn-factura', tema.btnFactura);
   if (tema.btnCompra) root.style.setProperty('--color-btn-compra', tema.btnCompra);
   if (tema.btnCxc) root.style.setProperty('--color-btn-cxc', tema.btnCxc);
   if (tema.btnCxp) root.style.setProperty('--color-btn-cxp', tema.btnCxp);
   if (tema.btnDevoluciones) root.style.setProperty('--color-btn-devoluciones', tema.btnDevoluciones);
+  if (tema.btnKardex) root.style.setProperty('--color-btn-kardex', tema.btnKardex);
+  if (tema.btnFiscal) root.style.setProperty('--color-btn-fiscal', tema.btnFiscal);
 
   // Sincronizar pickers
   syncPickersWithTheme(tema);
@@ -295,11 +322,14 @@ function syncPickersWithTheme(tema) {
     pickerSidebarText: tema.sidebarText,
     pickerPrimaryColor: tema.primaryColor,
     pickerBgApp: tema.bgApp,
+    pickerHeaderBg: tema.headerBg || '#ffffff',
     pickerBtnFactura: tema.btnFactura,
     pickerBtnCompra: tema.btnCompra,
     pickerBtnCxc: tema.btnCxc,
     pickerBtnCxp: tema.btnCxp,
-    pickerBtnDevoluciones: tema.btnDevoluciones
+    pickerBtnDevoluciones: tema.btnDevoluciones,
+    pickerBtnKardex: tema.btnKardex || '#4f46e5',
+    pickerBtnFiscal: tema.btnFiscal || '#0284c7'
   };
   for (const [id, val] of Object.entries(map)) {
     const el = document.getElementById(id);
@@ -369,11 +399,15 @@ function openPersonalizacionModal() {
     customTabProductos: labels.tab_productos,
     customTabClientes: labels.tab_clientes,
     customTabFacturacion: labels.tab_facturacion,
+    customTabDevoluciones: labels.tab_devoluciones,
     customTabCompras: labels.tab_compras,
     customTabProveedores: labels.tab_proveedores,
     customTabCxc: labels.tab_cxc,
     customTabCxp: labels.tab_cxp,
-    customTabReportes: labels.tab_reportes
+    customTabReportes: labels.tab_reportes,
+    customTabKardex: labels.tab_kardex,
+    customTabInvSimple: labels.tab_inv_simple,
+    customTabFiscal: labels.tab_fiscal
   };
   for (const [id, val] of Object.entries(pMap)) {
     const el = document.getElementById(id);
@@ -388,7 +422,9 @@ function openPersonalizacionModal() {
     customBtnProcesarVenta: labels.btn_procesar_venta,
     customBtnCredito: labels.btn_credito,
     customBtnAbonar: labels.btn_abonar,
-    customBtnSyncTasas: labels.btn_sincronizar_tasas
+    customBtnSyncTasas: labels.btn_sincronizar_tasas,
+    customBtnNuevaDevolucion: labels.btn_nueva_devolucion,
+    customBtnKardex: labels.btn_kardex
   };
   for (const [id, val] of Object.entries(bMap)) {
     const el = document.getElementById(id);
@@ -410,10 +446,14 @@ async function guardarPersonalizacion() {
     primaryColor: document.getElementById('pickerPrimaryColor').value,
     primaryHover: document.getElementById('pickerPrimaryColor').value,
     bgApp: document.getElementById('pickerBgApp').value,
+    headerBg: document.getElementById('pickerHeaderBg')?.value || '#ffffff',
     btnFactura: document.getElementById('pickerBtnFactura').value,
     btnCompra: document.getElementById('pickerBtnCompra').value,
     btnCxc: document.getElementById('pickerBtnCxc').value,
-    btnCxp: document.getElementById('pickerBtnCxp')?.value || '#e11d48'
+    btnCxp: document.getElementById('pickerBtnCxp')?.value || '#e11d48',
+    btnDevoluciones: document.getElementById('pickerBtnDevoluciones')?.value || '#0891b2',
+    btnKardex: document.getElementById('pickerBtnKardex')?.value || '#4f46e5',
+    btnFiscal: document.getElementById('pickerBtnFiscal')?.value || '#0284c7'
   };
 
   const labels = {
@@ -424,17 +464,23 @@ async function guardarPersonalizacion() {
     tab_productos: document.getElementById('customTabProductos').value.trim() || DEFAULT_LABELS.tab_productos,
     tab_clientes: document.getElementById('customTabClientes').value.trim() || DEFAULT_LABELS.tab_clientes,
     tab_facturacion: document.getElementById('customTabFacturacion').value.trim() || DEFAULT_LABELS.tab_facturacion,
+    tab_devoluciones: document.getElementById('customTabDevoluciones')?.value.trim() || DEFAULT_LABELS.tab_devoluciones,
     tab_compras: document.getElementById('customTabCompras').value.trim() || DEFAULT_LABELS.tab_compras,
     tab_proveedores: document.getElementById('customTabProveedores').value.trim() || DEFAULT_LABELS.tab_proveedores,
     tab_cxc: document.getElementById('customTabCxc').value.trim() || DEFAULT_LABELS.tab_cxc,
     tab_cxp: document.getElementById('customTabCxp')?.value.trim() || DEFAULT_LABELS.tab_cxp,
     tab_reportes: document.getElementById('customTabReportes').value.trim() || DEFAULT_LABELS.tab_reportes,
+    tab_kardex: document.getElementById('customTabKardex')?.value.trim() || DEFAULT_LABELS.tab_kardex,
+    tab_inv_simple: document.getElementById('customTabInvSimple')?.value.trim() || DEFAULT_LABELS.tab_inv_simple,
+    tab_fiscal: document.getElementById('customTabFiscal')?.value.trim() || DEFAULT_LABELS.tab_fiscal,
     btn_nueva_venta: document.getElementById('customBtnNuevaVenta').value.trim() || DEFAULT_LABELS.btn_nueva_venta,
     btn_cargar_compra: document.getElementById('customBtnCargarCompra').value.trim() || DEFAULT_LABELS.btn_cargar_compra,
     btn_procesar_venta: document.getElementById('customBtnProcesarVenta').value.trim() || DEFAULT_LABELS.btn_procesar_venta,
     btn_credito: document.getElementById('customBtnCredito').value.trim() || DEFAULT_LABELS.btn_credito,
     btn_abonar: document.getElementById('customBtnAbonar').value.trim() || DEFAULT_LABELS.btn_abonar,
-    btn_sincronizar_tasas: document.getElementById('customBtnSyncTasas').value.trim() || DEFAULT_LABELS.btn_sincronizar_tasas
+    btn_sincronizar_tasas: document.getElementById('customBtnSyncTasas').value.trim() || DEFAULT_LABELS.btn_sincronizar_tasas,
+    btn_nueva_devolucion: document.getElementById('customBtnNuevaDevolucion')?.value.trim() || DEFAULT_LABELS.btn_nueva_devolucion,
+    btn_kardex: document.getElementById('customBtnKardex')?.value.trim() || DEFAULT_LABELS.btn_kardex
   };
 
   try {
@@ -5303,7 +5349,7 @@ function loadReportes() {
 
 function setReportTab(tabName) {
   AppState.reportesTabActual = tabName;
-  const tabs = ['inventario', 'diarias', 'mensuales', 'cxc', 'cxp'];
+  const tabs = ['inventario', 'diarias', 'mensuales', 'kardex', 'inv_simple', 'libro_ventas', 'libro_compras', 'art177', 'cxc', 'cxp'];
 
   tabs.forEach(t => {
     const btn = document.getElementById(`btn-subtab-rep-${t}`);
@@ -5317,9 +5363,9 @@ function setReportTab(tabName) {
     }
     if (btn) {
       if (t === tabName) {
-        btn.className = 'px-4 py-2 rounded-xl text-sm font-bold bg-indigo-600 text-white shadow-xs transition';
+        btn.className = 'px-4 py-2 rounded-xl text-sm font-bold bg-indigo-600 text-white shadow-xs transition whitespace-nowrap';
       } else {
-        btn.className = 'px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition';
+        btn.className = 'px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap';
       }
     }
   });
@@ -5327,6 +5373,11 @@ function setReportTab(tabName) {
   if (tabName === 'inventario') loadReporteInventario();
   if (tabName === 'diarias') loadReporteVentasDiarias();
   if (tabName === 'mensuales') loadReporteVentasMensuales();
+  if (tabName === 'kardex') loadReporteKardex();
+  if (tabName === 'inv_simple') loadReporteInventarioSimple();
+  if (tabName === 'libro_ventas') loadLibroVentasSeniat();
+  if (tabName === 'libro_compras') loadLibroComprasSeniat();
+  if (tabName === 'art177') loadLibroInventarioArt177();
   if (tabName === 'cxc') loadReporteCxc();
   if (tabName === 'cxp') loadReporteCxp();
 }
@@ -5335,6 +5386,11 @@ function recargarReporteActual() {
   if (AppState.reportesTabActual === 'inventario') loadReporteInventario();
   else if (AppState.reportesTabActual === 'diarias') loadReporteVentasDiarias();
   else if (AppState.reportesTabActual === 'mensuales') loadReporteVentasMensuales();
+  else if (AppState.reportesTabActual === 'kardex') loadReporteKardex();
+  else if (AppState.reportesTabActual === 'inv_simple') loadReporteInventarioSimple();
+  else if (AppState.reportesTabActual === 'libro_ventas') loadLibroVentasSeniat();
+  else if (AppState.reportesTabActual === 'libro_compras') loadLibroComprasSeniat();
+  else if (AppState.reportesTabActual === 'art177') loadLibroInventarioArt177();
   else if (AppState.reportesTabActual === 'cxc') loadReporteCxc();
   else if (AppState.reportesTabActual === 'cxp') loadReporteCxp();
 }
@@ -5500,8 +5556,29 @@ function renderReporteVentasDiarias() {
   if (!data) return;
 
   const r = data.resumen || {};
+  const facturadoUsd = parseFloat(r.total_facturado_usd || 0);
+  const devolucionesUsd = parseFloat(r.total_devoluciones_usd || 0);
+  const ventasNetasUsd = parseFloat(r.ventas_netas_usd !== undefined ? r.ventas_netas_usd : Math.max(0, facturadoUsd - devolucionesUsd));
+  const devCount = r.devoluciones_count !== undefined ? r.devoluciones_count : (data.devoluciones ? data.devoluciones.length : 0);
+
   document.getElementById('repDiaFacturasCount').textContent = r.facturas_emitidas || 0;
-  document.getElementById('repDiaTotalFacturadoUsd').textContent = `$${parseFloat(r.total_facturado_usd || 0).toFixed(2)}`;
+  document.getElementById('repDiaTotalFacturadoUsd').textContent = `$${facturadoUsd.toFixed(2)}`;
+
+  const elDevUsd = document.getElementById('repDiaTotalDevolucionesUsd');
+  if (elDevUsd) elDevUsd.textContent = `-$${devolucionesUsd.toFixed(2)}`;
+  const elDevBadge = document.getElementById('repDiaDevolucionesBadge');
+  if (elDevBadge) elDevBadge.textContent = `${devCount} devolución(es)`;
+
+  const elNeto = document.getElementById('repDiaVentasNetasUsd');
+  if (elNeto) elNeto.textContent = `$${ventasNetasUsd.toFixed(2)}`;
+
+  const elF1 = document.getElementById('repDiaFormulaFacturado');
+  if (elF1) elF1.textContent = `$${facturadoUsd.toFixed(2)}`;
+  const elF2 = document.getElementById('repDiaFormulaDevoluciones');
+  if (elF2) elF2.textContent = `$${devolucionesUsd.toFixed(2)}`;
+  const elF3 = document.getElementById('repDiaFormulaNeto');
+  if (elF3) elF3.textContent = `$${ventasNetasUsd.toFixed(2)}`;
+
   document.getElementById('repDiaIvaUsd').textContent = `$${parseFloat(r.iva_usd || 0).toFixed(2)}`;
   document.getElementById('repDiaSubtotalUsd').textContent = `Subtotal: $${parseFloat(r.subtotal_usd || 0).toFixed(2)}`;
   document.getElementById('repDiaTotalCobradoUsd').textContent = `$${parseFloat(r.total_cobrado_caja_usd || 0).toFixed(2)}`;
@@ -5573,38 +5650,71 @@ function renderReporteVentasDiarias() {
   if (tbody) {
     if (facturas.length === 0) {
       tbody.innerHTML = `<tr><td colspan="10" class="text-center py-8 text-slate-400">No se registraron ventas en esta fecha.</td></tr>`;
-      return;
+    } else {
+      tbody.innerHTML = facturas.map(f => {
+        const hora = f.fecha ? f.fecha.split(' ')[1] || f.fecha : '-';
+        const esCredito = f.tipo_venta === 'credito';
+        return `
+          <tr class="hover:bg-slate-50 transition">
+            <td class="py-2.5 px-4 font-mono font-bold text-slate-800 text-xs">${escapeHtml(f.numero_factura)}</td>
+            <td class="py-2.5 px-4 text-xs text-slate-500">${hora}</td>
+            <td class="py-2.5 px-4">
+              <p class="font-bold text-slate-800 text-xs">${escapeHtml(f.cliente_nombre)}</p>
+              <p class="text-[10px] text-slate-400 font-mono">${escapeHtml(f.cliente_cedula)}</p>
+            </td>
+            <td class="py-2.5 px-4">
+              <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${esCredito ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}">
+                ${esCredito ? 'Crédito' : 'Contado'}
+              </span>
+            </td>
+            <td class="py-2.5 px-4 text-right text-xs text-slate-600">$${parseFloat(f.subtotal).toFixed(2)}</td>
+            <td class="py-2.5 px-4 text-right text-xs text-slate-600">$${parseFloat(f.iva_total).toFixed(2)}</td>
+            <td class="py-2.5 px-4 text-right font-extrabold text-xs text-indigo-700">$${parseFloat(f.total_usd).toFixed(2)}</td>
+            <td class="py-2.5 px-4 text-right text-xs text-slate-600">${parseFloat(f.total_ves).toFixed(2)} Bs.</td>
+            <td class="py-2.5 px-4 text-right text-xs text-slate-600">${Math.round(f.total_cop).toLocaleString('es-CO')} COP</td>
+            <td class="py-2.5 px-4 text-center">
+              <button onclick="verFacturaEmitida(${f.id})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold">
+                <i class="fa-solid fa-receipt mr-1"></i>Ver
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
     }
+  }
 
-    tbody.innerHTML = facturas.map(f => {
-      const hora = f.fecha ? f.fecha.split(' ')[1] || f.fecha : '-';
-      const esCredito = f.tipo_venta === 'credito';
-      return `
-        <tr class="hover:bg-slate-50 transition">
-          <td class="py-2.5 px-4 font-mono font-bold text-slate-800 text-xs">${escapeHtml(f.numero_factura)}</td>
-          <td class="py-2.5 px-4 text-xs text-slate-500">${hora}</td>
-          <td class="py-2.5 px-4">
-            <p class="font-bold text-slate-800 text-xs">${escapeHtml(f.cliente_nombre)}</p>
-            <p class="text-[10px] text-slate-400 font-mono">${escapeHtml(f.cliente_cedula)}</p>
-          </td>
-          <td class="py-2.5 px-4">
-            <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${esCredito ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}">
-              ${esCredito ? 'Crédito' : 'Contado'}
-            </span>
-          </td>
-          <td class="py-2.5 px-4 text-right text-xs text-slate-600">$${parseFloat(f.subtotal).toFixed(2)}</td>
-          <td class="py-2.5 px-4 text-right text-xs text-slate-600">$${parseFloat(f.iva_total).toFixed(2)}</td>
-          <td class="py-2.5 px-4 text-right font-extrabold text-xs text-indigo-700">$${parseFloat(f.total_usd).toFixed(2)}</td>
-          <td class="py-2.5 px-4 text-right text-xs text-slate-600">${parseFloat(f.total_ves).toFixed(2)} Bs.</td>
-          <td class="py-2.5 px-4 text-right text-xs text-slate-600">${Math.round(f.total_cop).toLocaleString('es-CO')} COP</td>
-          <td class="py-2.5 px-4 text-center">
-            <button onclick="verFacturaEmitida(${f.id})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold">
-              <i class="fa-solid fa-receipt mr-1"></i>Ver
-            </button>
-          </td>
-        </tr>
-      `;
-    }).join('');
+  // Tabla de devoluciones del día (Restando)
+  const devBody = document.getElementById('repDiaDevolucionesTableBody');
+  const devoluciones = data.devoluciones || [];
+  const elDevSub = document.getElementById('repDiaDevolucionesSubtitle');
+  if (elDevSub) elDevSub.textContent = `${devoluciones.length} devolución(es) registrada(s)`;
+
+  if (devBody) {
+    if (devoluciones.length === 0) {
+      devBody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-slate-400 italic text-xs">No se registraron devoluciones en esta fecha (Ventas íntegras sin deducciones).</td></tr>`;
+    } else {
+      devBody.innerHTML = devoluciones.map(d => {
+        return `
+          <tr class="hover:bg-rose-50/50 transition">
+            <td class="py-2.5 px-4 font-mono font-bold text-rose-800 text-xs">${escapeHtml(d.numero_devolucion)}</td>
+            <td class="py-2.5 px-4 font-mono text-xs text-slate-600">${escapeHtml(d.numero_factura || 'Libre')}</td>
+            <td class="py-2.5 px-4">
+              <p class="font-bold text-slate-800 text-xs">${escapeHtml(d.cliente_nombre)}</p>
+              <p class="text-[10px] text-slate-400 font-mono">${escapeHtml(d.cliente_cedula || '')}</p>
+            </td>
+            <td class="py-2.5 px-4 text-xs text-slate-600">${escapeHtml(d.motivo || 'Devolución')}</td>
+            <td class="py-2.5 px-4 text-right font-extrabold text-xs text-rose-600">-$${parseFloat(d.total_usd).toFixed(2)}</td>
+            <td class="py-2.5 px-4 text-right text-xs text-rose-700">-${parseFloat(d.total_ves).toFixed(2)} Bs.</td>
+            <td class="py-2.5 px-4 text-right text-xs text-rose-700">-${Math.round(d.total_cop || 0).toLocaleString('es-CO')} COP</td>
+            <td class="py-2.5 px-4 text-center">
+              <button onclick="verComprobanteDevolucion(${d.id})" class="px-2 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-xs font-semibold">
+                <i class="fa-solid fa-receipt mr-1"></i>Ver
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
   }
 }
 
@@ -6331,6 +6441,360 @@ function abrirVistaPreliminarReporte() {
         </tfoot>
       </table>
     `;
+  } else if (tab === 'kardex') {
+    const data = AppState.reportesKardexData;
+    const p = data?.producto || {};
+    const r = data?.resumen || {};
+    tituloReporte = `KARDEX DE INVENTARIO: ${p.codigo || ''} - ${p.nombre || ''}`;
+    subtituloReporte = `Categoría: ${p.categoria_nombre || 'General'} | Costo Unitario: $${parseFloat(p.costo || 0).toFixed(2)} | Precio Venta: $${parseFloat(p.precio_total || p.precio || 0).toFixed(2)}`;
+
+    kpisHtml = `
+      <div class="grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
+        <div>
+          <p class="text-slate-500 uppercase text-[10px] font-bold">Stock Inicial</p>
+          <strong class="text-slate-800 text-base font-black">${r.stock_inicial || 0}</strong>
+        </div>
+        <div>
+          <p class="text-emerald-700 uppercase text-[10px] font-bold">Total Entradas</p>
+          <strong class="text-emerald-700 text-base font-black">${r.total_entradas || 0} ($${parseFloat(r.valor_entradas || 0).toFixed(2)})</strong>
+        </div>
+        <div>
+          <p class="text-rose-700 uppercase text-[10px] font-bold">Total Salidas</p>
+          <strong class="text-rose-700 text-base font-black">${r.total_salidas || 0} ($${parseFloat(r.valor_salidas || 0).toFixed(2)})</strong>
+        </div>
+        <div>
+          <p class="text-cyan-800 uppercase text-[10px] font-bold">Existencia Actual</p>
+          <strong class="text-cyan-800 text-base font-black">${r.stock_actual || 0} ($${parseFloat(r.valor_total_actual || 0).toFixed(2)})</strong>
+        </div>
+      </div>
+    `;
+
+    const movs = data?.movimientos || [];
+    tablaHtml = `
+      <table class="w-full text-left text-xs border border-slate-300">
+        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[10px] text-slate-700">
+          <tr>
+            <th class="p-2">Fecha</th>
+            <th class="p-2">Tipo</th>
+            <th class="p-2">Documento / Ref</th>
+            <th class="p-2">Tercero</th>
+            <th class="p-2">Concepto</th>
+            <th class="p-2 text-right">Entrada Cant.</th>
+            <th class="p-2 text-right">Entrada Total</th>
+            <th class="p-2 text-right">Salida Cant.</th>
+            <th class="p-2 text-right">Salida Total</th>
+            <th class="p-2 text-right font-black">Stock Saldo</th>
+            <th class="p-2 text-right font-black">Saldo Total ($)</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          ${movs.map(m => `
+            <tr>
+              <td class="p-2 font-mono">${formatFecha(m.fecha)}</td>
+              <td class="p-2 font-bold">${m.tipo_movimiento}</td>
+              <td class="p-2 font-mono">${escapeHtml(m.documento)}</td>
+              <td class="p-2">${escapeHtml(m.tercero || '-')}</td>
+              <td class="p-2 text-slate-500">${escapeHtml(m.concepto || '-')}</td>
+              <td class="p-2 text-right font-semibold text-emerald-700">${m.entrada_cant > 0 ? m.entrada_cant : '-'}</td>
+              <td class="p-2 text-right text-emerald-800">${m.entrada_cant > 0 ? '$' + parseFloat(m.entrada_total).toFixed(2) : '-'}</td>
+              <td class="p-2 text-right font-semibold text-rose-700">${m.salida_cant > 0 ? m.salida_cant : '-'}</td>
+              <td class="p-2 text-right text-rose-800">${m.salida_cant > 0 ? '$' + parseFloat(m.salida_total).toFixed(2) : '-'}</td>
+              <td class="p-2 text-right font-black">${m.saldo_cant}</td>
+              <td class="p-2 text-right font-black">$${parseFloat(m.saldo_total || 0).toFixed(2)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  } else if (tab === 'inv_simple') {
+    const data = AppState.reportesInvSimpleData?.productos || [];
+    tituloReporte = 'INFORME SIMPLIFICADO DE STOCK Y EXISTENCIAS';
+    subtituloReporte = 'Reporte operativo de almacén con código, descripción, categoría y cantidad actual disponible.';
+
+    const totalStock = data.reduce((a, b) => a + parseFloat(b.stock || 0), 0);
+    kpisHtml = `
+      <div class="grid grid-cols-2 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
+        <div>
+          <p class="text-slate-500 uppercase text-[10px] font-bold">Total Ítems en Catálogo</p>
+          <strong class="text-slate-900 text-base font-black">${data.length}</strong>
+        </div>
+        <div>
+          <p class="text-emerald-700 uppercase text-[10px] font-bold">Total Unidades Físicas en Stock</p>
+          <strong class="text-emerald-700 text-base font-black">${totalStock}</strong>
+        </div>
+      </div>
+    `;
+
+    tablaHtml = `
+      <table class="w-full text-left text-xs border border-slate-300">
+        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[10px] text-slate-700">
+          <tr>
+            <th class="p-2 w-32">Código del Ítem</th>
+            <th class="p-2">Nombre del Ítem / Descripción</th>
+            <th class="p-2 w-48">Categoría</th>
+            <th class="p-2 w-36 text-right font-black">Cantidad Actual (Stock)</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          ${data.map(p => `
+            <tr>
+              <td class="p-2 font-mono font-bold">${escapeHtml(p.codigo)}</td>
+              <td class="p-2 font-medium text-slate-900">${escapeHtml(p.nombre)}</td>
+              <td class="p-2 text-slate-500">${escapeHtml(p.categoria_nombre || '-')}</td>
+              <td class="p-2 text-right font-black text-sm text-slate-950">${p.stock}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
+          <tr>
+            <td colspan="3" class="p-2 text-right uppercase">Total Unidades Físicas:</td>
+            <td class="p-2 text-right font-black text-sm">${totalStock}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+  } else if (tab === 'libro_ventas') {
+    const data = AppState.reportesLibroVentasSeniat;
+    const r = data?.resumen || {};
+    const emp = data?.empresa || {};
+    tituloReporte = `LIBRO DE VENTAS (NORMATIVA SENIAT - VENEZUELA)`;
+    subtituloReporte = `Contribuyente: ${emp.nombre || AppState.config.nombre_negocio} | RIF: ${emp.rif || AppState.config.documento_fiscal} | Período: ${data?.mes || ''}/${data?.anio || ''} | Tasa BCV: ${parseFloat(data?.tasa_bcv_cierre || 0).toFixed(2)} Bs.`;
+
+    kpisHtml = `
+      <div class="grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
+        <div>
+          <p class="text-slate-500 uppercase text-[10px] font-bold">Total Ventas (Bs.)</p>
+          <strong class="text-slate-900 text-sm font-black">${parseFloat(r.total_ventas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
+          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_ventas_usd || 0).toFixed(2)})</span>
+        </div>
+        <div>
+          <p class="text-indigo-700 uppercase text-[10px] font-bold">Base Imponible (16%)</p>
+          <strong class="text-indigo-700 text-sm font-black">${parseFloat(r.total_base_imponible_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
+          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_base_imponible_usd || 0).toFixed(2)})</span>
+        </div>
+        <div>
+          <p class="text-rose-700 uppercase text-[10px] font-bold">Débito Fiscal IVA (16%)</p>
+          <strong class="text-rose-700 text-sm font-black">${parseFloat(r.total_iva_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
+          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_iva_usd || 0).toFixed(2)})</span>
+        </div>
+        <div>
+          <p class="text-slate-500 uppercase text-[10px] font-bold">Ventas Exentas</p>
+          <strong class="text-slate-700 text-sm font-black">${parseFloat(r.total_exento_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
+          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_exento_usd || 0).toFixed(2)})</span>
+        </div>
+      </div>
+    `;
+
+    const items = data?.items || [];
+    tablaHtml = `
+      <table class="w-full text-left text-[11px] border border-slate-300">
+        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[9px] text-slate-700">
+          <tr>
+            <th class="p-1 text-center">N° Op.</th>
+            <th class="p-1">Fecha</th>
+            <th class="p-1">RIF/Cédula</th>
+            <th class="p-1">Nombre / Razón Social</th>
+            <th class="p-1">N° Factura</th>
+            <th class="p-1">N° Control</th>
+            <th class="p-1">N° NC</th>
+            <th class="p-1">Fact. Afectada</th>
+            <th class="p-1 text-center">Tipo</th>
+            <th class="p-1 text-right">Total Ventas Bs.</th>
+            <th class="p-1 text-right">Exento Bs.</th>
+            <th class="p-1 text-right">Base Imponible</th>
+            <th class="p-1 text-right">IVA (16%)</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          ${items.map(i => `
+            <tr class="${i.es_devolucion ? 'text-rose-700 bg-rose-50/40' : ''}">
+              <td class="p-1 text-center font-mono">${i.operacion_nro}</td>
+              <td class="p-1 font-mono">${i.fecha}</td>
+              <td class="p-1 font-mono">${escapeHtml(i.cliente_rif)}</td>
+              <td class="p-1">${escapeHtml(i.cliente_nombre)}</td>
+              <td class="p-1 font-mono font-bold">${escapeHtml(i.numero_factura || '-')}</td>
+              <td class="p-1 font-mono">${escapeHtml(i.numero_control || '-')}</td>
+              <td class="p-1 font-mono">${escapeHtml(i.numero_nota_credito || '-')}</td>
+              <td class="p-1 font-mono">${escapeHtml(i.factura_afectada || '-')}</td>
+              <td class="p-1 text-center font-bold">${i.tipo_transaccion}</td>
+              <td class="p-1 text-right font-black">${parseFloat(i.total_ventas_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+              <td class="p-1 text-right">${parseFloat(i.ventas_exentas_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+              <td class="p-1 text-right font-semibold">${parseFloat(i.base_imponible_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+              <td class="p-1 text-right font-bold">${parseFloat(i.iva_debito_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
+          <tr>
+            <td colspan="9" class="p-1.5 text-right uppercase">TOTALES GENERALES SENIAT:</td>
+            <td class="p-1.5 text-right font-black">${parseFloat(r.total_ventas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+            <td class="p-1.5 text-right font-semibold">${parseFloat(r.total_exento_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+            <td class="p-1.5 text-right font-bold">${parseFloat(r.total_base_imponible_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+            <td class="p-1.5 text-right font-black text-rose-700">${parseFloat(r.total_iva_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+  } else if (tab === 'libro_compras') {
+    const data = AppState.reportesLibroComprasSeniat;
+    const r = data?.resumen || {};
+    const emp = data?.empresa || {};
+    tituloReporte = `LIBRO DE COMPRAS (NORMATIVA SENIAT - VENEZUELA)`;
+    subtituloReporte = `Contribuyente: ${emp.nombre || AppState.config.nombre_negocio} | RIF: ${emp.rif || AppState.config.documento_fiscal} | Período: ${data?.mes || ''}/${data?.anio || ''} | Tasa BCV: ${parseFloat(data?.tasa_bcv_cierre || 0).toFixed(2)} Bs.`;
+
+    kpisHtml = `
+      <div class="grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
+        <div>
+          <p class="text-slate-500 uppercase text-[10px] font-bold">Total Compras (Bs.)</p>
+          <strong class="text-slate-900 text-sm font-black">${parseFloat(r.total_compras_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
+          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_ventas_usd || 0).toFixed(2)})</span>
+        </div>
+        <div>
+          <p class="text-indigo-700 uppercase text-[10px] font-bold">Base Imponible (16%)</p>
+          <strong class="text-indigo-700 text-sm font-black">${parseFloat(r.total_base_imponible_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
+          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_base_imponible_usd || 0).toFixed(2)})</span>
+        </div>
+        <div>
+          <p class="text-emerald-700 uppercase text-[10px] font-bold">Crédito Fiscal IVA (16%)</p>
+          <strong class="text-emerald-700 text-sm font-black">${parseFloat(r.total_iva_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
+          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_iva_usd || 0).toFixed(2)})</span>
+        </div>
+        <div>
+          <p class="text-slate-500 uppercase text-[10px] font-bold">Compras Exentas</p>
+          <strong class="text-slate-700 text-sm font-black">${parseFloat(r.total_exento_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
+          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_exento_usd || 0).toFixed(2)})</span>
+        </div>
+      </div>
+    `;
+
+    const items = data?.items || [];
+    tablaHtml = `
+      <table class="w-full text-left text-[11px] border border-slate-300">
+        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[9px] text-slate-700">
+          <tr>
+            <th class="p-1 text-center">N° Op.</th>
+            <th class="p-1">Fecha</th>
+            <th class="p-1">RIF Proveedor</th>
+            <th class="p-1">Nombre / Razón Social</th>
+            <th class="p-1">N° Factura</th>
+            <th class="p-1">N° Control</th>
+            <th class="p-1">N° ND/NC</th>
+            <th class="p-1">Fact. Afectada</th>
+            <th class="p-1 text-center">Tipo</th>
+            <th class="p-1 text-right">Total Compras Bs.</th>
+            <th class="p-1 text-right">Exento Bs.</th>
+            <th class="p-1 text-right">Base Imponible</th>
+            <th class="p-1 text-right">IVA (16%)</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          ${items.map(i => `
+            <tr>
+              <td class="p-1 text-center font-mono">${i.operacion_nro}</td>
+              <td class="p-1 font-mono">${i.fecha}</td>
+              <td class="p-1 font-mono font-semibold">${escapeHtml(i.proveedor_rif)}</td>
+              <td class="p-1">${escapeHtml(i.proveedor_nombre)}</td>
+              <td class="p-1 font-mono font-bold">${escapeHtml(i.numero_factura || '-')}</td>
+              <td class="p-1 font-mono">${escapeHtml(i.numero_control || '-')}</td>
+              <td class="p-1 font-mono text-slate-400">${escapeHtml(i.numero_nota_deb_cred || '-')}</td>
+              <td class="p-1 font-mono text-slate-400">${escapeHtml(i.factura_afectada || '-')}</td>
+              <td class="p-1 text-center font-bold">${i.tipo_transaccion}</td>
+              <td class="p-1 text-right font-black">${parseFloat(i.total_compras_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+              <td class="p-1 text-right">${parseFloat(i.compras_exentas_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+              <td class="p-1 text-right font-semibold">${parseFloat(i.base_imponible_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+              <td class="p-1 text-right font-bold text-emerald-700">${parseFloat(i.iva_credito_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
+          <tr>
+            <td colspan="9" class="p-1.5 text-right uppercase">TOTALES GENERALES SENIAT:</td>
+            <td class="p-1.5 text-right font-black">${parseFloat(r.total_compras_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+            <td class="p-1.5 text-right font-semibold">${parseFloat(r.total_exento_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+            <td class="p-1.5 text-right font-bold">${parseFloat(r.total_base_imponible_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+            <td class="p-1.5 text-right font-black text-emerald-800">${parseFloat(r.total_iva_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+  } else if (tab === 'art177') {
+    const data = AppState.reportesArt177Data;
+    const r = data?.resumen || {};
+    tituloReporte = `LIBRO DE INVENTARIO DE MERCANCÍAS (ARTÍCULO 177 R-LISLR)`;
+    subtituloReporte = `Registro detallado mensual de entradas y salidas de mercancías en unidades físicas y valores monetarios | Período: ${data?.periodo || ''} | Tasa BCV: ${parseFloat(data?.tasa_bcv || 0).toFixed(2)} Bs.`;
+
+    kpisHtml = `
+      <div class="grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
+        <div>
+          <p class="text-slate-500 uppercase text-[10px] font-bold">Inventario Inicial</p>
+          <strong class="text-slate-900 text-sm font-black">${parseFloat(r.total_inicial_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
+          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_inicial_usd || 0).toFixed(2)})</span>
+        </div>
+        <div>
+          <p class="text-emerald-700 uppercase text-[10px] font-bold">Entradas del Mes</p>
+          <strong class="text-emerald-700 text-sm font-black">${parseFloat(r.total_entradas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
+          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_entradas_usd || 0).toFixed(2)})</span>
+        </div>
+        <div>
+          <p class="text-rose-700 uppercase text-[10px] font-bold">Salidas del Mes</p>
+          <strong class="text-rose-700 text-sm font-black">${parseFloat(r.total_salidas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
+          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_salidas_usd || 0).toFixed(2)})</span>
+        </div>
+        <div>
+          <p class="text-indigo-900 uppercase text-[10px] font-bold">Inventario Final</p>
+          <strong class="text-indigo-900 text-sm font-black">${parseFloat(r.total_final_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
+          <span class="block text-[10px] text-indigo-700 font-bold">($${parseFloat(r.total_final_usd || 0).toFixed(2)})</span>
+        </div>
+      </div>
+    `;
+
+    const items = data?.items || [];
+    tablaHtml = `
+      <table class="w-full text-left text-[11px] border border-slate-300">
+        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[9px] text-slate-700">
+          <tr>
+            <th class="p-1">Código</th>
+            <th class="p-1">Descripción Mercancía</th>
+            <th class="p-1 text-right">Inicial Cant.</th>
+            <th class="p-1 text-right">Inicial Total Bs.</th>
+            <th class="p-1 text-right">Entradas Cant.</th>
+            <th class="p-1 text-right">Entradas Total Bs.</th>
+            <th class="p-1 text-right">Salidas Cant.</th>
+            <th class="p-1 text-right">Salidas Total Bs.</th>
+            <th class="p-1 text-right font-black">Final Cant.</th>
+            <th class="p-1 text-right font-black">Final Total Bs.</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          ${items.map(i => `
+            <tr>
+              <td class="p-1 font-mono font-bold">${escapeHtml(i.codigo)}</td>
+              <td class="p-1">${escapeHtml(i.nombre)}</td>
+              <td class="p-1 text-right">${i.inicial_cant}</td>
+              <td class="p-1 text-right">${parseFloat(i.inicial_total_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+              <td class="p-1 text-right text-emerald-700 font-semibold">${i.entradas_cant}</td>
+              <td class="p-1 text-right text-emerald-800 font-bold">${parseFloat(i.entradas_total_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+              <td class="p-1 text-right text-rose-700 font-semibold">${i.salidas_cant}</td>
+              <td class="p-1 text-right text-rose-800 font-bold">${parseFloat(i.salidas_total_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+              <td class="p-1 text-right font-black">${i.final_cant}</td>
+              <td class="p-1 text-right font-black text-indigo-900">${parseFloat(i.final_total_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
+          <tr>
+            <td colspan="3" class="p-1.5 text-right uppercase">TOTALES INVENTARIO ART. 177:</td>
+            <td class="p-1.5 text-right font-black">${parseFloat(r.total_inicial_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+            <td></td>
+            <td class="p-1.5 text-right font-black text-emerald-800">${parseFloat(r.total_entradas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+            <td></td>
+            <td class="p-1.5 text-right font-black text-rose-800">${parseFloat(r.total_salidas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+            <td></td>
+            <td class="p-1.5 text-right font-black text-indigo-950">${parseFloat(r.total_final_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
   }
 
   // Firmas y Bloque de Auditoría Formal
@@ -6468,6 +6932,101 @@ function exportarReporteActualCsv() {
         `"${c.estado}"`
       ]);
     });
+  } else if (tab === 'kardex') {
+    const data = AppState.reportesKardexData;
+    const p = data?.producto || {};
+    rows.push(['Producto', `"${p.codigo || ''} - ${p.nombre || ''}"`]);
+    rows.push(['Fecha', 'Tipo', 'Documento', 'Referencia', 'Tercero', 'Concepto', 'Entrada Cant', 'Entrada Unit USD', 'Entrada Total USD', 'Salida Cant', 'Salida Unit USD', 'Salida Total USD', 'Stock Saldo', 'Costo Unit USD', 'Saldo Total USD']);
+    (data?.movimientos || []).forEach(m => {
+      rows.push([
+        `"${m.fecha}"`,
+        `"${m.tipo_movimiento}"`,
+        `"${m.documento}"`,
+        `"${m.referencia || ''}"`,
+        `"${(m.tercero || '').replace(/"/g, '""')}"`,
+        `"${(m.concepto || '').replace(/"/g, '""')}"`,
+        m.entrada_cant || 0,
+        parseFloat(m.entrada_unit || 0).toFixed(2),
+        parseFloat(m.entrada_total || 0).toFixed(2),
+        m.salida_cant || 0,
+        parseFloat(m.salida_unit || 0).toFixed(2),
+        parseFloat(m.salida_total || 0).toFixed(2),
+        m.saldo_cant || 0,
+        parseFloat(m.saldo_unit || 0).toFixed(2),
+        parseFloat(m.saldo_total || 0).toFixed(2)
+      ]);
+    });
+  } else if (tab === 'inv_simple') {
+    const data = AppState.reportesInvSimpleData?.productos || [];
+    rows.push(['Codigo', 'Nombre', 'Categoria', 'Stock Actual']);
+    data.forEach(p => {
+      rows.push([
+        `"${p.codigo || ''}"`,
+        `"${(p.nombre || '').replace(/"/g, '""')}"`,
+        `"${(p.categoria_nombre || '').replace(/"/g, '""')}"`,
+        p.stock || 0
+      ]);
+    });
+  } else if (tab === 'libro_ventas') {
+    const data = AppState.reportesLibroVentasSeniat;
+    rows.push(['Nro Operacion', 'Fecha', 'RIF/Cedula', 'Nombre/Razon Social', 'Nro Factura', 'Nro Control', 'Nro Nota Credito', 'Factura Afectada', 'Tipo Transaccion', 'Total Ventas VES', 'Ventas Exentas VES', 'Base Imponible VES', 'IVA Debito VES', 'Total Ventas USD']);
+    (data?.items || []).forEach(i => {
+      rows.push([
+        i.operacion_nro,
+        `"${i.fecha}"`,
+        `"${i.cliente_rif}"`,
+        `"${(i.cliente_nombre || '').replace(/"/g, '""')}"`,
+        `"${i.numero_factura || ''}"`,
+        `"${i.numero_control || ''}"`,
+        `"${i.numero_nota_credito || ''}"`,
+        `"${i.factura_afectada || ''}"`,
+        `"${i.tipo_transaccion}"`,
+        parseFloat(i.total_ventas_ves || 0).toFixed(2),
+        parseFloat(i.ventas_exentas_ves || 0).toFixed(2),
+        parseFloat(i.base_imponible_ves || 0).toFixed(2),
+        parseFloat(i.iva_debito_ves || 0).toFixed(2),
+        parseFloat(i.total_ventas_usd || 0).toFixed(2)
+      ]);
+    });
+  } else if (tab === 'libro_compras') {
+    const data = AppState.reportesLibroComprasSeniat;
+    rows.push(['Nro Operacion', 'Fecha', 'RIF Proveedor', 'Nombre/Razon Social', 'Nro Factura', 'Nro Control', 'Nro ND/NC', 'Factura Afectada', 'Tipo Transaccion', 'Total Compras VES', 'Compras Exentas VES', 'Base Imponible VES', 'IVA Credito VES', 'Total Compras USD']);
+    (data?.items || []).forEach(i => {
+      rows.push([
+        i.operacion_nro,
+        `"${i.fecha}"`,
+        `"${i.proveedor_rif}"`,
+        `"${(i.proveedor_nombre || '').replace(/"/g, '""')}"`,
+        `"${i.numero_factura || ''}"`,
+        `"${i.numero_control || ''}"`,
+        `"${i.numero_nota_deb_cred || ''}"`,
+        `"${i.factura_afectada || ''}"`,
+        `"${i.tipo_transaccion}"`,
+        parseFloat(i.total_compras_ves || 0).toFixed(2),
+        parseFloat(i.compras_exentas_ves || 0).toFixed(2),
+        parseFloat(i.base_imponible_ves || 0).toFixed(2),
+        parseFloat(i.iva_credito_ves || 0).toFixed(2),
+        parseFloat(i.total_compras_usd || 0).toFixed(2)
+      ]);
+    });
+  } else if (tab === 'art177') {
+    const data = AppState.reportesArt177Data;
+    rows.push(['Codigo', 'Descripcion Mercancia', 'Inicial Cant', 'Inicial Costo Unit USD', 'Inicial Total Bs', 'Entradas Cant', 'Entradas Total Bs', 'Salidas Cant', 'Salidas Total Bs', 'Final Cant', 'Final Total Bs']);
+    (data?.items || []).forEach(i => {
+      rows.push([
+        `"${i.codigo || ''}"`,
+        `"${(i.nombre || '').replace(/"/g, '""')}"`,
+        i.inicial_cant,
+        parseFloat(i.costo_unit_usd || 0).toFixed(2),
+        parseFloat(i.inicial_total_ves || 0).toFixed(2),
+        i.entradas_cant,
+        parseFloat(i.entradas_total_ves || 0).toFixed(2),
+        i.salidas_cant,
+        parseFloat(i.salidas_total_ves || 0).toFixed(2),
+        i.final_cant,
+        parseFloat(i.final_total_ves || 0).toFixed(2)
+      ]);
+    });
   }
 
   const csvContent = "\uFEFF" + rows.map(e => e.join(",")).join("\n");
@@ -6479,6 +7038,526 @@ function exportarReporteActualCsv() {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+// ========================================================
+// REPORTE 6: KARDEX DE INVENTARIO
+// ========================================================
+async function loadReporteKardex(producto_id) {
+  const select = document.getElementById('kardexProductoSelect');
+  const desde = document.getElementById('kardexDesdeInput')?.value || '';
+  const hasta = document.getElementById('kardexHastaInput')?.value || '';
+  const prodId = producto_id || select?.value || '';
+
+  try {
+    const url = `/api/reportes/kardex?producto_id=${encodeURIComponent(prodId)}&desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const data = await res.json();
+    AppState.reportesKardexData = data;
+
+    // Poblar select si está vacío
+    if (select && select.options.length <= 1 && data.productos) {
+      select.innerHTML = data.productos.map(p => 
+        `<option value="${p.id}" ${data.producto && data.producto.id === p.id ? 'selected' : ''}>${escapeHtml(p.codigo)} - ${escapeHtml(p.nombre)} (Stock: ${p.stock})</option>`
+      ).join('');
+    }
+
+    renderReporteKardex();
+  } catch (err) {
+    console.error("Error al cargar Kardex:", err);
+  }
+}
+
+function renderReporteKardex() {
+  const data = AppState.reportesKardexData;
+  if (!data || !data.producto) return;
+
+  const p = data.producto;
+  const r = data.resumen || {};
+
+  document.getElementById('kardexStockInicial').textContent = r.stock_inicial || 0;
+  document.getElementById('kardexCodigoItem').textContent = `Cód: ${p.codigo} | ${p.categoria_nombre || 'General'}`;
+  document.getElementById('kardexTotalEntradas').textContent = r.total_entradas || 0;
+  document.getElementById('kardexValorEntradas').textContent = `Total: $${parseFloat(r.valor_entradas || 0).toFixed(2)}`;
+  document.getElementById('kardexTotalSalidas').textContent = r.total_salidas || 0;
+  document.getElementById('kardexValorSalidas').textContent = `Total: $${parseFloat(r.valor_salidas || 0).toFixed(2)}`;
+  document.getElementById('kardexStockFinal').textContent = r.stock_actual || 0;
+  document.getElementById('kardexValorSaldo').textContent = `$${parseFloat(r.valor_total_actual || 0).toFixed(2)} valor total`;
+  document.getElementById('kardexCostoUnitario').textContent = `$${parseFloat(p.costo || 0).toFixed(2)}`;
+  document.getElementById('kardexPrecioVenta').textContent = `Precio Venta: $${parseFloat(p.precio_total || p.precio || 0).toFixed(2)}`;
+  document.getElementById('kardexProductoNombreHeader').textContent = `${p.codigo} - ${p.nombre}`;
+  document.getElementById('kardexMovimientosCount').textContent = `${(data.movimientos || []).length} movimiento(s)`;
+
+  const tbody = document.getElementById('kardexTableBody');
+  const movs = data.movimientos || [];
+  if (!tbody) return;
+
+  if (movs.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="14" class="text-center py-8 text-slate-400 italic">No hay movimientos registrados para este producto en el período seleccionado.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = movs.map(m => {
+    let badgeClass = 'bg-slate-100 text-slate-700';
+    if (m.tipo_movimiento === 'COMPRA') badgeClass = 'bg-emerald-100 text-emerald-800 font-bold';
+    else if (m.tipo_movimiento === 'VENTA') badgeClass = 'bg-rose-100 text-rose-800 font-bold';
+    else if (m.tipo_movimiento === 'DEVOLUCION') badgeClass = 'bg-blue-100 text-blue-800 font-bold';
+
+    const entCant = m.entrada_cant > 0 ? m.entrada_cant : '-';
+    const entUnit = m.entrada_cant > 0 ? `$${parseFloat(m.entrada_unit).toFixed(2)}` : '-';
+    const entTot = m.entrada_cant > 0 ? `$${parseFloat(m.entrada_total).toFixed(2)}` : '-';
+
+    const salCant = m.salida_cant > 0 ? m.salida_cant : '-';
+    const salUnit = m.salida_cant > 0 ? `$${parseFloat(m.salida_unit).toFixed(2)}` : '-';
+    const salTot = m.salida_cant > 0 ? `$${parseFloat(m.salida_total).toFixed(2)}` : '-';
+
+    return `
+      <tr class="hover:bg-slate-50 transition border-b border-slate-100 text-slate-800">
+        <td class="py-2 px-3 font-mono text-[11px]">${formatFecha(m.fecha)}</td>
+        <td class="py-2 px-3"><span class="px-2 py-0.5 rounded text-[10px] ${badgeClass}">${m.tipo_movimiento}</span></td>
+        <td class="py-2 px-3 font-mono font-bold text-slate-800">${escapeHtml(m.documento)} ${m.referencia ? `<span class="text-slate-400 font-normal">(${escapeHtml(m.referencia)})</span>` : ''}</td>
+        <td class="py-2 px-3">${escapeHtml(m.tercero || '-')}</td>
+        <td class="py-2 px-3 text-slate-500">${escapeHtml(m.concepto || '-')}</td>
+        <!-- Entradas -->
+        <td class="py-2 px-2 text-right bg-emerald-50/40 text-emerald-900 font-semibold">${entCant}</td>
+        <td class="py-2 px-2 text-right bg-emerald-50/40 text-slate-600">${entUnit}</td>
+        <td class="py-2 px-2 text-right bg-emerald-50/40 text-emerald-800 font-bold border-r border-emerald-100">${entTot}</td>
+        <!-- Salidas -->
+        <td class="py-2 px-2 text-right bg-rose-50/40 text-rose-900 font-semibold">${salCant}</td>
+        <td class="py-2 px-2 text-right bg-rose-50/40 text-slate-600">${salUnit}</td>
+        <td class="py-2 px-2 text-right bg-rose-50/40 text-rose-800 font-bold border-r border-rose-100">${salTot}</td>
+        <!-- Saldo -->
+        <td class="py-2 px-2 text-right bg-slate-100/70 font-black text-slate-900">${m.saldo_cant}</td>
+        <td class="py-2 px-2 text-right bg-slate-100/70 text-slate-600">$${parseFloat(m.saldo_unit || 0).toFixed(2)}</td>
+        <td class="py-2 px-2 text-right bg-slate-100/70 font-black text-slate-900">$${parseFloat(m.saldo_total || 0).toFixed(2)}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function imprimirKardex() {
+  abrirVistaPreliminarReporte();
+}
+
+// ========================================================
+// REPORTE 7: INVENTARIO RÁPIDO (CÓDIGO, NOMBRE, STOCK)
+// ========================================================
+async function loadReporteInventarioSimple() {
+  const catSelect = document.getElementById('invSimpleCategoriaSelect');
+  if (catSelect && catSelect.options.length <= 1) {
+    try {
+      const resCat = await fetch('/api/categorias');
+      if (resCat.ok) {
+        const cats = await resCat.json();
+        catSelect.innerHTML = `<option value="">Todas las Categorías</option>` +
+          cats.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join('');
+      }
+    } catch(e) {}
+  }
+
+  const catId = catSelect?.value || '';
+  const q = document.getElementById('invSimpleSearchInput')?.value || '';
+
+  try {
+    const res = await fetch(`/api/reportes/inventario-simple?categoria_id=${encodeURIComponent(catId)}&q=${encodeURIComponent(q)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    AppState.reportesInvSimpleData = data;
+    renderReporteInventarioSimple();
+  } catch (err) {
+    console.error("Error al cargar inventario simple:", err);
+  }
+}
+
+function renderReporteInventarioSimple() {
+  const data = AppState.reportesInvSimpleData;
+  if (!data) return;
+
+  const q = (document.getElementById('invSimpleSearchInput')?.value || '').toLowerCase().trim();
+  const catSelect = document.getElementById('invSimpleCategoriaSelect');
+  const catNombre = catSelect && catSelect.selectedIndex > 0 ? catSelect.options[catSelect.selectedIndex].text : '';
+
+  let prods = data.productos || [];
+  if (q) {
+    prods = prods.filter(p => (p.codigo || '').toLowerCase().includes(q) || (p.nombre || '').toLowerCase().includes(q));
+  }
+  if (catNombre && catNombre !== 'Todas las Categorías') {
+    prods = prods.filter(p => p.categoria_nombre === catNombre);
+  }
+
+  const badge = document.getElementById('invSimpleCountBadge');
+  if (badge) badge.textContent = `${prods.length} ítems registrados`;
+
+  const tbody = document.getElementById('invSimpleTableBody');
+  if (!tbody) return;
+
+  if (prods.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8 text-slate-400">No se encontraron productos con los filtros aplicados.</td></tr>`;
+    return;
+  }
+
+  let totalUnidades = 0;
+  tbody.innerHTML = prods.map(p => {
+    const stock = parseFloat(p.stock || 0);
+    totalUnidades += stock;
+    const stockClass = stock <= 0 ? 'text-rose-600 bg-rose-50' : (stock <= 5 ? 'text-amber-600 bg-amber-50' : 'text-slate-900 bg-slate-50');
+
+    return `
+      <tr class="hover:bg-slate-50 transition border-b border-slate-100">
+        <td class="py-3 px-6 font-mono font-bold text-slate-800 text-xs">${escapeHtml(p.codigo)}</td>
+        <td class="py-3 px-6 font-medium text-slate-900 text-xs">${escapeHtml(p.nombre)}</td>
+        <td class="py-3 px-6 text-xs text-slate-500">${escapeHtml(p.categoria_nombre || '-')}</td>
+        <td class="py-3 px-6 text-right font-black text-sm ${stockClass} px-3 py-1 rounded">${stock}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const tfoot = document.getElementById('invSimpleTableFoot');
+  if (tfoot) {
+    tfoot.innerHTML = `
+      <tr>
+        <td colspan="2" class="py-3 px-6 uppercase tracking-wider text-xs font-bold text-slate-700">Total ítems mostrados: ${prods.length}</td>
+        <td class="py-3 px-6 text-right uppercase tracking-wider text-xs font-bold text-slate-700">Total Unidades Físicas:</td>
+        <td class="py-3 px-6 text-right font-black text-base text-slate-950 bg-slate-200/70">${totalUnidades}</td>
+      </tr>
+    `;
+  }
+}
+
+function imprimirInventarioSimple() {
+  abrirVistaPreliminarReporte();
+}
+
+// ========================================================
+// REPORTE 8: LIBRO DE VENTAS SENIAT (VENEZUELA)
+// ========================================================
+async function loadLibroVentasSeniat() {
+  const mesInput = document.getElementById('libroVentasMesInput');
+  if (mesInput && !mesInput.value) {
+    mesInput.value = new Date().toISOString().slice(0, 7);
+  }
+  const mes = mesInput?.value || new Date().toISOString().slice(0, 7);
+
+  try {
+    const res = await fetch(`/api/reportes/seniat/libro-ventas?mes=${encodeURIComponent(mes)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    AppState.reportesLibroVentasSeniat = data;
+    renderLibroVentasSeniat();
+  } catch (err) {
+    console.error("Error al cargar libro de ventas SENIAT:", err);
+  }
+}
+
+function renderLibroVentasSeniat() {
+  const data = AppState.reportesLibroVentasSeniat;
+  if (!data) return;
+
+  const r = data.resumen || data.totales || {};
+  const emp = data.empresa || data.contribuyente || {};
+  const totalBs = r.total_ventas_ves ?? r.total_ventas_netas_ves ?? 0;
+  const totalUsd = r.total_ventas_usd ?? r.total_ventas_netas_usd ?? 0;
+  const baseBs = r.total_base_imponible_ves ?? 0;
+  const baseUsd = r.total_base_imponible_usd ?? 0;
+  const debitoBs = r.total_iva_ves ?? r.total_iva_debito_ves ?? 0;
+  const debitoUsd = r.total_iva_usd ?? r.total_iva_debito_usd ?? 0;
+  const exentoBs = r.total_exento_ves ?? r.total_exentas_ves ?? 0;
+  const exentoUsd = r.total_exento_usd ?? r.total_exentas_usd ?? 0;
+  const mesLabel = data.mes && data.anio ? `${data.mes}/${data.anio}` : (data.periodo || '');
+  const tasaCierre = data.tasa_bcv_cierre || emp.tasa_ves || AppState.config.tasa_ves || 45.0;
+
+  document.getElementById('seniatVentasTotalBs').textContent = `${parseFloat(totalBs).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.`;
+  document.getElementById('seniatVentasTotalUsd').textContent = `≈ $${parseFloat(totalUsd).toFixed(2)} USD`;
+
+  document.getElementById('seniatVentasBaseBs').textContent = `${parseFloat(baseBs).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.`;
+  document.getElementById('seniatVentasBaseUsd').textContent = `≈ $${parseFloat(baseUsd).toFixed(2)} USD`;
+
+  document.getElementById('seniatVentasDebitoBs').textContent = `${parseFloat(debitoBs).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.`;
+  document.getElementById('seniatVentasDebitoUsd').textContent = `≈ $${parseFloat(debitoUsd).toFixed(2)} USD`;
+
+  document.getElementById('seniatVentasExentoBs').textContent = `${parseFloat(exentoBs).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.`;
+  document.getElementById('seniatVentasExentoUsd').textContent = `≈ $${parseFloat(exentoUsd).toFixed(2)} USD`;
+
+  document.getElementById('seniatVentasEmpresaNombre').textContent = emp.nombre || emp.nombre_negocio || AppState.config.nombre_negocio;
+  document.getElementById('seniatVentasEmpresaRif').textContent = emp.rif || emp.documento_fiscal || AppState.config.documento_fiscal;
+  document.getElementById('seniatVentasPeriodoLabel').textContent = `${mesLabel} (Tasa: ${parseFloat(tasaCierre).toFixed(2)} Bs.)`;
+
+  const tbody = document.getElementById('libroVentasTableBody');
+  const items = data.items || data.registros || [];
+  if (!tbody) return;
+
+  if (items.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="14" class="text-center py-8 text-slate-400 italic">No se registraron operaciones de ventas ni devoluciones en el período fiscal seleccionado.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = items.map(i => {
+    const isNc = i.es_devolucion;
+    const rowClass = isNc ? 'bg-rose-50/60 text-rose-950 font-semibold' : 'hover:bg-slate-50 text-slate-800';
+    return `
+      <tr class="${rowClass} transition border-b border-slate-100">
+        <td class="py-2 px-2 text-center font-mono font-bold">${i.operacion_nro}</td>
+        <td class="py-2 px-2 font-mono text-[10px]">${i.fecha}</td>
+        <td class="py-2 px-2 font-mono font-semibold">${escapeHtml(i.cliente_rif)}</td>
+        <td class="py-2 px-3">${escapeHtml(i.cliente_nombre)}</td>
+        <td class="py-2 px-2 font-mono font-bold">${escapeHtml(i.numero_factura || '-')}</td>
+        <td class="py-2 px-2 font-mono text-slate-600">${escapeHtml(i.numero_control || '-')}</td>
+        <td class="py-2 px-2 font-mono text-rose-700 font-bold">${escapeHtml(i.numero_nota_credito || '-')}</td>
+        <td class="py-2 px-2 font-mono text-slate-500">${escapeHtml(i.factura_afectada || '-')}</td>
+        <td class="py-2 px-2 text-center font-bold text-[10px]">${i.tipo_transaccion}</td>
+        <td class="py-2 px-2 text-right font-black ${isNc ? 'text-rose-700' : 'text-slate-900'}">${parseFloat(i.total_ventas_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2 px-2 text-right text-slate-500">${parseFloat(i.ventas_exentas_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2 px-2 text-right text-indigo-700 font-semibold">${parseFloat(i.base_imponible_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2 px-2 text-right text-rose-700 font-bold">${parseFloat(i.iva_debito_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2 px-2 text-right text-slate-500 font-mono text-[10px]">$${parseFloat(i.total_ventas_usd).toFixed(2)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const tfoot = document.getElementById('libroVentasTableFoot');
+  if (tfoot) {
+    tfoot.innerHTML = `
+      <tr>
+        <td colspan="9" class="py-2.5 px-3 text-right uppercase font-bold text-slate-900 text-xs">TOTALES DEL PERÍODO FISCAL:</td>
+        <td class="py-2.5 px-2 text-right font-black text-xs text-slate-950">${parseFloat(r.total_ventas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2.5 px-2 text-right font-bold text-xs text-slate-600">${parseFloat(r.total_exento_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2.5 px-2 text-right font-bold text-xs text-indigo-900">${parseFloat(r.total_base_imponible_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2.5 px-2 text-right font-black text-xs text-rose-800">${parseFloat(r.total_iva_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2.5 px-2 text-right font-black text-xs text-slate-900">$${parseFloat(r.total_ventas_usd || 0).toFixed(2)}</td>
+      </tr>
+    `;
+  }
+}
+
+function imprimirLibroVentasSeniat() {
+  abrirVistaPreliminarReporte();
+}
+
+function exportarLibroVentasCSV() {
+  exportReporteCsv('libro_ventas');
+}
+
+// ========================================================
+// REPORTE 9: LIBRO DE COMPRAS SENIAT (VENEZUELA)
+// ========================================================
+async function loadLibroComprasSeniat() {
+  const mesInput = document.getElementById('libroComprasMesInput');
+  if (mesInput && !mesInput.value) {
+    mesInput.value = new Date().toISOString().slice(0, 7);
+  }
+  const mes = mesInput?.value || new Date().toISOString().slice(0, 7);
+
+  try {
+    const res = await fetch(`/api/reportes/seniat/libro-compras?mes=${encodeURIComponent(mes)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    AppState.reportesLibroComprasSeniat = data;
+    renderLibroComprasSeniat();
+  } catch (err) {
+    console.error("Error al cargar libro de compras SENIAT:", err);
+  }
+}
+
+function renderLibroComprasSeniat() {
+  const data = AppState.reportesLibroComprasSeniat;
+  if (!data) return;
+
+  const r = data.resumen || data.totales || {};
+  const emp = data.empresa || data.contribuyente || {};
+  const totalBs = r.total_compras_ves ?? 0;
+  const totalUsd = r.total_compras_usd ?? 0;
+  const baseBs = r.total_base_imponible_ves ?? 0;
+  const baseUsd = r.total_base_imponible_usd ?? 0;
+  const creditoBs = r.total_iva_ves ?? r.total_iva_credito_ves ?? 0;
+  const creditoUsd = r.total_iva_usd ?? r.total_iva_credito_usd ?? 0;
+  const exentoBs = r.total_exento_ves ?? r.total_exentas_ves ?? 0;
+  const exentoUsd = r.total_exento_usd ?? r.total_exentas_usd ?? 0;
+  const mesLabel = data.mes && data.anio ? `${data.mes}/${data.anio}` : (data.periodo || '');
+  const tasaCierre = data.tasa_bcv_cierre || emp.tasa_ves || AppState.config.tasa_ves || 45.0;
+
+  document.getElementById('seniatComprasTotalBs').textContent = `${parseFloat(totalBs).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.`;
+  document.getElementById('seniatComprasTotalUsd').textContent = `≈ $${parseFloat(totalUsd).toFixed(2)} USD`;
+
+  document.getElementById('seniatComprasBaseBs').textContent = `${parseFloat(baseBs).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.`;
+  document.getElementById('seniatComprasBaseUsd').textContent = `≈ $${parseFloat(baseUsd).toFixed(2)} USD`;
+
+  document.getElementById('seniatComprasCreditoBs').textContent = `${parseFloat(creditoBs).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.`;
+  document.getElementById('seniatComprasCreditoUsd').textContent = `≈ $${parseFloat(creditoUsd).toFixed(2)} USD`;
+
+  document.getElementById('seniatComprasExentoBs').textContent = `${parseFloat(exentoBs).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.`;
+  document.getElementById('seniatComprasExentoUsd').textContent = `≈ $${parseFloat(exentoUsd).toFixed(2)} USD`;
+
+  document.getElementById('seniatComprasEmpresaNombre').textContent = emp.nombre || emp.nombre_negocio || AppState.config.nombre_negocio;
+  document.getElementById('seniatComprasEmpresaRif').textContent = emp.rif || emp.documento_fiscal || AppState.config.documento_fiscal;
+  document.getElementById('seniatComprasPeriodoLabel').textContent = `${mesLabel} (Tasa: ${parseFloat(tasaCierre).toFixed(2)} Bs.)`;
+
+  const tbody = document.getElementById('libroComprasTableBody');
+  const items = data.items || data.registros || [];
+  if (!tbody) return;
+
+  if (items.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="14" class="text-center py-8 text-slate-400 italic">No se registraron compras de mercancía en el período fiscal seleccionado.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = items.map(i => {
+    return `
+      <tr class="hover:bg-slate-50 transition border-b border-slate-100 text-slate-800">
+        <td class="py-2 px-2 text-center font-mono font-bold">${i.operacion_nro}</td>
+        <td class="py-2 px-2 font-mono text-[10px]">${i.fecha}</td>
+        <td class="py-2 px-2 font-mono font-semibold">${escapeHtml(i.proveedor_rif)}</td>
+        <td class="py-2 px-3">${escapeHtml(i.proveedor_nombre)}</td>
+        <td class="py-2 px-2 font-mono font-bold text-slate-900">${escapeHtml(i.numero_factura || '-')}</td>
+        <td class="py-2 px-2 font-mono text-slate-600">${escapeHtml(i.numero_control || '-')}</td>
+        <td class="py-2 px-2 font-mono text-slate-400">${escapeHtml(i.numero_nota_deb_cred || '-')}</td>
+        <td class="py-2 px-2 font-mono text-slate-400">${escapeHtml(i.factura_afectada || '-')}</td>
+        <td class="py-2 px-2 text-center font-bold text-[10px]">${i.tipo_transaccion}</td>
+        <td class="py-2 px-2 text-right font-black text-slate-950">${parseFloat(i.total_compras_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2 px-2 text-right text-slate-500">${parseFloat(i.compras_exentas_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2 px-2 text-right text-indigo-700 font-semibold">${parseFloat(i.base_imponible_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2 px-2 text-right text-emerald-700 font-bold">${parseFloat(i.iva_credito_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2 px-2 text-right text-slate-500 font-mono text-[10px]">$${parseFloat(i.total_compras_usd).toFixed(2)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const tfoot = document.getElementById('libroComprasTableFoot');
+  if (tfoot) {
+    tfoot.innerHTML = `
+      <tr>
+        <td colspan="9" class="py-2.5 px-3 text-right uppercase font-bold text-slate-900 text-xs">TOTALES DEL PERÍODO FISCAL:</td>
+        <td class="py-2.5 px-2 text-right font-black text-xs text-slate-950">${parseFloat(r.total_compras_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2.5 px-2 text-right font-bold text-xs text-slate-600">${parseFloat(r.total_exento_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2.5 px-2 text-right font-bold text-xs text-indigo-900">${parseFloat(r.total_base_imponible_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2.5 px-2 text-right font-black text-xs text-emerald-800">${parseFloat(r.total_iva_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td class="py-2.5 px-2 text-right font-black text-xs text-slate-900">$${parseFloat(r.total_compras_usd || 0).toFixed(2)}</td>
+      </tr>
+    `;
+  }
+}
+
+function imprimirLibroComprasSeniat() {
+  abrirVistaPreliminarReporte();
+}
+
+function exportarLibroComprasCSV() {
+  exportReporteCsv('libro_compras');
+}
+
+// ========================================================
+// REPORTE 10: LIBRO DE INVENTARIO ARTÍCULO 177 R-LISLR
+// ========================================================
+async function loadLibroInventarioArt177() {
+  const mesInput = document.getElementById('art177MesInput');
+  if (mesInput && !mesInput.value) {
+    mesInput.value = new Date().toISOString().slice(0, 7);
+  }
+  const mes = mesInput?.value || new Date().toISOString().slice(0, 7);
+
+  try {
+    const res = await fetch(`/api/reportes/seniat/libro-inventario-art177?mes=${encodeURIComponent(mes)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    AppState.reportesArt177Data = data;
+    renderLibroInventarioArt177();
+  } catch (err) {
+    console.error("Error al cargar Libro de Inventario Art 177:", err);
+  }
+}
+
+function renderLibroInventarioArt177() {
+  const data = AppState.reportesArt177Data;
+  if (!data) return;
+
+  const r = data.resumen || data.totales || {};
+  const totalInicialBs = r.total_inicial_ves ?? r.inicial_valor_ves ?? 0;
+  const totalInicialUsd = r.total_inicial_usd ?? r.inicial_valor_usd ?? 0;
+  const totalEntradasBs = r.total_entradas_ves ?? r.entradas_valor_ves ?? 0;
+  const totalEntradasUsd = r.total_entradas_usd ?? r.entradas_valor_usd ?? 0;
+  const totalSalidasBs = r.total_salidas_ves ?? r.salidas_valor_ves ?? 0;
+  const totalSalidasUsd = r.total_salidas_usd ?? r.salidas_valor_usd ?? 0;
+  const totalFinalBs = r.total_final_ves ?? r.final_valor_ves ?? 0;
+  const totalFinalUsd = r.total_final_usd ?? r.final_valor_usd ?? 0;
+
+  document.getElementById('art177TotalInicialBs').textContent = `${parseFloat(totalInicialBs).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.`;
+  document.getElementById('art177TotalInicialUsd').textContent = `≈ $${parseFloat(totalInicialUsd).toFixed(2)} USD`;
+
+  document.getElementById('art177TotalEntradasBs').textContent = `${parseFloat(totalEntradasBs).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.`;
+  document.getElementById('art177TotalEntradasUsd').textContent = `≈ $${parseFloat(totalEntradasUsd).toFixed(2)} USD`;
+
+  document.getElementById('art177TotalSalidasBs').textContent = `${parseFloat(totalSalidasBs).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.`;
+  document.getElementById('art177TotalSalidasUsd').textContent = `≈ $${parseFloat(totalSalidasUsd).toFixed(2)} USD`;
+
+  document.getElementById('art177TotalFinalBs').textContent = `${parseFloat(totalFinalBs).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.`;
+  document.getElementById('art177TotalFinalUsd').textContent = `≈ $${parseFloat(totalFinalUsd).toFixed(2)} USD`;
+
+  document.getElementById('art177PeriodoLabel').textContent = data.periodo || data.periodo_mes || '-';
+  document.getElementById('art177TasaBcvLabel').textContent = `${parseFloat(data.tasa_bcv || AppState.config.tasa_ves || 45.0).toFixed(2)} Bs.`;
+
+  const tbody = document.getElementById('art177TableBody');
+  const items = data.items || data.articulos || [];
+  if (!tbody) return;
+
+  if (items.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="14" class="text-center py-8 text-slate-400 italic">No hay productos ni mercancías registradas para el balance del período.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = items.map(i => {
+    const costoUnit = i.costo_unit_usd ?? i.costo_unitario ?? 0;
+    const inicialTotal = i.inicial_total_ves ?? i.inicial_valor_ves ?? 0;
+    const entradasTotal = i.entradas_total_ves ?? i.entradas_valor_ves ?? 0;
+    const salidasTotal = i.salidas_total_ves ?? i.salidas_valor_ves ?? 0;
+    const finalTotal = i.final_total_ves ?? i.final_valor_ves ?? 0;
+    return `
+      <tr class="hover:bg-slate-50 transition border-b border-slate-100 text-slate-800 text-xs">
+        <td class="py-2 px-3 font-mono font-bold text-slate-800">${escapeHtml(i.codigo)}</td>
+        <td class="py-2 px-3 font-medium">${escapeHtml(i.nombre)} <span class="text-slate-400 text-[10px]">(${escapeHtml(i.categoria || '')})</span></td>
+        <!-- Inicial -->
+        <td class="py-2 px-2 text-right font-semibold">${i.inicial_cant}</td>
+        <td class="py-2 px-2 text-right text-slate-500">$${parseFloat(costoUnit).toFixed(2)}</td>
+        <td class="py-2 px-2 text-right font-medium border-r border-slate-200">${parseFloat(inicialTotal).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <!-- Entradas -->
+        <td class="py-2 px-2 text-right bg-emerald-50/50 text-emerald-900 font-semibold">${i.entradas_cant}</td>
+        <td class="py-2 px-2 text-right bg-emerald-50/50 text-slate-500">$${parseFloat(costoUnit).toFixed(2)}</td>
+        <td class="py-2 px-2 text-right bg-emerald-50/50 text-emerald-900 font-bold border-r border-emerald-100">${parseFloat(entradasTotal).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <!-- Salidas -->
+        <td class="py-2 px-2 text-right bg-rose-50/50 text-rose-900 font-semibold">${i.salidas_cant}</td>
+        <td class="py-2 px-2 text-right bg-rose-50/50 text-slate-500">$${parseFloat(costoUnit).toFixed(2)}</td>
+        <td class="py-2 px-2 text-right bg-rose-50/50 text-rose-900 font-bold border-r border-rose-100">${parseFloat(salidasTotal).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <!-- Final -->
+        <td class="py-2 px-2 text-right bg-indigo-50/70 text-indigo-950 font-black">${i.final_cant}</td>
+        <td class="py-2 px-2 text-right bg-indigo-50/70 text-slate-600">$${parseFloat(costoUnit).toFixed(2)}</td>
+        <td class="py-2 px-2 text-right bg-indigo-50/70 text-indigo-950 font-black">${parseFloat(finalTotal).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const tfoot = document.getElementById('art177TableFoot');
+  if (tfoot) {
+    tfoot.innerHTML = `
+      <tr>
+        <td colspan="2" class="py-2.5 px-3 text-right uppercase font-bold text-slate-900 text-xs">VALORACIONES TOTALES CONSOLIDADAS:</td>
+        <td colspan="2" class="py-2.5 px-2 text-right text-slate-500 text-xs">$${parseFloat(r.total_inicial_usd || 0).toFixed(2)}</td>
+        <td class="py-2.5 px-2 text-right font-black text-xs text-slate-900">${parseFloat(r.total_inicial_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td colspan="2" class="py-2.5 px-2 text-right text-emerald-700 text-xs">$${parseFloat(r.total_entradas_usd || 0).toFixed(2)}</td>
+        <td class="py-2.5 px-2 text-right font-black text-xs text-emerald-900">${parseFloat(r.total_entradas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td colspan="2" class="py-2.5 px-2 text-right text-rose-700 text-xs">$${parseFloat(r.total_salidas_usd || 0).toFixed(2)}</td>
+        <td class="py-2.5 px-2 text-right font-black text-xs text-rose-900">${parseFloat(r.total_salidas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        <td colspan="2" class="py-2.5 px-2 text-right text-indigo-800 text-xs font-bold">$${parseFloat(r.total_final_usd || 0).toFixed(2)}</td>
+        <td class="py-2.5 px-2 text-right font-black text-xs text-indigo-950 bg-indigo-100">${parseFloat(r.total_final_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+      </tr>
+    `;
+  }
+}
+
+function imprimirLibroInventarioArt177() {
+  abrirVistaPreliminarReporte();
+}
+
+function exportarLibroArt177CSV() {
+  exportReporteCsv('art177');
 }
 
 // ========================================================
