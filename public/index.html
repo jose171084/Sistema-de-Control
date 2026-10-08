@@ -68,29 +68,17 @@
         <i class="fa-solid fa-building-user mr-3 text-purple-400"></i>
         <span data-label-key="tab_proveedores">7. Proveedores</span>
       </button>
+      <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn">
+        <i class="fa-solid fa-chart-column mr-3 text-sky-400"></i>
+        <span data-label-key="tab_reportes">8. Informes, Kardex & Fiscales</span>
+      </button>
       <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn">
         <i class="fa-solid fa-hand-holding-dollar mr-3 text-orange-400"></i>
-        <span data-label-key="tab_cxc">8. Cuentas por Cobrar</span>
+        <span data-label-key="tab_cxc">9. Cuentas por Cobrar</span>
       </button>
       <button onclick="navigate('cxp')" id="nav-cxp" class="sidebar-nav-btn">
         <i class="fa-solid fa-receipt mr-3 text-rose-400"></i>
-        <span data-label-key="tab_cxp">9. Cuentas por Pagar</span>
-      </button>
-      <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn">
-        <i class="fa-solid fa-chart-column mr-3 text-pink-400"></i>
-        <span data-label-key="tab_reportes">10. Reportes & Balances</span>
-      </button>
-      <button onclick="navigate('reportes'); setReportTab('kardex')" id="nav-kardex" class="sidebar-nav-btn">
-        <i class="fa-solid fa-timeline mr-3 text-cyan-400"></i>
-        <span data-label-key="tab_kardex">11. Kardex de Inventario</span>
-      </button>
-      <button onclick="navigate('reportes'); setReportTab('inv_simple')" id="nav-inv-simple" class="sidebar-nav-btn">
-        <i class="fa-solid fa-list-check mr-3 text-emerald-400"></i>
-        <span data-label-key="tab_inv_simple">12. Inventario Rápido</span>
-      </button>
-      <button onclick="navigate('reportes'); setReportTab('libro_ventas')" id="nav-fiscal" class="sidebar-nav-btn">
-        <i class="fa-solid fa-scale-balanced mr-3 text-sky-400"></i>
-        <span data-label-key="tab_fiscal">13. Libros Fiscales SENIAT</span>
+        <span data-label-key="tab_cxp">10. Cuentas por Pagar</span>
       </button>
     </nav>
 
@@ -141,28 +129,35 @@
   <div class="flex-1 flex flex-col min-w-0 min-h-screen">
     
     <!-- Barra Superior (Header) -->
-    <header class="app-header bg-white border-b border-slate-200 sticky top-0 z-20 px-4 sm:px-6 py-3 flex items-center justify-between shadow-sm">
-      <div class="flex items-center space-x-3">
+    <header class="app-header bg-white border-b border-slate-200 sticky top-0 z-20 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between shadow-xs">
+      <div class="flex items-center space-x-2 sm:space-x-3 min-w-0">
         <!-- Botón Toggle Menú Móvil -->
-        <button onclick="toggleMobileSidebar()" class="md:hidden p-2 text-slate-600 hover:text-slate-900 rounded-lg border border-slate-200">
-          <i class="fa-solid fa-bars text-lg"></i>
+        <button onclick="toggleMobileSidebar()" class="md:hidden p-2 text-slate-600 hover:text-slate-900 rounded-lg border border-slate-200 shrink-0" aria-label="Abrir Menú">
+          <i class="fa-solid fa-bars text-base"></i>
         </button>
-        <div>
-          <h2 class="font-bold text-base text-slate-800 leading-tight" id="headerBusinessName">Mi Negocio Comercial</h2>
-          <div class="flex items-center space-x-2 text-xs text-slate-500">
-            <span id="headerDocFiscal">J-12345678-9</span>
+        <div class="min-w-0">
+          <h2 class="font-bold text-sm sm:text-base text-slate-800 leading-tight truncate max-w-[120px] sm:max-w-xs" id="headerBusinessName">Mi Negocio Comercial</h2>
+          <div class="flex items-center space-x-1.5 text-[11px] sm:text-xs text-slate-500 truncate">
+            <span id="headerDocFiscal" class="truncate">J-12345678-9</span>
             <span>•</span>
-            <span class="text-emerald-600 font-medium flex items-center">
-              <i class="fa-solid fa-circle-check text-[10px] mr-1"></i>En línea
+            <span class="text-emerald-600 font-medium flex items-center shrink-0">
+              <i class="fa-solid fa-circle-check text-[9px] mr-1"></i>En línea
             </span>
           </div>
         </div>
       </div>
 
-      <!-- Tasas en Header (Tablet / Desktop) & Acciones Rápidas -->
-      <div class="flex items-center space-x-3">
-        <!-- Badge de Tasas -->
-        <div class="hidden lg:flex items-center space-x-3 bg-slate-50 px-3.5 py-1.5 rounded-xl border border-slate-200 text-xs">
+      <!-- Tasas en Header (Mobile + Tablet / Desktop) & Acciones Rápidas -->
+      <div class="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
+        <!-- Badge de Tasas Móvil (< 1024px) -->
+        <div class="flex lg:hidden items-center space-x-1.5 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200 text-[10px] font-mono shadow-xs" title="Tasas Oficiales del Día">
+          <span class="text-amber-700 font-bold"><i class="fa-solid fa-landmark text-amber-500 mr-0.5"></i><span id="mobileRateVes">45.00</span> Bs.</span>
+          <span class="text-slate-300">|</span>
+          <span class="text-emerald-700 font-bold"><i class="fa-solid fa-coins text-emerald-500 mr-0.5"></i><span id="mobileRateCop">4,100</span> COP</span>
+        </div>
+
+        <!-- Badge de Tasas Desktop (>= 1024px) -->
+        <div class="hidden lg:flex items-center space-x-3 bg-slate-50 px-3.5 py-1.5 rounded-xl border border-slate-200 text-xs shadow-xs">
           <div class="flex items-center space-x-1 font-medium">
             <span class="text-slate-500 font-semibold">BCV:</span>
             <span class="text-amber-700 font-bold" id="headerRateVes">45.00 Bs.</span>
@@ -172,21 +167,21 @@
             <span class="text-slate-500 font-semibold">TRM:</span>
             <span class="text-emerald-700 font-bold" id="headerRateCop">4,100 COP</span>
           </div>
-          <button onclick="sincronizarTasasOficiales()" title="Sincronizar Tasas Oficiales de BCV y TRM" class="text-slate-500 hover:text-indigo-600 ml-1 transition">
+          <button onclick="sincronizarTasasOficiales()" title="Sincronizar Tasas Oficiales de BCV y TRM" class="text-slate-500 hover:text-sky-600 ml-1 transition">
             <i class="fa-solid fa-arrows-rotate"></i>
           </button>
         </div>
 
         <!-- Botones de Acción Rápida -->
-        <button onclick="navigate('facturacion')" class="btn-theme-factura text-white px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow flex items-center transition">
-          <i class="fa-solid fa-cash-register mr-1.5"></i>
-          <span data-label-key="btn_nueva_venta">Nueva Venta</span>
+        <button onclick="navigate('facturacion')" class="btn-theme-factura text-white px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-xs flex items-center transition" title="Nueva Venta">
+          <i class="fa-solid fa-cash-register sm:mr-1.5"></i>
+          <span class="hidden sm:inline" data-label-key="btn_nueva_venta">Nueva Venta</span>
         </button>
-        <button onclick="navigate('compras')" class="btn-theme-compra text-white px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow flex items-center transition">
-          <i class="fa-solid fa-cart-shopping mr-1.5"></i>
-          <span data-label-key="btn_cargar_compra">Cargar Compra</span>
+        <button onclick="navigate('compras')" class="btn-theme-compra text-white px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-xs flex items-center transition" title="Cargar Compra">
+          <i class="fa-solid fa-cart-shopping sm:mr-1.5"></i>
+          <span class="hidden sm:inline" data-label-key="btn_cargar_compra">Cargar Compra</span>
         </button>
-        <button onclick="openPersonalizacionModal()" title="Personalizar Colores y Nombres" class="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition">
+        <button onclick="openPersonalizacionModal()" title="Personalizar Colores y Nombres" class="p-1.5 sm:p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition">
           <i class="fa-solid fa-palette text-sm"></i>
         </button>
       </div>
@@ -1644,57 +1639,76 @@
          VISTA 9: CENTRO DE REPORTES & ESTADÍSTICAS
          ======================================================== -->
     <section id="view-reportes" class="hidden space-y-6">
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
         <div>
-          <h2 class="text-2xl font-bold text-slate-800 flex items-center">
-            <i class="fa-solid fa-chart-column text-indigo-600 mr-2.5"></i>
-            Módulo 8: Centro de Reportes & Análisis
+          <h2 class="text-xl sm:text-2xl font-bold text-slate-800 flex items-center">
+            <i class="fa-solid fa-chart-column text-sky-600 mr-2.5"></i>
+            Módulo 8: Informes, Kardex & Libros Fiscales
           </h2>
-          <p class="text-sm text-slate-500">
-            Valoración total de inventario, ventas diarias con desglose de monedas, análisis mensual y cuentas por cobrar.
+          <p class="text-xs sm:text-sm text-slate-500">
+            Kardex cronológico valorizado, inventario rápido, libros fiscales SENIAT (Ventas, Compras, Art. 177) y análisis comercial.
           </p>
         </div>
         <div class="flex items-center space-x-2">
-          <button onclick="abrirVistaPreliminarReporte()" class="text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-xl shadow-sm transition flex items-center">
+          <button onclick="abrirVistaPreliminarReporte()" class="text-xs sm:text-sm btn-theme-fiscal text-white font-semibold px-3 sm:px-4 py-2 rounded-xl shadow-xs transition flex items-center">
             <i class="fa-solid fa-file-invoice mr-1.5"></i>Vista Preliminar / PDF
           </button>
-          <button onclick="recargarReporteActual()" class="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-3.5 py-2 rounded-xl transition flex items-center">
+          <button onclick="recargarReporteActual()" class="text-xs sm:text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-3 py-2 rounded-xl transition flex items-center">
             <i class="fa-solid fa-rotate-right mr-1.5"></i>Actualizar
           </button>
         </div>
       </div>
 
-      <!-- Pestañas internas de reportes -->
-      <div class="flex space-x-2 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
-        <button onclick="setReportTab('inventario')" id="btn-subtab-rep-inventario" class="px-4 py-2 rounded-xl text-sm font-bold bg-indigo-600 text-white shadow-xs transition whitespace-nowrap">
-          <i class="fa-solid fa-boxes-stacked mr-1.5"></i>Inventario & Valoración
+      <!-- Selector Móvil de Informes para Teléfonos (< 640px) -->
+      <div class="sm:hidden bg-slate-50 p-2.5 rounded-xl border border-slate-200 shadow-xs">
+        <label for="mobileReportSelector" class="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center">
+          <i class="fa-solid fa-folder-tree mr-1 text-sky-600"></i>Seleccionar Informe / Libro Fiscal:
+        </label>
+        <select id="mobileReportSelector" onchange="setReportTab(this.value)" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 shadow-xs focus:ring-2 focus:ring-sky-500">
+          <option value="kardex">📦 1. Kardex de Inventario (Entradas, Salidas & Saldos)</option>
+          <option value="inv_simple">📋 2. Stock Rápido (3 Columnas con Categorías)</option>
+          <option value="libro_ventas">⚖️ 3. Libro de Ventas SENIAT (Venezuela)</option>
+          <option value="libro_compras">🛒 4. Libro de Compras SENIAT (Venezuela)</option>
+          <option value="art177">📑 5. Libro de Inventario Art. 177 LISLR</option>
+          <option value="diarias">📊 6. Ventas Diarias (Monedas & Devoluciones)</option>
+          <option value="mensuales">📅 7. Ventas Mensuales</option>
+          <option value="inventario">🏢 8. Inventario General & Valoración</option>
+          <option value="cxc">💵 9. Cuentas por Cobrar (CXC)</option>
+          <option value="cxp">🧾 10. Cuentas por Pagar (CXP)</option>
+        </select>
+      </div>
+
+      <!-- Pestañas Horizontales Desktop / Tablet (>= 640px) -->
+      <div class="hidden sm:flex space-x-1.5 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
+        <button onclick="setReportTab('kardex')" id="btn-subtab-rep-kardex" class="px-3.5 py-2 rounded-xl text-xs font-bold btn-theme-primary text-white shadow-xs transition whitespace-nowrap">
+          <i class="fa-solid fa-timeline mr-1.5 text-sky-300"></i>Kardex de Inventario
         </button>
-        <button onclick="setReportTab('diarias')" id="btn-subtab-rep-diarias" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
-          <i class="fa-solid fa-calendar-day mr-1.5"></i>Ventas Diarias (Monedas)
-        </button>
-        <button onclick="setReportTab('mensuales')" id="btn-subtab-rep-mensuales" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
-          <i class="fa-solid fa-calendar-days mr-1.5"></i>Ventas Mensuales
-        </button>
-        <button onclick="setReportTab('kardex')" id="btn-subtab-rep-kardex" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
-          <i class="fa-solid fa-timeline mr-1.5 text-cyan-600"></i>Kardex de Inventario
-        </button>
-        <button onclick="setReportTab('inv_simple')" id="btn-subtab-rep-inv_simple" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+        <button onclick="setReportTab('inv_simple')" id="btn-subtab-rep-inv_simple" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
           <i class="fa-solid fa-list-check mr-1.5 text-emerald-600"></i>Stock Rápido (3 Col.)
         </button>
-        <button onclick="setReportTab('libro_ventas')" id="btn-subtab-rep-libro_ventas" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+        <button onclick="setReportTab('libro_ventas')" id="btn-subtab-rep-libro_ventas" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
           <i class="fa-solid fa-book mr-1.5 text-sky-600"></i>Libro Ventas SENIAT
         </button>
-        <button onclick="setReportTab('libro_compras')" id="btn-subtab-rep-libro_compras" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+        <button onclick="setReportTab('libro_compras')" id="btn-subtab-rep-libro_compras" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
           <i class="fa-solid fa-book-open mr-1.5 text-amber-600"></i>Libro Compras SENIAT
         </button>
-        <button onclick="setReportTab('art177')" id="btn-subtab-rep-art177" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
-          <i class="fa-solid fa-scale-balanced mr-1.5 text-indigo-600"></i>Libro Inv. Art. 177 LISLR
+        <button onclick="setReportTab('art177')" id="btn-subtab-rep-art177" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-scale-balanced mr-1.5 text-indigo-600"></i>Libro Inv. Art. 177
         </button>
-        <button onclick="setReportTab('cxc')" id="btn-subtab-rep-cxc" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
-          <i class="fa-solid fa-hand-holding-dollar mr-1.5"></i>Cuentas por Cobrar
+        <button onclick="setReportTab('diarias')" id="btn-subtab-rep-diarias" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-calendar-day mr-1.5 text-slate-600"></i>Ventas Diarias
         </button>
-        <button onclick="setReportTab('cxp')" id="btn-subtab-rep-cxp" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
-          <i class="fa-solid fa-file-invoice-dollar mr-1.5"></i>Cuentas por Pagar
+        <button onclick="setReportTab('mensuales')" id="btn-subtab-rep-mensuales" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-calendar-days mr-1.5 text-slate-600"></i>Ventas Mensuales
+        </button>
+        <button onclick="setReportTab('inventario')" id="btn-subtab-rep-inventario" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-boxes-stacked mr-1.5 text-slate-600"></i>Inventario General
+        </button>
+        <button onclick="setReportTab('cxc')" id="btn-subtab-rep-cxc" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-hand-holding-dollar mr-1.5 text-orange-600"></i>CXC
+        </button>
+        <button onclick="setReportTab('cxp')" id="btn-subtab-rep-cxp" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
+          <i class="fa-solid fa-file-invoice-dollar mr-1.5 text-rose-600"></i>CXP
         </button>
       </div>
 
@@ -2743,6 +2757,32 @@
       </div>
     </section>
   </main>
+
+  <!-- ========================================================
+       BARRA DE NAVEGACIÓN INFERIOR PARA TELÉFONOS MÓVILES (BOTTOM NAV)
+       ======================================================== -->
+  <nav class="mobile-bottom-nav md:hidden" id="mobileBottomNav">
+    <button onclick="navigate('dashboard')" class="mobile-nav-item active" id="mob-nav-dashboard" title="Panel Principal">
+      <i class="fa-solid fa-chart-pie"></i>
+      <span>Inicio</span>
+    </button>
+    <button onclick="navigate('facturacion')" class="mobile-nav-item" id="mob-nav-facturacion" title="Punto de Venta">
+      <i class="fa-solid fa-file-invoice-dollar"></i>
+      <span>Ventas</span>
+    </button>
+    <button onclick="navigate('productos')" class="mobile-nav-item" id="mob-nav-productos" title="Productos y Stock">
+      <i class="fa-solid fa-box"></i>
+      <span>Stock</span>
+    </button>
+    <button onclick="navigate('reportes')" class="mobile-nav-item" id="mob-nav-reportes" title="Informes, Kardex y Fiscales">
+      <i class="fa-solid fa-chart-column"></i>
+      <span>Informes</span>
+    </button>
+    <button onclick="toggleMobileSidebar()" class="mobile-nav-item" title="Abrir Menú Completo">
+      <i class="fa-solid fa-bars"></i>
+      <span>Menú</span>
+    </button>
+  </nav>
 </div>
 
   <!-- ========================================================
@@ -2789,6 +2829,13 @@
           <div>
             <label class="block font-bold text-slate-700 uppercase tracking-wider text-[11px] mb-2">Paletas Rápidas Prediseñadas</label>
             <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <button type="button" onclick="aplicarPresetTema('zen_fresco')" class="flex items-center p-2 rounded-xl border-2 border-sky-500 bg-sky-50/70 hover:bg-sky-100 text-left transition col-span-2 sm:col-span-1 shadow-xs">
+                <span class="w-4 h-4 rounded-full bg-sky-600 mr-2 flex-shrink-0"></span>
+                <div>
+                  <strong class="font-bold text-sky-950 block text-[11px]">Brisa Zen (Predeterminado)</strong>
+                  <span class="text-[9px] text-sky-700">Fresco, calmado & proactivo</span>
+                </div>
+              </button>
               <button type="button" onclick="aplicarPresetTema('indigo')" class="flex items-center p-2 rounded-xl border border-slate-200 hover:border-indigo-500 hover:shadow-sm text-left transition">
                 <span class="w-4 h-4 rounded-full bg-indigo-600 mr-2 flex-shrink-0"></span>
                 <span class="font-medium text-slate-700">Índigo Clásico</span>
@@ -2800,10 +2847,6 @@
               <button type="button" onclick="aplicarPresetTema('azul')" class="flex items-center p-2 rounded-xl border border-slate-200 hover:border-blue-500 hover:shadow-sm text-left transition">
                 <span class="w-4 h-4 rounded-full bg-blue-600 mr-2 flex-shrink-0"></span>
                 <span class="font-medium text-slate-700">Azul Corporativo</span>
-              </button>
-              <button type="button" onclick="aplicarPresetTema('violeta')" class="flex items-center p-2 rounded-xl border border-slate-200 hover:border-purple-500 hover:shadow-sm text-left transition">
-                <span class="w-4 h-4 rounded-full bg-purple-600 mr-2 flex-shrink-0"></span>
-                <span class="font-medium text-slate-700">Violeta Dark</span>
               </button>
               <button type="button" onclick="aplicarPresetTema('oscuro')" class="flex items-center p-2 rounded-xl border border-slate-200 hover:border-slate-800 hover:shadow-sm text-left transition">
                 <span class="w-4 h-4 rounded-full bg-slate-900 mr-2 flex-shrink-0"></span>
@@ -2956,28 +2999,16 @@
               <input type="text" id="customTabProveedores" placeholder="7. Proveedores" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 8 (Cuentas por Cobrar)</label>
-              <input type="text" id="customTabCxc" placeholder="8. Cuentas por Cobrar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 8 (Informes & Fiscales)</label>
+              <input type="text" id="customTabReportes" placeholder="8. Informes, Kardex & Fiscales" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 9 (Cuentas por Pagar)</label>
-              <input type="text" id="customTabCxp" placeholder="9. Cuentas por Pagar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 9 (Cuentas por Cobrar)</label>
+              <input type="text" id="customTabCxc" placeholder="9. Cuentas por Cobrar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 10 (Reportes & Balances)</label>
-              <input type="text" id="customTabReportes" placeholder="10. Reportes & Balances" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
-            </div>
-            <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 11 (Kardex de Inventario)</label>
-              <input type="text" id="customTabKardex" placeholder="11. Kardex de Inventario" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
-            </div>
-            <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 12 (Inventario Rápido)</label>
-              <input type="text" id="customTabInvSimple" placeholder="12. Inventario Rápido" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
-            </div>
-            <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 13 (Libros Fiscales SENIAT)</label>
-              <input type="text" id="customTabFiscal" placeholder="13. Libros Fiscales SENIAT" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Pestaña 10 (Cuentas por Pagar)</label>
+              <input type="text" id="customTabCxp" placeholder="10. Cuentas por Pagar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
           </div>
         </div>

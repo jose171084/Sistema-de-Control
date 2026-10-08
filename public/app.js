@@ -42,7 +42,7 @@ const AppState = {
   abonoCxpPagos: [],
   abonoCxpActual: null,
   // Estado de Reportes
-  reportesTabActual: 'inventario',
+  reportesTabActual: 'kardex',
   reportesInventarioData: null,
   reportesInventarioFilterTipo: 'todos',
   reportesVentasDiariasData: null,
@@ -76,6 +76,21 @@ const AppState = {
 // CONFIGURACIÓN DE TEMAS Y ETIQUETAS PERSONALIZABLES
 // ========================================================
 const THEME_PRESETS = {
+  zen_fresco: {
+    sidebarBg: '#1e293b',
+    sidebarText: '#f8fafc',
+    primaryColor: '#0284c7',
+    primaryHover: '#0369a1',
+    bgApp: '#f8fafc',
+    headerBg: '#ffffff',
+    btnFactura: '#0284c7',
+    btnCompra: '#475569',
+    btnCxc: '#0d9488',
+    btnCxp: '#64748b',
+    btnDevoluciones: '#0891b2',
+    btnKardex: '#0284c7',
+    btnFiscal: '#0369a1'
+  },
   indigo: {
     sidebarBg: '#0f172a',
     sidebarText: '#f8fafc',
@@ -168,7 +183,7 @@ const THEME_PRESETS = {
   }
 };
 
-const DEFAULT_THEME = { ...THEME_PRESETS.indigo };
+const DEFAULT_THEME = { ...THEME_PRESETS.zen_fresco };
 
 const DEFAULT_LABELS = {
   titulo_app: "Inventario & Facturación",
@@ -181,12 +196,9 @@ const DEFAULT_LABELS = {
   tab_devoluciones: "5. Devoluciones & NC",
   tab_compras: "6. Compras",
   tab_proveedores: "7. Proveedores",
-  tab_cxc: "8. Cuentas por Cobrar",
-  tab_cxp: "9. Cuentas por Pagar",
-  tab_reportes: "10. Reportes & Balances",
-  tab_kardex: "11. Kardex de Inventario",
-  tab_inv_simple: "12. Inventario Rápido",
-  tab_fiscal: "13. Libros Fiscales SENIAT",
+  tab_reportes: "8. Informes, Kardex & Fiscales",
+  tab_cxc: "9. Cuentas por Cobrar",
+  tab_cxp: "10. Cuentas por Pagar",
   btn_nueva_venta: "Nueva Venta",
   btn_cargar_compra: "Cargar Compra",
   btn_procesar_venta: "Completar Facturación",
@@ -282,6 +294,18 @@ function initPersonalizacion() {
       const local = localStorage.getItem('sis_labels');
       if (local) labelsGuardados = JSON.parse(local);
     } catch(e) {}
+  }
+
+  // Si el tema guardado correspondía al tema antiguo por defecto, actualizar al nuevo tema Zen Fresco
+  if (temaGuardado && (temaGuardado.primaryColor === '#4f46e5' || temaGuardado.sidebarBg === '#0f172a' || temaGuardado.sidebarBg === '#2d2e2f')) {
+    temaGuardado = { ...DEFAULT_THEME, ...THEME_PRESETS.zen_fresco };
+    try { localStorage.setItem('sis_tema', JSON.stringify(temaGuardado)); } catch(e) {}
+  }
+
+  // Asegurar que la pestaña 8 quede con su nombre consolidado
+  if (labelsGuardados && (labelsGuardados.tab_reportes === '10. Reportes & Balances' || !labelsGuardados.tab_reportes)) {
+    labelsGuardados.tab_reportes = DEFAULT_LABELS.tab_reportes;
+    try { localStorage.setItem('sis_labels', JSON.stringify(labelsGuardados)); } catch(e) {}
   }
 
   AppState.temaActual = temaGuardado ? { ...DEFAULT_THEME, ...temaGuardado } : { ...DEFAULT_THEME };
@@ -576,6 +600,19 @@ function navigate(viewName) {
     }
   });
 
+  // Sincronizar indicador de la Barra Inferior Móvil (Bottom Nav)
+  const mobItems = ['dashboard', 'facturacion', 'productos', 'reportes'];
+  mobItems.forEach(m => {
+    const mobBtn = document.getElementById(`mob-nav-${m}`);
+    if (mobBtn) {
+      if (m === viewName) {
+        mobBtn.classList.add('active');
+      } else {
+        mobBtn.classList.remove('active');
+      }
+    }
+  });
+
   // Acciones específicas al entrar a una vista
   if (viewName === 'dashboard') loadDashboard();
   if (viewName === 'categorias') loadCategorias();
@@ -639,6 +676,11 @@ function updateConfigUI() {
   if (hRateVes) hRateVes.textContent = vesStr;
   const sRateVes = document.getElementById('sidebarRateVes');
   if (sRateVes) sRateVes.textContent = vesStr;
+
+  const mRateVes = document.getElementById('mobileRateVes');
+  if (mRateVes) mRateVes.textContent = parseFloat(cfg.tasa_ves || 45.0).toFixed(2);
+  const mRateCop = document.getElementById('mobileRateCop');
+  if (mRateCop) mRateCop.textContent = Math.round(cfg.tasa_cop || 4100.0).toLocaleString('es-CO');
 
   const hRateCop = document.getElementById('headerRateCop');
   if (hRateCop) hRateCop.textContent = copStr;
@@ -5344,12 +5386,19 @@ function loadReportes() {
   if (fechaInput && !fechaInput.value) {
     fechaInput.value = new Date().toISOString().split('T')[0];
   }
-  setReportTab(AppState.reportesTabActual || 'inventario');
+  setReportTab(AppState.reportesTabActual || 'kardex');
 }
 
 function setReportTab(tabName) {
+  if (!tabName) tabName = 'kardex';
   AppState.reportesTabActual = tabName;
-  const tabs = ['inventario', 'diarias', 'mensuales', 'kardex', 'inv_simple', 'libro_ventas', 'libro_compras', 'art177', 'cxc', 'cxp'];
+  const tabs = ['kardex', 'inv_simple', 'libro_ventas', 'libro_compras', 'art177', 'diarias', 'mensuales', 'inventario', 'cxc', 'cxp'];
+
+  // Sincronizar selector móvil si existe
+  const mobSelect = document.getElementById('mobileReportSelector');
+  if (mobSelect && mobSelect.value !== tabName) {
+    mobSelect.value = tabName;
+  }
 
   tabs.forEach(t => {
     const btn = document.getElementById(`btn-subtab-rep-${t}`);
@@ -5363,9 +5412,9 @@ function setReportTab(tabName) {
     }
     if (btn) {
       if (t === tabName) {
-        btn.className = 'px-4 py-2 rounded-xl text-sm font-bold bg-indigo-600 text-white shadow-xs transition whitespace-nowrap';
+        btn.className = 'px-3.5 py-2 rounded-xl text-xs font-bold btn-theme-primary text-white shadow-xs transition whitespace-nowrap';
       } else {
-        btn.className = 'px-4 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap';
+        btn.className = 'px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap';
       }
     }
   });
