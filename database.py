@@ -542,10 +542,25 @@ def init_db():
     # Sembrar configuración inicial si no existe
     cursor.execute("SELECT COUNT(*) FROM configuracion")
     if cursor.fetchone()[0] == 0:
+        tema_zen = json.dumps({
+            "sidebarBg": "#0f172a",
+            "sidebarText": "#f8fafc",
+            "primaryColor": "#14b8a6",
+            "primaryHover": "#0d9488",
+            "bgApp": "#f8fafc",
+            "headerBg": "#ffffff",
+            "btnFactura": "#14b8a6",
+            "btnCompra": "#0ea5e9",
+            "btnCxc": "#10b981",
+            "btnCxp": "#64748b",
+            "btnDevoluciones": "#06b6d4",
+            "btnKardex": "#14b8a6",
+            "btnFiscal": "#0284c7"
+        })
         cursor.execute("""
-        INSERT INTO configuracion (id, nombre_negocio, documento_fiscal, telefono, direccion, iva_porcentaje, tasa_ves, tasa_cop, moneda_principal)
-        VALUES (1, 'Mi Negocio Comercial', 'J-12345678-9', '+58 412 0000000', 'Av. Principal, Edificio Central, Local 1', 16.0, 45.00, 4100.00, 'USD')
-        """)
+        INSERT INTO configuracion (id, nombre_negocio, documento_fiscal, telefono, direccion, iva_porcentaje, tasa_ves, tasa_cop, moneda_principal, tema, tema_config)
+        VALUES (1, 'Mi Negocio Comercial', 'J-12345678-9', '+58 412 0000000', 'Av. Principal, Edificio Central, Local 1', 16.0, 45.00, 4100.00, 'USD', ?, ?)
+        """, (tema_zen, tema_zen))
 
     # Sembrar categorías base si está vacío
     cursor.execute("SELECT COUNT(*) FROM categorias")

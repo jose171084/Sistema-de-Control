@@ -8,6 +8,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Estilos Custom Soft UI y Tematización Dinámica -->
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans min-h-screen antialiased overflow-x-hidden md:flex selection:bg-teal-100 selection:text-teal-900">
 
@@ -24,7 +26,7 @@
         </div>
         <div>
           <h1 class="font-bold text-base leading-tight tracking-wide" id="sidebarBusinessName" data-label-key="titulo_app">Mi Negocio</h1>
-          <p class="text-xs text-indigo-300" id="sidebarSubtitle" data-label-key="subtitulo_app">Control Multimoneda</p>
+          <p class="text-xs text-teal-300" id="sidebarSubtitle" data-label-key="subtitulo_app">Control Multimoneda</p>
         </div>
       </div>
       <!-- Botón cerrar para móvil -->
@@ -33,56 +35,56 @@
       </button>
     </div>
 
-    <!-- Navegación Vertical con Pestañas (Con Barra de Desplazamiento Propia e Independiente) -->
-    <nav class="flex-1 p-3 space-y-1.5 overflow-y-auto" id="sidebarNavList">
-      <button onclick="navigate('dashboard')" id="nav-dashboard" class="sidebar-nav-btn active-nav">
-        <i class="fa-solid fa-chart-pie mr-3 text-indigo-400"></i>
+    <!-- Navegación Vertical con Pestañas (Minimalista, Sofisticada y Coherente) -->
+    <nav class="flex-1 p-3 space-y-1 overflow-y-auto" id="sidebarNavList">
+      <button onclick="navigate('dashboard')" id="nav-dashboard" class="sidebar-nav-btn active-nav group">
+        <i class="fa-solid fa-chart-pie mr-3 text-slate-400 group-hover:text-white transition-colors"></i>
         <span data-label-key="tab_dashboard">Dashboard</span>
       </button>
-      <button onclick="navigate('categorias')" id="nav-categorias" class="sidebar-nav-btn">
-        <i class="fa-solid fa-tags mr-3 text-cyan-400"></i>
+      <button onclick="navigate('categorias')" id="nav-categorias" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-tags mr-3 text-slate-400 group-hover:text-white transition-colors"></i>
         <span data-label-key="tab_categorias">1. Categorías</span>
       </button>
-      <button onclick="navigate('productos')" id="nav-productos" class="sidebar-nav-btn">
-        <i class="fa-solid fa-box mr-3 text-amber-400"></i>
+      <button onclick="navigate('productos')" id="nav-productos" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-box mr-3 text-slate-400 group-hover:text-white transition-colors"></i>
         <span data-label-key="tab_productos">2. Productos & Servicios</span>
       </button>
-      <button onclick="navigate('clientes')" id="nav-clientes" class="sidebar-nav-btn">
-        <i class="fa-solid fa-users mr-3 text-emerald-400"></i>
+      <button onclick="navigate('clientes')" id="nav-clientes" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-users mr-3 text-slate-400 group-hover:text-white transition-colors"></i>
         <span data-label-key="tab_clientes">3. Clientes</span>
       </button>
-      <button onclick="navigate('facturacion')" id="nav-facturacion" class="sidebar-nav-btn">
-        <i class="fa-solid fa-file-invoice-dollar mr-3 text-green-400"></i>
+      <button onclick="navigate('facturacion')" id="nav-facturacion" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-file-invoice-dollar mr-3 text-slate-400 group-hover:text-white transition-colors"></i>
         <span data-label-key="tab_facturacion">4. Facturación (Ventas)</span>
       </button>
-      <button onclick="navigate('devoluciones')" id="nav-devoluciones" class="sidebar-nav-btn">
-        <i class="fa-solid fa-arrow-rotate-left mr-3 text-cyan-400"></i>
+      <button onclick="navigate('devoluciones')" id="nav-devoluciones" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-arrow-rotate-left mr-3 text-slate-400 group-hover:text-white transition-colors"></i>
         <span data-label-key="tab_devoluciones">5. Devoluciones</span>
       </button>
-      <button onclick="navigate('compras')" id="nav-compras" class="sidebar-nav-btn">
-        <i class="fa-solid fa-truck-ramp-box mr-3 text-blue-400"></i>
+      <button onclick="navigate('compras')" id="nav-compras" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-truck-ramp-box mr-3 text-slate-400 group-hover:text-white transition-colors"></i>
         <span data-label-key="tab_compras">6. Compras</span>
       </button>
-      <button onclick="navigate('proveedores')" id="nav-proveedores" class="sidebar-nav-btn">
-        <i class="fa-solid fa-building-user mr-3 text-purple-400"></i>
+      <button onclick="navigate('proveedores')" id="nav-proveedores" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-building-user mr-3 text-slate-400 group-hover:text-white transition-colors"></i>
         <span data-label-key="tab_proveedores">7. Proveedores</span>
       </button>
-      <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn">
-        <i class="fa-solid fa-chart-column mr-3 text-sky-400"></i>
+      <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-chart-column mr-3 text-slate-400 group-hover:text-white transition-colors"></i>
         <span data-label-key="tab_reportes">8. Informes, Kardex & Fiscales</span>
       </button>
-      <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn">
-        <i class="fa-solid fa-hand-holding-dollar mr-3 text-orange-400"></i>
+      <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-hand-holding-dollar mr-3 text-slate-400 group-hover:text-white transition-colors"></i>
         <span data-label-key="tab_cxc">9. Cuentas por Cobrar</span>
       </button>
-      <button onclick="navigate('cxp')" id="nav-cxp" class="sidebar-nav-btn">
-        <i class="fa-solid fa-receipt mr-3 text-rose-400"></i>
+      <button onclick="navigate('cxp')" id="nav-cxp" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-receipt mr-3 text-slate-400 group-hover:text-white transition-colors"></i>
         <span data-label-key="tab_cxp">10. Cuentas por Pagar</span>
       </button>
     </nav>
 
     <!-- Tarjeta de Tasas de Cambio en Sidebar -->
-    <div class="p-3 mx-3 my-2 rounded-xl bg-slate-800/90 border border-slate-700/60 text-xs space-y-2">
+    <div class="p-3.5 mx-3 my-2 rounded-2xl bg-slate-800/80 border border-slate-700/50 text-xs space-y-2 shadow-xs">
       <div class="flex items-center justify-between cursor-pointer" onclick="openTasasModal()" title="Configurar Tasas y Modo de Sincronización">
         <span class="font-bold text-slate-300 flex items-center">
           <i class="fa-solid fa-coins text-amber-400 mr-1.5 text-xs"></i>
@@ -94,19 +96,19 @@
       </div>
       <div class="space-y-1 cursor-pointer font-mono text-xs" onclick="openTasasModal()" title="Clic para modificar tasas manualmente o cambiar modo">
         <div class="flex justify-between items-center py-0.5">
-          <span class="text-slate-400 flex items-center"><i class="fa-solid fa-landmark text-amber-400 mr-1"></i>BCV USD:</span>
+          <span class="text-slate-400 flex items-center"><i class="fa-solid fa-landmark text-amber-400 mr-1.5 text-[11px]"></i>BCV USD:</span>
           <strong class="text-amber-300 font-mono font-bold" id="sidebarRateVes">45.00 Bs.</strong>
         </div>
         <div class="flex justify-between items-center py-0.5">
-          <span class="text-slate-400 flex items-center"><i class="fa-solid fa-scale-balanced text-emerald-400 mr-1"></i>TRM USD:</span>
+          <span class="text-slate-400 flex items-center"><i class="fa-solid fa-scale-balanced text-emerald-400 mr-1.5 text-[11px]"></i>TRM USD:</span>
           <strong class="text-emerald-300 font-mono font-bold" id="sidebarRateCop">4,100 COP</strong>
         </div>
       </div>
-      <div class="grid grid-cols-2 gap-1.5 mt-1 pt-1 border-t border-slate-700/60">
-        <button onclick="openTasasModal()" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold py-1.5 px-2 rounded-lg text-[10px] flex items-center justify-center transition" title="Modificar tasas manualmente o apagar sincronización">
+      <div class="grid grid-cols-2 gap-1.5 mt-1 pt-1.5 border-t border-slate-700/50">
+        <button onclick="openTasasModal()" class="bg-slate-700/80 hover:bg-slate-700 text-slate-200 font-semibold py-1.5 px-2 rounded-xl text-[10px] flex items-center justify-center transition" title="Modificar tasas manualmente o apagar sincronización">
           <i class="fa-solid fa-pen-to-square mr-1 text-sky-400"></i>Modo / Editar
         </button>
-        <button onclick="sincronizarTasasOficiales()" id="btnSyncTasasSidebar" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-1.5 px-2 rounded-lg text-[10px] flex items-center justify-center transition shadow-sm" title="Consultar BCV y TRM ahora">
+        <button onclick="sincronizarTasasOficiales()" id="btnSyncTasasSidebar" class="btn-theme-primary text-white font-semibold py-1.5 px-2 rounded-xl text-[10px] flex items-center justify-center transition shadow-xs" title="Consultar BCV y TRM ahora">
           <i class="fa-solid fa-rotate mr-1" id="iconSyncTasas"></i>Sincronizar
         </button>
       </div>
@@ -357,10 +359,10 @@
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
           <div class="flex items-center justify-between mb-4">
             <h3 class="font-bold text-slate-800 flex items-center">
-              <i class="fa-solid fa-crown text-indigo-600 mr-2"></i>
+              <i class="fa-solid fa-crown text-amber-500 mr-2"></i>
               Top 5 Mejores Clientes
             </h3>
-            <button onclick="navigate('clientes')" class="text-xs font-semibold text-indigo-600 hover:text-indigo-700">
+            <button onclick="navigate('clientes')" class="text-xs font-semibold text-teal-600 hover:text-teal-700">
               Ver Clientes &rarr;
             </button>
           </div>
@@ -391,7 +393,7 @@
 
       <!-- Filtros de Categorías -->
       <div class="flex space-x-2 border-b border-slate-200 pb-3">
-        <button onclick="filterCategorias('todos')" id="filter-cat-todos" class="px-3.5 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 text-white">Todos</button>
+        <button onclick="filterCategorias('todos')" id="filter-cat-todos" class="px-3.5 py-1.5 rounded-lg text-sm font-medium bg-slate-800 text-white">Todos</button>
         <button onclick="filterCategorias('producto')" id="filter-cat-producto" class="px-3.5 py-1.5 rounded-lg text-sm font-medium bg-slate-200 text-slate-700 hover:bg-slate-300">Solo Productos (Controlan Stock)</button>
         <button onclick="filterCategorias('servicio')" id="filter-cat-servicio" class="px-3.5 py-1.5 rounded-lg text-sm font-medium bg-slate-200 text-slate-700 hover:bg-slate-300">Solo Servicios (No Manejan Stock)</button>
       </div>
@@ -437,15 +439,15 @@
         <div class="relative w-full md:w-96">
           <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
           <input type="text" id="prodSearchInput" oninput="loadProductos()" placeholder="Buscar por nombre o código..." 
-                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:bg-white transition">
         </div>
         <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          <select id="prodFilterTipo" onchange="loadProductos()" class="bg-slate-50 border border-slate-200 text-slate-700 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-indigo-500">
+          <select id="prodFilterTipo" onchange="loadProductos()" class="bg-slate-50 border border-slate-200 text-slate-700 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20">
             <option value="">Todos los tipos</option>
             <option value="producto">Solo Productos (Controlan existencia)</option>
             <option value="servicio">Solo Servicios (Sin existencia)</option>
           </select>
-          <select id="prodFilterCategoria" onchange="loadProductos()" class="bg-slate-50 border border-slate-200 text-slate-700 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-indigo-500">
+          <select id="prodFilterCategoria" onchange="loadProductos()" class="bg-slate-50 border border-slate-200 text-slate-700 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20">
             <option value="">Todas las categorías</option>
           </select>
         </div>
@@ -494,7 +496,7 @@
         <div class="relative w-full sm:w-96">
           <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
           <input type="text" id="clienteSearchInput" oninput="loadClientes()" placeholder="Buscar por nombre o cédula/RIF..." 
-                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:bg-white transition">
         </div>
       </div>
 
@@ -550,9 +552,9 @@
           <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
             <div class="flex items-center justify-between">
               <label class="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center">
-                <i class="fa-solid fa-user-tag mr-1.5 text-indigo-600"></i>Cliente Receptor *
+                <i class="fa-solid fa-user-tag mr-1.5 text-teal-600"></i>Cliente Receptor *
               </label>
-              <button onclick="openClienteModal(false, 'facturacion')" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800">
+              <button onclick="openClienteModal(false, 'facturacion')" class="text-xs font-semibold text-teal-600 hover:text-teal-700">
                 + Crear Nuevo Cliente
               </button>
             </div>
@@ -561,7 +563,7 @@
             <div class="relative">
               <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
               <input type="text" id="posClienteSearchInput" oninput="buscarClientePOS(this.value)" onfocus="buscarClientePOS(this.value)" placeholder="Buscar cliente por Nombre o Cédula / RIF..." autocomplete="off"
-                     class="w-full pl-10 pr-24 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+                     class="w-full pl-10 pr-24 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:bg-white transition">
               <button type="button" id="btnClearClientePOS" onclick="limpiarClientePOS()" class="hidden absolute right-2.5 top-2 text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1 rounded-lg font-medium">
                 Cambiar
               </button>
@@ -571,9 +573,9 @@
             </div>
 
             <!-- Tarjeta de Cliente Seleccionado -->
-            <div id="posClienteSelectedCard" class="hidden bg-indigo-50/70 border border-indigo-200 p-3 rounded-xl flex items-center justify-between text-xs">
+            <div id="posClienteSelectedCard" class="hidden bg-teal-50/70 border border-teal-200 p-3 rounded-xl flex items-center justify-between text-xs">
               <div class="flex items-center space-x-3">
-                <div class="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold">
+                <div class="w-8 h-8 rounded-full btn-theme-primary text-white flex items-center justify-center font-bold">
                   <i class="fa-solid fa-user"></i>
                 </div>
                 <div>
@@ -594,10 +596,10 @@
               <div class="relative w-full">
                 <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400 text-sm"></i>
                 <input type="text" id="posSearchProduct" oninput="renderPosCatalog()" placeholder="Buscar ítem para agregar..." 
-                       class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500">
+                       class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20">
               </div>
               <div class="flex space-x-1 shrink-0">
-                <button onclick="setPosFilterCategory('todos')" id="posCat-todos" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white">Todos</button>
+                <button onclick="setPosFilterCategory('todos')" id="posCat-todos" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-white">Todos</button>
                 <button onclick="setPosFilterCategory('producto')" id="posCat-producto" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Productos</button>
                 <button onclick="setPosFilterCategory('servicio')" id="posCat-servicio" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Servicios</button>
               </div>
@@ -640,7 +642,7 @@
               </div>
               <div class="flex justify-between items-baseline pt-2 border-t border-slate-200">
                 <span class="text-base font-bold text-slate-900">Total a Pagar (USD):</span>
-                <span class="text-2xl font-extrabold text-indigo-700" id="posTotalUsd">$0.00</span>
+                <span class="text-2xl font-extrabold text-slate-800" id="posTotalUsd">$0.00</span>
               </div>
               <!-- Conversiones de Referencia -->
               <div class="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
@@ -659,7 +661,7 @@
             <div class="border-t border-slate-200 pt-3 space-y-2.5">
               <div class="flex items-center justify-between">
                 <span class="text-xs font-bold uppercase text-slate-600 tracking-wider">
-                  <i class="fa-solid fa-handshake mr-1 text-indigo-600"></i>Condición de Venta:
+                  <i class="fa-solid fa-handshake mr-1 text-teal-600"></i>Condición de Venta:
                 </span>
                 <div class="inline-flex rounded-lg border border-slate-300 p-0.5 bg-slate-200">
                   <button type="button" onclick="setPosTipoVenta('contado')" id="btnTipoVentaContado" class="px-3 py-1 rounded-md text-xs font-bold bg-white text-slate-900 shadow-xs transition">
@@ -708,9 +710,9 @@
               </div>
 
               <!-- Balance / Saldo restante o Cambio -->
-              <div class="bg-indigo-50/70 p-3 rounded-xl border border-indigo-100 flex items-center justify-between text-xs font-medium">
+              <div class="bg-slate-100/80 p-3 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs font-medium">
                 <div>
-                  <span class="text-indigo-900 block">Total Pagado: <strong id="posPagadoUsd">$0.00</strong></span>
+                  <span class="text-slate-700 block">Total Pagado: <strong id="posPagadoUsd">$0.00</strong></span>
                   <span class="text-slate-500" id="posPagadoDetalle">0 pagos</span>
                 </div>
                 <div class="text-right">
@@ -1141,7 +1143,7 @@
           <button onclick="toggleHistorialCompras()" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-sm font-medium shadow-sm transition">
             <i class="fa-solid fa-list mr-1.5"></i>Historial de Compras
           </button>
-          <button onclick="nuevaCompraForm()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow transition">
+          <button onclick="nuevaCompraForm()" class="btn-theme-compra text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm transition">
             <i class="fa-solid fa-plus mr-1.5"></i>Nueva Carga de Compra
           </button>
         </div>
@@ -1154,7 +1156,7 @@
         <div class="lg:col-span-5 space-y-4">
           <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
             <h3 class="font-bold text-slate-800 flex items-center">
-              <i class="fa-solid fa-truck-field mr-2 text-blue-600"></i>
+              <i class="fa-solid fa-truck-field mr-2 text-sky-600"></i>
               Datos de la Compra & Proveedor
             </h3>
 
@@ -1162,9 +1164,9 @@
             <div>
               <div class="flex justify-between items-center mb-1">
                 <label class="text-xs font-semibold text-slate-600">Proveedor *</label>
-                <button onclick="openProveedorModal()" class="text-xs text-blue-600 hover:underline">+ Crear Proveedor</button>
+                <button onclick="openProveedorModal()" class="text-xs text-sky-600 font-semibold hover:underline">+ Crear Proveedor</button>
               </div>
-              <select id="compraProveedorSelect" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+              <select id="compraProveedorSelect" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20">
                 <option value="">Seleccione proveedor...</option>
               </select>
             </div>
@@ -1172,32 +1174,32 @@
             <!-- Número de Control / Factura del Proveedor -->
             <div>
               <label class="block text-xs font-semibold text-slate-600 mb-1">N° de Factura / Control del Proveedor *</label>
-              <input type="text" id="compraNumeroControl" placeholder="Ej: F-987654" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+              <input type="text" id="compraNumeroControl" placeholder="Ej: F-987654" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20">
             </div>
 
             <!-- Fecha de Compra -->
             <div>
               <label class="block text-xs font-semibold text-slate-600 mb-1">Fecha de la Factura *</label>
-              <input type="date" id="compraFecha" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-blue-500">
+              <input type="date" id="compraFecha" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20">
             </div>
 
             <!-- CARGA DE FOTO DE LA FACTURA -->
             <div class="border-t border-slate-100 pt-3">
               <label class="block text-xs font-semibold text-slate-700 mb-1 flex items-center">
-                <i class="fa-solid fa-camera mr-1.5 text-indigo-600"></i>
+                <i class="fa-solid fa-camera mr-1.5 text-teal-600"></i>
                 Foto de la Factura del Proveedor
               </label>
               <p class="text-xs text-slate-400 mb-2">Sube o toma una foto del comprobante físico para soporte contable.</p>
               
               <div class="flex items-center space-x-2">
-                <input type="file" id="compraFotoInput" accept="image/*" capture="environment" onchange="previewFotoFactura(event)" class="text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                <input type="file" id="compraFotoInput" accept="image/*" capture="environment" onchange="previewFotoFactura(event)" class="text-xs text-slate-500 file:mr-2 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-sky-50 file:text-sky-700 hover:file:bg-sky-100">
               </div>
 
               <!-- Vista previa de la foto de la factura -->
               <div id="compraFotoPreviewContainer" class="hidden mt-3 border border-slate-200 rounded-xl p-2 bg-slate-50 text-center relative group">
                 <img id="compraFotoImg" src="" alt="Foto Factura" class="max-h-48 mx-auto rounded-lg object-contain shadow-sm cursor-pointer" onclick="verFotoAmpliada()">
                 <div class="mt-1 flex justify-center space-x-2">
-                  <button type="button" onclick="verFotoAmpliada()" class="text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-lg">
+                  <button type="button" onclick="verFotoAmpliada()" class="text-xs btn-theme-primary text-white px-2.5 py-1 rounded-lg shadow-sm">
                     <i class="fa-solid fa-expand mr-1"></i>Ampliar
                   </button>
                   <button type="button" onclick="eliminarFotoFactura()" class="text-xs bg-rose-600 text-white px-2.5 py-1 rounded-lg">
@@ -1210,7 +1212,7 @@
             <!-- Notas -->
             <div>
               <label class="block text-xs font-semibold text-slate-600 mb-1">Observaciones / Notas</label>
-              <textarea id="compraNotas" rows="2" placeholder="Detalles de entrega, crédito, etc." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-blue-500"></textarea>
+              <textarea id="compraNotas" rows="2" placeholder="Detalles de entrega, crédito, etc." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"></textarea>
             </div>
 
           </div>
@@ -1249,7 +1251,7 @@
                   <input type="number" id="compraItemCosto" value="0.00" min="0" step="any" placeholder="Costo $" class="w-full bg-white border border-slate-200 py-2 px-2 rounded-lg text-xs" title="Costo Unitario ($)">
                 </div>
                 <div class="sm:col-span-2">
-                  <button onclick="agregarItemACompra()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 rounded-lg text-xs transition">
+                  <button onclick="agregarItemACompra()" class="w-full btn-theme-compra text-white font-semibold py-2.5 rounded-xl text-xs transition shadow-sm">
                     + Añadir
                   </button>
                 </div>
@@ -1293,10 +1295,10 @@
             <div class="border-t border-slate-200 pt-3 space-y-3">
               <div class="flex items-center justify-between">
                 <span class="text-xs font-bold uppercase text-slate-600 tracking-wider">
-                  <i class="fa-solid fa-file-invoice-dollar mr-1 text-blue-600"></i>Condición de Compra
+                  <i class="fa-solid fa-file-invoice-dollar mr-1 text-sky-600"></i>Condición de Compra
                 </span>
                 <div class="flex bg-slate-100 p-1 rounded-lg">
-                  <button type="button" onclick="setCompraTipo('contado')" id="btnCompraTipoContado" class="px-3 py-1 rounded-md text-xs font-bold bg-white text-blue-700 shadow-xs transition">
+                  <button type="button" onclick="setCompraTipo('contado')" id="btnCompraTipoContado" class="px-3 py-1 rounded-md text-xs font-bold bg-white text-sky-700 shadow-xs transition">
                     Al Contado
                   </button>
                   <button type="button" onclick="setCompraTipo('credito')" id="btnCompraTipoCredito" class="px-3 py-1 rounded-md text-xs font-bold text-slate-600 hover:text-slate-900 transition">
@@ -1309,7 +1311,7 @@
               <div id="compraPagosContainer" class="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
                 <div class="flex items-center justify-between">
                   <span class="text-xs font-semibold text-slate-700">Formas de Pago de la Compra:</span>
-                  <button type="button" onclick="addCompraPagoRow()" class="text-xs font-bold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition">
+                  <button type="button" onclick="addCompraPagoRow()" class="text-xs font-bold text-sky-700 hover:text-sky-800 bg-sky-50 hover:bg-sky-100 px-2.5 py-1 rounded-lg border border-sky-200 transition">
                     + Otra Moneda (Pago Mixto)
                   </button>
                 </div>
@@ -1394,7 +1396,7 @@
         <div class="relative w-full sm:w-96">
           <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
           <input type="text" id="proveedorSearchInput" oninput="loadProveedores()" placeholder="Buscar por razón social o RIF/Cédula..." 
-                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:bg-white transition">
         </div>
       </div>
 
@@ -1437,7 +1439,7 @@
           <button onclick="loadCxc()" class="text-sm bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl shadow-sm transition">
             <i class="fa-solid fa-rotate-right mr-1.5"></i>Actualizar
           </button>
-          <button onclick="navigate('facturacion')" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow transition">
+          <button onclick="navigate('facturacion')" class="btn-theme-primary text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-sm transition">
             <i class="fa-solid fa-plus mr-1.5"></i>Nueva Factura a Crédito
           </button>
         </div>
@@ -1499,10 +1501,10 @@
         <div class="relative w-full md:w-96">
           <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
           <input type="text" id="cxcSearchInput" oninput="loadCxc()" placeholder="Buscar por cliente, cédula o factura..." 
-                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+                 class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:bg-white transition">
         </div>
         <div class="flex flex-wrap items-center gap-1.5 w-full md:w-auto">
-          <button onclick="filterCxcEstado('todos')" id="cxcFilter-todos" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white">Todas</button>
+          <button onclick="filterCxcEstado('todos')" id="cxcFilter-todos" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-white">Todas</button>
           <button onclick="filterCxcEstado('pendiente')" id="cxcFilter-pendiente" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pendientes</button>
           <button onclick="filterCxcEstado('vencida')" id="cxcFilter-vencida" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Vencidas</button>
           <button onclick="filterCxcEstado('pagada')" id="cxcFilter-pagada" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pagadas</button>
@@ -1712,7 +1714,7 @@
           <i class="fa-solid fa-book-open mr-1.5 text-amber-600"></i>Libro Compras SENIAT
         </button>
         <button onclick="setReportTab('art177')" id="btn-subtab-rep-art177" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
-          <i class="fa-solid fa-scale-balanced mr-1.5 text-indigo-600"></i>Libro Inv. Art. 177
+          <i class="fa-solid fa-scale-balanced mr-1.5 text-teal-600"></i>Libro Inv. Art. 177
         </button>
         <button onclick="setReportTab('diarias')" id="btn-subtab-rep-diarias" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition whitespace-nowrap">
           <i class="fa-solid fa-calendar-day mr-1.5 text-slate-600"></i>Ventas Diarias
@@ -1743,7 +1745,7 @@
               <h3 class="text-2xl font-bold text-slate-900 mt-1" id="repInvTotalCostoUsd">$0.00</h3>
               <p class="text-xs text-slate-500 mt-0.5" id="repInvTotalCostoBs">0.00 Bs. | 0 COP</p>
             </div>
-            <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
+            <div class="w-12 h-12 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center text-xl">
               <i class="fa-solid fa-vault"></i>
             </div>
           </div>
@@ -1762,10 +1764,10 @@
           <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
             <div>
               <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Ganancia Bruta Potencial</p>
-              <h3 class="text-2xl font-bold text-blue-600 mt-1" id="repInvGananciaUsd">$0.00</h3>
+              <h3 class="text-2xl font-bold text-sky-600 mt-1" id="repInvGananciaUsd">$0.00</h3>
               <p class="text-xs text-slate-500 mt-0.5">Venta total menos costo</p>
             </div>
-            <div class="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl">
+            <div class="w-12 h-12 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center text-xl">
               <i class="fa-solid fa-chart-line"></i>
             </div>
           </div>
@@ -1787,10 +1789,10 @@
           <div class="relative w-full md:w-96">
             <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
             <input type="text" id="repInvSearchInput" oninput="renderReporteInventarioTabla()" placeholder="Buscar ítem por nombre o código..." 
-                   class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+                   class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:bg-white transition">
           </div>
           <div class="flex items-center gap-1.5 w-full md:w-auto">
-            <button onclick="filterRepInvTipo('todos')" id="repInvFilter-todos" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white">Todos</button>
+            <button onclick="filterRepInvTipo('todos')" id="repInvFilter-todos" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-white">Todos</button>
             <button onclick="filterRepInvTipo('producto')" id="repInvFilter-producto" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Solo Productos (Stock)</button>
             <button onclick="filterRepInvTipo('servicio')" id="repInvFilter-servicio" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Solo Servicios</button>
           </div>
@@ -1832,11 +1834,11 @@
         <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div class="flex items-center space-x-3 w-full sm:w-auto">
             <span class="text-sm font-semibold text-slate-700 flex items-center">
-              <i class="fa-solid fa-calendar-day text-indigo-600 mr-2"></i>Fecha de Consulta:
+              <i class="fa-solid fa-calendar-day text-teal-600 mr-2"></i>Fecha de Consulta:
             </span>
             <input type="date" id="repVentasFechaInput" onchange="loadReporteVentasDiarias()" 
-                   class="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-sm font-bold text-slate-800 focus:outline-none focus:border-indigo-500">
-            <button onclick="setRepVentasHoy()" class="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold rounded-xl text-xs transition">
+                   class="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-sm font-bold text-slate-800 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20">
+            <button onclick="setRepVentasHoy()" class="px-3 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 font-semibold rounded-xl text-xs transition">
               Hoy
             </button>
           </div>
@@ -1850,7 +1852,7 @@
           <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
             <div class="flex items-center justify-between text-slate-400">
               <span class="text-[11px] font-semibold uppercase tracking-wider">Facturas</span>
-              <i class="fa-solid fa-receipt text-indigo-500"></i>
+              <i class="fa-solid fa-receipt text-teal-600"></i>
             </div>
             <div class="mt-2">
               <h3 class="text-2xl font-bold text-slate-800" id="repDiaFacturasCount">0</h3>
@@ -1861,10 +1863,10 @@
           <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
             <div class="flex items-center justify-between text-slate-400">
               <span class="text-[11px] font-semibold uppercase tracking-wider">Venta Bruta</span>
-              <i class="fa-solid fa-file-invoice-dollar text-indigo-500"></i>
+              <i class="fa-solid fa-file-invoice-dollar text-teal-600"></i>
             </div>
             <div class="mt-2">
-              <h3 class="text-2xl font-bold text-indigo-700" id="repDiaTotalFacturadoUsd">$0.00</h3>
+              <h3 class="text-2xl font-bold text-slate-800" id="repDiaTotalFacturadoUsd">$0.00</h3>
               <p class="text-[11px] text-slate-500 mt-0.5" id="repDiaSubtotalUsd">Subtotal: $0.00</p>
             </div>
           </div>
@@ -1918,7 +1920,7 @@
         <div class="bg-slate-900 text-white p-3.5 rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
           <div class="flex flex-wrap items-center gap-2 font-bold">
             <span class="text-slate-300">Total Facturado:</span>
-            <span class="text-indigo-300 bg-slate-800 px-2 py-0.5 rounded-lg font-mono text-sm" id="repDiaFormulaFacturado">$0.00</span>
+            <span class="text-teal-300 bg-slate-800 px-2 py-0.5 rounded-lg font-mono text-sm" id="repDiaFormulaFacturado">$0.00</span>
             <span class="text-rose-400 text-base font-extrabold">-</span>
             <span class="text-rose-300">Devoluciones:</span>
             <span class="text-rose-300 bg-slate-800 px-2 py-0.5 rounded-lg font-mono text-sm" id="repDiaFormulaDevoluciones">$0.00</span>
@@ -1963,14 +1965,14 @@
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4">
               <div class="flex items-center justify-between border-b pb-3 border-slate-100">
                 <div class="flex items-center space-x-2.5">
-                  <span class="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs">Bs</span>
+                  <span class="w-9 h-9 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center font-bold text-xs">Bs</span>
                   <div>
                     <h4 class="font-bold text-slate-800 text-sm">Bolívares (VES)</h4>
                     <p class="text-[11px] text-slate-400">Pago Móvil, Transferencia, Punto</p>
                   </div>
                 </div>
                 <div class="text-right">
-                  <span class="text-lg font-black text-blue-600 block" id="repMonedaTotalVes">0.00 Bs.</span>
+                  <span class="text-lg font-black text-sky-600 block" id="repMonedaTotalVes">0.00 Bs.</span>
                   <span class="text-[11px] text-slate-400 font-semibold" id="repMonedaEquivVesUsd">≈ $0.00</span>
                 </div>
               </div>
@@ -2073,10 +2075,10 @@
           <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
             <div>
               <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Total Histórico Facturado</p>
-              <h3 class="text-2xl font-bold text-indigo-700 mt-1" id="repMesTotalHistoricoUsd">$0.00</h3>
+              <h3 class="text-2xl font-bold text-slate-800 mt-1" id="repMesTotalHistoricoUsd">$0.00</h3>
               <p class="text-xs text-slate-500 mt-0.5">Suma de todas las ventas</p>
             </div>
-            <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
+            <div class="w-12 h-12 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center text-xl">
               <i class="fa-solid fa-chart-pie"></i>
             </div>
           </div>
@@ -2120,7 +2122,7 @@
                   <th class="py-3 px-4 text-right">Ventas Crédito ($)</th>
                   <th class="py-3 px-4 text-right">Subtotal ($)</th>
                   <th class="py-3 px-4 text-right">IVA ($)</th>
-                  <th class="py-3 px-4 text-right font-bold text-indigo-700 bg-indigo-50/50">Total Facturado ($)</th>
+                  <th class="py-3 px-4 text-right font-bold text-slate-700 bg-slate-100/70">Total Facturado ($)</th>
                   <th class="py-3 px-4 text-right">Equiv. Bolívares</th>
                   <th class="py-3 px-4 text-right">Equiv. Pesos COP</th>
                 </tr>
@@ -2189,10 +2191,10 @@
           <div class="relative w-full md:w-96">
             <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
             <input type="text" id="repCxcSearchInput" oninput="renderReporteCxcTabla()" placeholder="Buscar por cliente, cédula o factura..." 
-                   class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition">
+                   class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 focus:bg-white transition">
           </div>
           <div class="flex items-center gap-1.5 w-full md:w-auto">
-            <button onclick="filterRepCxcEstado('todos')" id="repCxcFilter-todos" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white">Todas</button>
+            <button onclick="filterRepCxcEstado('todos')" id="repCxcFilter-todos" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-white">Todas</button>
             <button onclick="filterRepCxcEstado('pendiente')" id="repCxcFilter-pendiente" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pendientes</button>
             <button onclick="filterRepCxcEstado('vencida')" id="repCxcFilter-vencida" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Vencidas</button>
             <button onclick="filterRepCxcEstado('pagada')" id="repCxcFilter-pagada" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pagadas</button>
@@ -2524,7 +2526,7 @@
           </div>
           <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
             <p class="text-[11px] font-semibold uppercase text-slate-400">Base Imponible (16% IVA)</p>
-            <h3 class="text-xl font-bold text-indigo-700 mt-1" id="seniatVentasBaseBs">0.00 Bs.</h3>
+            <h3 class="text-xl font-bold text-slate-800 mt-1" id="seniatVentasBaseBs">0.00 Bs.</h3>
             <p class="text-xs text-slate-500" id="seniatVentasBaseUsd">≈ $0.00 USD</p>
           </div>
           <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
@@ -2612,7 +2614,7 @@
           </div>
           <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
             <p class="text-[11px] font-semibold uppercase text-slate-400">Base Imponible (16% IVA)</p>
-            <h3 class="text-xl font-bold text-indigo-700 mt-1" id="seniatComprasBaseBs">0.00 Bs.</h3>
+            <h3 class="text-xl font-bold text-slate-800 mt-1" id="seniatComprasBaseBs">0.00 Bs.</h3>
             <p class="text-xs text-slate-500" id="seniatComprasBaseUsd">≈ $0.00 USD</p>
           </div>
           <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
@@ -2675,9 +2677,9 @@
           <div class="flex items-center gap-3">
             <div>
               <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Período Mensual (Mes / Año)</label>
-              <input type="month" id="art177MesInput" onchange="loadLibroInventarioArt177()" class="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-800 focus:outline-none focus:border-indigo-500">
+              <input type="month" id="art177MesInput" onchange="loadLibroInventarioArt177()" class="bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-800 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20">
             </div>
-            <button onclick="loadLibroInventarioArt177()" class="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2 px-4 rounded-xl shadow-sm">
+            <button onclick="loadLibroInventarioArt177()" class="mt-4 btn-theme-fiscal text-white font-bold text-xs py-2 px-4 rounded-xl shadow-sm">
               <i class="fa-solid fa-arrows-rotate mr-1.5"></i>Generar Libro Art. 177
             </button>
           </div>
@@ -2719,10 +2721,10 @@
             <h3 class="text-xl font-bold text-rose-700 mt-1" id="art177TotalSalidasBs">0.00 Bs.</h3>
             <p class="text-xs text-slate-500" id="art177TotalSalidasUsd">≈ $0.00 USD</p>
           </div>
-          <div class="bg-white p-4 rounded-2xl shadow-sm border border-indigo-200 bg-indigo-50/20">
-            <p class="text-[11px] font-bold uppercase text-indigo-700">Inventario Final al Cierre</p>
-            <h3 class="text-xl font-black text-indigo-900 mt-1" id="art177TotalFinalBs">0.00 Bs.</h3>
-            <p class="text-xs text-indigo-700 font-semibold" id="art177TotalFinalUsd">≈ $0.00 USD</p>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-teal-200 bg-teal-50/30">
+            <p class="text-[11px] font-bold uppercase text-teal-700">Inventario Final al Cierre</p>
+            <h3 class="text-xl font-black text-slate-800 mt-1" id="art177TotalFinalBs">0.00 Bs.</h3>
+            <p class="text-xs text-teal-700 font-semibold" id="art177TotalFinalUsd">≈ $0.00 USD</p>
           </div>
         </div>
 
@@ -2743,7 +2745,7 @@
                   <th class="py-1 px-3 text-center bg-slate-200/70 border-x border-slate-300" colspan="3">INVENTARIO INICIAL</th>
                   <th class="py-1 px-3 text-center bg-emerald-100/70 border-r border-emerald-200 text-emerald-900" colspan="3">ENTRADAS DEL MES</th>
                   <th class="py-1 px-3 text-center bg-rose-100/70 border-r border-rose-200 text-rose-900" colspan="3">SALIDAS DEL MES</th>
-                  <th class="py-1 px-3 text-center bg-indigo-100/70 text-indigo-900 font-black" colspan="3">INVENTARIO FINAL</th>
+                  <th class="py-1 px-3 text-center bg-slate-100 text-slate-800 font-black" colspan="3">INVENTARIO FINAL</th>
                 </tr>
                 <tr class="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-600">
                   <!-- Inicial -->
@@ -2759,9 +2761,9 @@
                   <th class="py-1 px-2 text-right bg-rose-50 text-rose-900">C. Unit ($)</th>
                   <th class="py-1 px-2 text-right bg-rose-50 text-rose-900 border-r border-rose-200">Total Bs.</th>
                   <!-- Final -->
-                  <th class="py-1 px-2 text-right bg-indigo-50 text-indigo-950 font-black">Cant.</th>
-                  <th class="py-1 px-2 text-right bg-indigo-50 text-indigo-950">C. Unit ($)</th>
-                  <th class="py-1 px-2 text-right bg-indigo-50 text-indigo-950 font-black">Total Bs.</th>
+                  <th class="py-1 px-2 text-right bg-slate-50 text-slate-700 font-black">Cant.</th>
+                  <th class="py-1 px-2 text-right bg-slate-50 text-slate-700">C. Unit ($)</th>
+                  <th class="py-1 px-2 text-right bg-slate-50 text-slate-700 font-black">Total Bs.</th>
                 </tr>
               </thead>
               <tbody id="art177TableBody" class="divide-y divide-slate-100">
@@ -2829,7 +2831,7 @@
 
       <!-- Pestañas internas de personalización -->
       <div class="flex border-b border-slate-200 space-x-2 text-xs font-semibold">
-        <button type="button" onclick="setPersonalizacionTab('colores')" id="tabBtnColores" class="px-4 py-2 text-indigo-600 border-b-2 border-indigo-600 transition flex items-center">
+        <button type="button" onclick="setPersonalizacionTab('colores')" id="tabBtnColores" class="px-4 py-2 text-teal-600 border-b-2 border-teal-600 transition flex items-center">
           <i class="fa-solid fa-brush mr-1.5"></i>Colores & Paletas
         </button>
         <button type="button" onclick="setPersonalizacionTab('pestanas')" id="tabBtnPestanas" class="px-4 py-2 text-slate-500 hover:text-slate-800 transition flex items-center">
@@ -3089,7 +3091,7 @@
           <button type="button" onclick="closePersonalizacionModal()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs font-medium hover:bg-slate-50 transition">
             Cancelar
           </button>
-          <button type="button" onclick="guardarPersonalizacion()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow transition flex items-center">
+          <button type="button" onclick="guardarPersonalizacion()" class="px-5 py-2 btn-theme-primary text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center">
             <i class="fa-solid fa-floppy-disk mr-1.5"></i>Guardar Personalización
           </button>
         </div>
@@ -3154,12 +3156,12 @@
         </div>
 
         <div class="space-y-2 pt-1">
-          <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center transition shadow-xs">
+          <button type="submit" class="w-full btn-theme-primary text-white font-semibold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center transition shadow-sm">
             <i class="fa-solid fa-floppy-disk mr-2"></i>Guardar Tasas Modificadas
           </button>
           
           <button type="button" onclick="sincronizarTasasOficialesDesdeModal()" class="w-full bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-xl text-xs flex items-center justify-center transition">
-            <i class="fa-solid fa-arrows-rotate mr-2 text-indigo-600" id="modalIconSync"></i>Consultar y Traer Tasas Oficiales (BCV & TRM)
+            <i class="fa-solid fa-arrows-rotate mr-2 text-teal-600" id="modalIconSync"></i>Consultar y Traer Tasas Oficiales (BCV & TRM)
           </button>
         </div>
       </form>
@@ -3175,7 +3177,7 @@
     <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4">
       <div class="flex items-center justify-between border-b pb-3">
         <h3 class="font-bold text-lg text-slate-800 flex items-center">
-          <i class="fa-solid fa-sliders text-indigo-600 mr-2"></i>
+          <i class="fa-solid fa-sliders text-teal-600 mr-2"></i>
           Configuración & Tasas de Cambio
         </h3>
         <button onclick="closeConfigModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
@@ -3234,7 +3236,7 @@
           </button>
           <div class="flex space-x-2">
             <button type="button" onclick="closeConfigModal()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs">Cancelar</button>
-            <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-semibold text-xs">Guardar Cambios</button>
+            <button type="submit" class="px-5 py-2 btn-theme-primary text-white rounded-xl font-semibold text-xs shadow-sm">Guardar Cambios</button>
           </div>
         </div>
       </form>
@@ -3279,7 +3281,7 @@
           </div>
           <div class="bg-white border rounded-lg p-2">
             <p class="text-[10px] text-slate-400 uppercase font-semibold">Facturas</p>
-            <p class="text-sm font-bold text-indigo-600" id="dbStatFacturas">0</p>
+            <p class="text-sm font-bold text-teal-600" id="dbStatFacturas">0</p>
           </div>
           <div class="bg-white border rounded-lg p-2">
             <p class="text-[10px] text-slate-400 uppercase font-semibold">Compras</p>
@@ -3300,7 +3302,7 @@
             <i class="fa-solid fa-download mr-2"></i>Descargar Respaldo (.db)
           </button>
           <label class="w-full bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-semibold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center transition cursor-pointer text-center">
-            <i class="fa-solid fa-upload mr-2 text-indigo-600"></i>Restaurar Respaldo
+            <i class="fa-solid fa-upload mr-2 text-teal-600"></i>Restaurar Respaldo
             <input type="file" accept=".db" onchange="handleRestoreFile(this)" class="hidden">
           </label>
         </div>
@@ -3325,11 +3327,11 @@
 
       <!-- Guía de Persistencia en Render con Supabase -->
       <details class="border-t pt-3 text-xs text-slate-600">
-        <summary class="font-bold text-indigo-600 cursor-pointer flex items-center select-none py-1">
+        <summary class="font-bold text-teal-600 cursor-pointer flex items-center select-none py-1">
           <i class="fa-solid fa-cloud-arrow-up mr-1.5"></i>¿Cómo activar la persistencia permanente con Supabase en Render?
         </summary>
         <div class="bg-slate-50 border rounded-xl p-3 mt-2 space-y-2 text-[11px] leading-relaxed">
-          <p><strong>Paso 1:</strong> Entra a tu cuenta gratuita en <a href="https://supabase.com" target="_blank" class="text-indigo-600 underline font-semibold">Supabase.com</a> y en tu proyecto ve a <strong>Storage &gt; New bucket</strong>. Nómbralo <code>database</code>.</p>
+          <p><strong>Paso 1:</strong> Entra a tu cuenta gratuita en <a href="https://supabase.com" target="_blank" class="text-teal-600 underline font-semibold">Supabase.com</a> y en tu proyecto ve a <strong>Storage &gt; New bucket</strong>. Nómbralo <code>database</code>.</p>
           <p><strong>Paso 2:</strong> Ve a <strong>Project Settings &gt; API</strong> y copia la <code>Project URL</code> y la clave <code>anon / public</code>.</p>
           <p><strong>Paso 3:</strong> En tu panel de <strong>Render</strong>, abre tu servicio web, entra a <strong>Environment Variables</strong> y agrega:</p>
           <ul class="list-disc pl-4 space-y-1 font-mono text-[10px] text-slate-700">
@@ -3357,11 +3359,11 @@
         <input type="hidden" id="catId">
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1">Nombre de la Categoría *</label>
-          <input type="text" id="catNombre" required placeholder="Ej: Telefonía, Reparaciones, Papelería..." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-indigo-500">
+          <input type="text" id="catNombre" required placeholder="Ej: Telefonía, Reparaciones, Papelería..." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20">
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1">Clasificación Maestra *</label>
-          <select id="catTipo" required class="w-full bg-slate-50 border border-slate-200 py-2.5 px-3 rounded-xl text-sm focus:outline-none focus:border-indigo-500">
+          <select id="catTipo" required class="w-full bg-slate-50 border border-slate-200 py-2.5 px-3 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20">
             <option value="producto">Producto (Todos los ítems controlan existencia)</option>
             <option value="servicio">Servicio (Todos los ítems NO manejan existencia)</option>
           </select>
@@ -3369,11 +3371,11 @@
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1">Descripción</label>
-          <textarea id="catDescripcion" rows="2" placeholder="Opcional..." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-indigo-500"></textarea>
+          <textarea id="catDescripcion" rows="2" placeholder="Opcional..." class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20"></textarea>
         </div>
         <div class="flex justify-end space-x-2 pt-2">
           <button type="button" onclick="closeCategoryModal()" class="px-4 py-2 border rounded-xl text-slate-600">Cancelar</button>
-          <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-semibold">Guardar</button>
+          <button type="submit" class="px-5 py-2 btn-theme-primary text-white rounded-xl font-semibold shadow-sm">Guardar</button>
         </div>
       </form>
     </div>
@@ -3422,9 +3424,9 @@
         </div>
 
         <!-- Precios e Impuesto (IVA 16%) -->
-        <div class="bg-indigo-50/60 p-4 rounded-xl border border-indigo-100 space-y-3">
+        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-bold uppercase text-indigo-900 tracking-wider">Precios y Régimen Fiscal</span>
+            <span class="text-xs font-bold uppercase text-slate-800 tracking-wider">Precios y Régimen Fiscal</span>
             <span class="text-xs text-slate-500">Tasa IVA: <strong id="lblIvaPct">16%</strong></span>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -3441,11 +3443,11 @@
             </div>
             <div>
               <label class="block text-xs font-semibold text-slate-700 mb-1">Precio Final ($ con IVA)</label>
-              <input type="number" step="any" min="0" id="prodPrecioTotal" readonly class="w-full bg-indigo-100/60 border border-indigo-200 py-2 px-3 rounded-xl text-sm font-extrabold text-indigo-700">
+              <input type="number" step="any" min="0" id="prodPrecioTotal" readonly class="w-full bg-teal-50 border border-teal-200 py-2 px-3 rounded-xl text-sm font-extrabold text-teal-800">
             </div>
           </div>
           <!-- Indicador de IVA -->
-          <div class="flex justify-between items-center text-xs text-indigo-800">
+          <div class="flex justify-between items-center text-xs text-slate-600">
             <span>Monto del IVA (16%): <strong id="lblIvaCalculado">$0.00</strong></span>
             <span class="text-slate-500" id="lblEquivalenteBs">Equiv: 0.00 Bs. | 0 COP</span>
           </div>
@@ -3501,7 +3503,7 @@
 
         <div class="flex justify-end space-x-2 pt-2 border-t">
           <button type="button" onclick="closeProductoModal()" class="px-4 py-2 border rounded-xl text-slate-600">Cancelar</button>
-          <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-semibold">Guardar Ítem</button>
+          <button type="submit" class="px-5 py-2 btn-theme-primary text-white rounded-xl font-semibold shadow-sm">Guardar Ítem</button>
         </div>
       </form>
     </div>
@@ -3541,7 +3543,7 @@
         </div>
         <div class="flex justify-end space-x-2 pt-2 border-t">
           <button type="button" onclick="closeClienteModal()" class="px-4 py-2 border rounded-xl text-slate-600">Cancelar</button>
-          <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-semibold">Guardar Cliente</button>
+          <button type="submit" class="px-5 py-2 btn-theme-primary text-white rounded-xl font-semibold shadow-sm">Guardar Cliente</button>
         </div>
       </form>
     </div>
@@ -3581,7 +3583,7 @@
         </div>
         <div class="flex justify-end space-x-2 pt-2 border-t">
           <button type="button" onclick="closeProveedorModal()" class="px-4 py-2 border rounded-xl text-slate-600">Cancelar</button>
-          <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-semibold">Guardar Proveedor</button>
+          <button type="submit" class="px-5 py-2 btn-theme-primary text-white rounded-xl font-semibold shadow-sm">Guardar Proveedor</button>
         </div>
       </form>
     </div>
@@ -3722,7 +3724,7 @@
           </div>
           <div class="flex justify-between text-base font-bold text-slate-900 pt-1 border-t">
             <span>TOTAL USD:</span>
-            <span class="text-indigo-700 font-extrabold" id="ticketTotalUsd">$0.00</span>
+            <span class="text-slate-800 font-extrabold" id="ticketTotalUsd">$0.00</span>
           </div>
           <div class="flex justify-between text-xs text-slate-700 font-medium">
             <span>Total en Bolívares (Tasa <span id="ticketTasaVes">45.00</span>):</span>
@@ -3750,7 +3752,7 @@
 
       <!-- Botones de Acción (Imprimir y Enviar por WhatsApp) -->
       <div class="flex flex-col sm:flex-row gap-2 justify-end pt-2 no-print">
-        <button onclick="window.print()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center transition">
+        <button onclick="window.print()" class="btn-theme-primary text-white px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center transition shadow-sm">
           <i class="fa-solid fa-print mr-2"></i>Imprimir Factura
         </button>
         <button onclick="compartirFacturaWhatsApp()" id="btnTicketWhatsApp" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center transition">
@@ -3955,7 +3957,7 @@
     <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between border-b pb-3">
         <h3 class="font-bold text-lg text-slate-800 flex items-center">
-          <i class="fa-solid fa-clock-rotate-left text-indigo-600 mr-2"></i>
+          <i class="fa-solid fa-clock-rotate-left text-teal-600 mr-2"></i>
           Historial de Abonos Recibidos
         </h3>
         <button onclick="closeModalHistorialAbonosCXC()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
@@ -4159,7 +4161,7 @@
       <!-- Barra Superior de Acciones (No se imprime) -->
       <div class="bg-slate-900 text-white px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-b border-slate-800 no-print">
         <div class="flex items-center space-x-2">
-          <i class="fa-solid fa-file-invoice text-indigo-400 text-xl"></i>
+          <i class="fa-solid fa-file-invoice text-teal-500 text-xl"></i>
           <div>
             <h3 class="font-bold text-base leading-tight">Vista Preliminar del Reporte</h3>
             <p class="text-xs text-slate-400">Verifique los datos y totales antes de generar el documento final o PDF.</p>
@@ -4169,7 +4171,7 @@
           <button onclick="exportarReporteActualCsv()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center shadow">
             <i class="fa-solid fa-file-excel mr-1.5"></i>Exportar CSV / Excel
           </button>
-          <button onclick="imprimirDesdePreliminar()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition flex items-center shadow">
+          <button onclick="imprimirDesdePreliminar()" class="btn-theme-primary text-white px-4 py-2 rounded-xl text-xs font-bold transition flex items-center shadow-sm">
             <i class="fa-solid fa-print mr-1.5"></i>Imprimir / Guardar PDF
           </button>
           <button onclick="cerrarVistaPreliminar()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-2 rounded-xl text-xs font-semibold transition">

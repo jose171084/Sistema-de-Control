@@ -428,6 +428,16 @@ function aplicarTema(tema) {
       background-color: ${bFiscal} !important;
       color: #ffffff !important;
     }
+    .text-theme-primary {
+      color: ${pColor} !important;
+    }
+    .border-theme-primary {
+      border-color: ${pColor} !important;
+    }
+    input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:focus {
+      border-color: ${pColor} !important;
+      box-shadow: 0 0 0 3px ${pColor}28 !important;
+    }
   `;
 
   // 3. Forzar repintado directo en elementos clave del DOM para feedback instantáneo

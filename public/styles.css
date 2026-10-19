@@ -267,6 +267,36 @@ main > section:not(.hidden) {
   animation: fadeIn 0.18s ease-out forwards;
 }
 
+/* ========================================================
+   REGLAS SOFT UI: ENTRADAS, BOTONES Y TABLAS
+   ======================================================== */
+/* Inputs y selects con foco suave y elegante usando el color primario */
+input:not([type="checkbox"]):not([type="radio"]):focus, 
+select:focus, 
+textarea:focus {
+  outline: none !important;
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.18) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+/* Botones con transiciones ultra-suaves */
+button, .btn-theme-primary, .btn-theme-factura, .btn-theme-compra, .btn-theme-cxc, .btn-theme-cxp, .btn-theme-devoluciones, .btn-theme-kardex, .btn-theme-fiscal {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Tablas con cabeceras suaves y filas con hover relajante */
+table th {
+  color: #475569 !important;
+  font-weight: 600 !important;
+}
+tbody tr {
+  transition: background-color 0.15s ease-in-out;
+}
+tbody tr:hover {
+  background-color: rgba(248, 250, 252, 0.85);
+}
+
 /* Estilos de Ticket / Factura */
 .ticket-container {
   font-family: 'Courier New', Courier, monospace, system-ui;
