@@ -77,8 +77,8 @@ const AppState = {
 // ========================================================
 const THEME_PRESETS = {
   zen_fresco: {
-    sidebarBg: '#0f172a',
-    sidebarText: '#f8fafc',
+    sidebarBg: '#ffffff',
+    sidebarText: '#1e293b',
     primaryColor: '#14b8a6',
     primaryHover: '#0d9488',
     bgApp: '#f8fafc',
@@ -346,8 +346,8 @@ function aplicarTema(tema) {
 
   const pColor = tema.primaryColor || '#14b8a6';
   const pHover = tema.primaryHover || '#0d9488';
-  const sBg = tema.sidebarBg || '#0f172a';
-  const sText = tema.sidebarText || '#f8fafc';
+  const sBg = tema.sidebarBg || '#ffffff';
+  const sText = tema.sidebarText || '#1e293b';
   const bgApp = tema.bgApp || '#f8fafc';
   const hBg = tema.headerBg || '#ffffff';
   const bFactura = tema.btnFactura || '#14b8a6';
@@ -357,6 +357,24 @@ function aplicarTema(tema) {
   const bDev = tema.btnDevoluciones || '#06b6d4';
   const bKardex = tema.btnKardex || '#14b8a6';
   const bFiscal = tema.btnFiscal || '#0284c7';
+
+  function isHexDark(hex) {
+    if (!hex || typeof hex !== 'string' || !hex.startsWith('#')) return false;
+    let c = hex.substring(1);
+    if (c.length === 3) c = c.split('').map(x => x+x).join('');
+    if (c.length !== 6) return false;
+    const r = parseInt(c.substr(0,2), 16) || 0;
+    const g = parseInt(c.substr(2,2), 16) || 0;
+    const b = parseInt(c.substr(4,2), 16) || 0;
+    return ((r * 299 + g * 587 + b * 114) / 1000) < 140;
+  }
+  const isDarkSidebar = isHexDark(sBg);
+  const sHover = isDarkSidebar ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.05)';
+  const sBorder = isDarkSidebar ? 'rgba(255, 255, 255, 0.1)' : 'rgba(226, 232, 240, 0.8)';
+  const sCardBg = isDarkSidebar ? 'rgba(255, 255, 255, 0.06)' : 'rgba(248, 250, 252, 0.95)';
+  const sCardBorder = isDarkSidebar ? 'rgba(255, 255, 255, 0.12)' : 'rgba(226, 232, 240, 0.8)';
+  const sMutedText = isDarkSidebar ? 'rgba(248, 250, 252, 0.65)' : '#64748b';
+  const sIconColor = isDarkSidebar ? '#94a3b8' : '#64748b';
 
   styleTag.textContent = `
     :root {
@@ -384,13 +402,35 @@ function aplicarTema(tema) {
     #appSidebar {
       background-color: ${sBg} !important;
       color: ${sText} !important;
+      border-right: 1px solid ${sBorder} !important;
     }
     header.app-header {
       background-color: ${hBg} !important;
     }
+    .sidebar-nav-btn {
+      color: ${sText} !important;
+    }
+    .sidebar-nav-btn i {
+      color: ${sIconColor} !important;
+    }
+    .sidebar-nav-btn:hover {
+      background-color: ${sHover} !important;
+      color: ${isDarkSidebar ? '#ffffff' : '#0f172a'} !important;
+    }
     .sidebar-nav-btn.active-nav {
       background-color: ${pColor} !important;
       color: #ffffff !important;
+      box-shadow: 0 4px 14px -2px ${pColor}55 !important;
+    }
+    .sidebar-nav-btn.active-nav i {
+      color: #ffffff !important;
+    }
+    .sidebar-section-title {
+      color: ${sMutedText} !important;
+    }
+    .sidebar-widget-card {
+      background-color: ${sCardBg} !important;
+      border-color: ${sCardBorder} !important;
     }
     .btn-theme-primary {
       background-color: ${pColor} !important;
@@ -516,10 +556,10 @@ function setPersonalizacionTab(tab) {
     const panel = document.getElementById(`panelPersonalizacion${t.charAt(0).toUpperCase() + t.slice(1)}`);
     if (btn) {
       if (t === tab) {
-        btn.classList.add('text-indigo-600', 'border-b-2', 'border-indigo-600');
+        btn.classList.add('text-teal-600', 'border-b-2', 'border-teal-600');
         btn.classList.remove('text-slate-500');
       } else {
-        btn.classList.remove('text-indigo-600', 'border-b-2', 'border-indigo-600');
+        btn.classList.remove('text-teal-600', 'border-b-2', 'border-teal-600');
         btn.classList.add('text-slate-500');
       }
     }

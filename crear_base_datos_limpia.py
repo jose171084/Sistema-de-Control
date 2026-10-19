@@ -379,8 +379,8 @@ def crear_base_limpia(destino_path=DB_LIMPIA):
     # ========================================================
 
     tema_zen = {
-        "sidebarBg": "#0f172a",
-        "sidebarText": "#f8fafc",
+        "sidebarBg": "#ffffff",
+        "sidebarText": "#1e293b",
         "primaryColor": "#14b8a6",
         "primaryHover": "#0d9488",
         "bgApp": "#f8fafc",

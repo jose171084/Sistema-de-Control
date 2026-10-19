@@ -543,8 +543,8 @@ def init_db():
     cursor.execute("SELECT COUNT(*) FROM configuracion")
     if cursor.fetchone()[0] == 0:
         tema_zen = json.dumps({
-            "sidebarBg": "#0f172a",
-            "sidebarText": "#f8fafc",
+            "sidebarBg": "#ffffff",
+            "sidebarText": "#1e293b",
             "primaryColor": "#14b8a6",
             "primaryHover": "#0d9488",
             "bgApp": "#f8fafc",
