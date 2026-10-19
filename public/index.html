@@ -8,9 +8,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="styles.css">
 </head>
-<body class="bg-slate-100 text-slate-800 font-sans min-h-screen antialiased overflow-x-hidden md:flex">
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen antialiased overflow-x-hidden md:flex selection:bg-teal-100 selection:text-teal-900">
 
   <!-- ========================================================
        BARRA LATERAL IZQUIERDA VERTICAL (SIDEBAR)
@@ -82,16 +81,18 @@
       </button>
     </nav>
 
-    <!-- Tarjeta de Tasas Oficiales en Sidebar -->
+    <!-- Tarjeta de Tasas de Cambio en Sidebar -->
     <div class="p-3 mx-3 my-2 rounded-xl bg-slate-800/90 border border-slate-700/60 text-xs space-y-2">
-      <div class="flex items-center justify-between">
+      <div class="flex items-center justify-between cursor-pointer" onclick="openTasasModal()" title="Configurar Tasas y Modo de Sincronización">
         <span class="font-bold text-slate-300 flex items-center">
-          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse mr-1.5"></span>
-          Tasas Oficiales
+          <i class="fa-solid fa-coins text-amber-400 mr-1.5 text-xs"></i>
+          Tasas de Cambio
         </span>
-        <span class="text-[10px] text-slate-400" id="sidebarRatesDate">Hoy</span>
+        <span class="text-[10px] font-mono flex items-center" id="badgeTasasOficiales">
+          <i class="fa-solid fa-bolt text-[7px] mr-1 text-emerald-400"></i>Auto
+        </span>
       </div>
-      <div class="space-y-1">
+      <div class="space-y-1 cursor-pointer font-mono text-xs" onclick="openTasasModal()" title="Clic para modificar tasas manualmente o cambiar modo">
         <div class="flex justify-between items-center py-0.5">
           <span class="text-slate-400 flex items-center"><i class="fa-solid fa-landmark text-amber-400 mr-1"></i>BCV USD:</span>
           <strong class="text-amber-300 font-mono font-bold" id="sidebarRateVes">45.00 Bs.</strong>
@@ -101,10 +102,14 @@
           <strong class="text-emerald-300 font-mono font-bold" id="sidebarRateCop">4,100 COP</strong>
         </div>
       </div>
-      <button onclick="sincronizarTasasOficiales()" id="btnSyncTasasSidebar" class="w-full mt-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center transition shadow-sm">
-        <i class="fa-solid fa-rotate mr-1.5" id="iconSyncTasas"></i>
-        <span data-label-key="btn_sincronizar_tasas">Sincronizar BCV / TRM</span>
-      </button>
+      <div class="grid grid-cols-2 gap-1.5 mt-1 pt-1 border-t border-slate-700/60">
+        <button onclick="openTasasModal()" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold py-1.5 px-2 rounded-lg text-[10px] flex items-center justify-center transition" title="Modificar tasas manualmente o apagar sincronización">
+          <i class="fa-solid fa-pen-to-square mr-1 text-sky-400"></i>Modo / Editar
+        </button>
+        <button onclick="sincronizarTasasOficiales()" id="btnSyncTasasSidebar" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-1.5 px-2 rounded-lg text-[10px] flex items-center justify-center transition shadow-sm" title="Consultar BCV y TRM ahora">
+          <i class="fa-solid fa-rotate mr-1" id="iconSyncTasas"></i>Sincronizar
+        </button>
+      </div>
     </div>
 
     <!-- Opciones del Sistema en Pie de Sidebar -->
@@ -116,6 +121,10 @@
       <button onclick="openConfigModal()" class="w-full flex items-center px-3 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition font-medium">
         <i class="fa-solid fa-gear mr-2.5 text-slate-400"></i>
         <span>Configuración Negocio</span>
+      </button>
+      <button onclick="openDatabaseModal()" class="w-full flex items-center px-3 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition font-medium">
+        <i class="fa-solid fa-database mr-2.5 text-emerald-400"></i>
+        <span>Base de Datos & Beta Tester</span>
       </button>
     </div>
   </aside>
@@ -150,14 +159,15 @@
       <!-- Tasas en Header (Mobile + Tablet / Desktop) & Acciones Rápidas -->
       <div class="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
         <!-- Badge de Tasas Móvil (< 1024px) -->
-        <div class="flex lg:hidden items-center space-x-1.5 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200 text-[10px] font-mono shadow-xs" title="Tasas Oficiales del Día">
+        <div onclick="openTasasModal()" class="flex lg:hidden items-center space-x-1.5 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200 text-[10px] font-mono shadow-xs cursor-pointer hover:bg-slate-100 transition" title="Configurar Tasas / Modo Manual">
           <span class="text-amber-700 font-bold"><i class="fa-solid fa-landmark text-amber-500 mr-0.5"></i><span id="mobileRateVes">45.00</span> Bs.</span>
           <span class="text-slate-300">|</span>
           <span class="text-emerald-700 font-bold"><i class="fa-solid fa-coins text-emerald-500 mr-0.5"></i><span id="mobileRateCop">4,100</span> COP</span>
+          <span id="headerTasasModoBadgeMob" class="ml-0.5 text-[8px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-sans font-bold">Auto</span>
         </div>
 
         <!-- Badge de Tasas Desktop (>= 1024px) -->
-        <div class="hidden lg:flex items-center space-x-3 bg-slate-50 px-3.5 py-1.5 rounded-xl border border-slate-200 text-xs shadow-xs">
+        <div onclick="openTasasModal()" class="hidden lg:flex items-center space-x-2.5 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs shadow-xs cursor-pointer hover:bg-slate-100 transition" title="Configurar Tasas y Modo Automático / Manual">
           <div class="flex items-center space-x-1 font-medium">
             <span class="text-slate-500 font-semibold">BCV:</span>
             <span class="text-amber-700 font-bold" id="headerRateVes">45.00 Bs.</span>
@@ -167,21 +177,24 @@
             <span class="text-slate-500 font-semibold">TRM:</span>
             <span class="text-emerald-700 font-bold" id="headerRateCop">4,100 COP</span>
           </div>
-          <button onclick="sincronizarTasasOficiales()" title="Sincronizar Tasas Oficiales de BCV y TRM" class="text-slate-500 hover:text-sky-600 ml-1 transition">
-            <i class="fa-solid fa-arrows-rotate"></i>
+          <span id="headerTasasModoBadge" class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 border border-emerald-300">
+            <i class="fa-solid fa-bolt mr-1"></i>Auto
+          </span>
+          <button onclick="event.stopPropagation(); sincronizarTasasOficiales()" title="Sincronizar Tasas Oficiales de BCV y TRM" class="text-slate-500 hover:text-sky-600 ml-1 transition">
+            <i class="fa-solid fa-arrows-rotate" id="headerIconSync"></i>
           </button>
         </div>
 
-        <!-- Botones de Acción Rápida -->
-        <button onclick="navigate('facturacion')" class="btn-theme-factura text-white px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-xs flex items-center transition" title="Nueva Venta">
+        <!-- Botones de Acción Rápida (Proactivos, Soft UI) -->
+        <button onclick="navigate('facturacion')" class="bg-teal-500 hover:bg-teal-600 active:scale-[0.98] text-white px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-[0_4px_14px_rgba(20,184,166,0.22)] hover:shadow-[0_6px_20px_rgba(20,184,166,0.32)] flex items-center transition-all duration-300" title="Nueva Venta">
           <i class="fa-solid fa-cash-register sm:mr-1.5"></i>
           <span class="hidden sm:inline" data-label-key="btn_nueva_venta">Nueva Venta</span>
         </button>
-        <button onclick="navigate('compras')" class="btn-theme-compra text-white px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-xs flex items-center transition" title="Cargar Compra">
+        <button onclick="navigate('compras')" class="bg-sky-500 hover:bg-sky-600 active:scale-[0.98] text-white px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-[0_4px_14px_rgba(14,165,233,0.22)] hover:shadow-[0_6px_20px_rgba(14,165,233,0.32)] flex items-center transition-all duration-300" title="Cargar Compra">
           <i class="fa-solid fa-cart-shopping sm:mr-1.5"></i>
           <span class="hidden sm:inline" data-label-key="btn_cargar_compra">Cargar Compra</span>
         </button>
-        <button onclick="openPersonalizacionModal()" title="Personalizar Colores y Nombres" class="p-1.5 sm:p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition">
+        <button onclick="openPersonalizacionModal()" title="Personalizar Colores y Nombres" class="p-2 bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 hover:text-slate-800 rounded-xl transition-all duration-300 shadow-xs">
           <i class="fa-solid fa-palette text-sm"></i>
         </button>
       </div>
@@ -206,77 +219,83 @@
         </div>
       </div>
 
-      <!-- Tarjetas de Estadísticas Principales -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <!-- Tarjetas de Estadísticas Principales (Soft UI Elevation & Whitespace) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5 sm:gap-6">
         <!-- Tarjeta Productos con Control de Existencia -->
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between">
+        <div class="soft-card p-6 flex items-center justify-between group hover:-translate-y-0.5 transition-all duration-300">
           <div>
-            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Productos (Con Stock)</p>
-            <h3 class="text-2xl font-bold text-slate-800 mt-1" id="dashTotalProductos">0</h3>
-            <p class="text-xs text-emerald-600 mt-1 font-medium"><i class="fa-solid fa-check-circle mr-1"></i>Controlan existencia</p>
+            <p class="text-[11px] font-bold uppercase text-slate-400 tracking-wider">Productos (Con Stock)</p>
+            <h3 class="text-2xl sm:text-3xl font-extrabold text-slate-800 mt-1.5 tracking-tight" id="dashTotalProductos">0</h3>
+            <p class="text-xs text-teal-600 mt-2 font-medium flex items-center">
+              <i class="fa-solid fa-circle-check mr-1.5 text-[10px]"></i>Controlan stock
+            </p>
           </div>
-          <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+          <div class="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-teal-50/80 text-teal-600 flex items-center justify-center text-xl group-hover:scale-105 transition-transform duration-300">
             <i class="fa-solid fa-cubes"></i>
           </div>
         </div>
 
         <!-- Tarjeta Servicios -->
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between">
+        <div class="soft-card p-6 flex items-center justify-between group hover:-translate-y-0.5 transition-all duration-300">
           <div>
-            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Servicios (Sin Stock)</p>
-            <h3 class="text-2xl font-bold text-slate-800 mt-1" id="dashTotalServicios">0</h3>
-            <p class="text-xs text-purple-600 mt-1 font-medium"><i class="fa-solid fa-wrench mr-1"></i>Sin manejo de stock</p>
+            <p class="text-[11px] font-bold uppercase text-slate-400 tracking-wider">Servicios (Sin Stock)</p>
+            <h3 class="text-2xl sm:text-3xl font-extrabold text-slate-800 mt-1.5 tracking-tight" id="dashTotalServicios">0</h3>
+            <p class="text-xs text-purple-600 mt-2 font-medium flex items-center">
+              <i class="fa-solid fa-sparkles mr-1.5 text-[10px]"></i>Sin inventario
+            </p>
           </div>
-          <div class="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl">
+          <div class="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-purple-50/80 text-purple-600 flex items-center justify-center text-xl group-hover:scale-105 transition-transform duration-300">
             <i class="fa-solid fa-hand-holding-heart"></i>
           </div>
         </div>
 
         <!-- Tarjeta Alertas Stock Bajo -->
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between">
+        <div class="soft-card p-6 flex items-center justify-between group hover:-translate-y-0.5 transition-all duration-300">
           <div>
-            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Stock Bajo / Crítico</p>
-            <h3 class="text-2xl font-bold text-rose-600 mt-1" id="dashAlertasStock">0</h3>
-            <p class="text-xs text-rose-500 mt-1 font-medium"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Requieren compra</p>
+            <p class="text-[11px] font-bold uppercase text-slate-400 tracking-wider">Stock Bajo / Crítico</p>
+            <h3 class="text-2xl sm:text-3xl font-extrabold text-rose-600 mt-1.5 tracking-tight" id="dashAlertasStock">0</h3>
+            <p class="text-xs text-rose-500 mt-2 font-medium flex items-center">
+              <i class="fa-solid fa-triangle-exclamation mr-1.5 text-[10px]"></i>Requiere reposición
+            </p>
           </div>
-          <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
+          <div class="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-rose-50/80 text-rose-600 flex items-center justify-center text-xl group-hover:scale-105 transition-transform duration-300">
             <i class="fa-solid fa-bell"></i>
           </div>
         </div>
 
         <!-- Tarjeta Ventas Totales -->
-        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between">
+        <div class="soft-card p-6 flex items-center justify-between group hover:-translate-y-0.5 transition-all duration-300">
           <div>
-            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Facturación Total</p>
-            <h3 class="text-2xl font-bold text-indigo-700 mt-1" id="dashTotalVentas">$0.00</h3>
-            <p class="text-xs text-slate-500 mt-1" id="dashTotalVentasBs">0.00 Bs.</p>
+            <p class="text-[11px] font-bold uppercase text-slate-400 tracking-wider">Facturación Total</p>
+            <h3 class="text-2xl sm:text-3xl font-extrabold text-teal-700 mt-1.5 tracking-tight" id="dashTotalVentas">$0.00</h3>
+            <p class="text-xs text-slate-500 mt-2 font-medium" id="dashTotalVentasBs">0.00 Bs.</p>
           </div>
-          <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
-            <i class="fa-solid fa-dollar-sign"></i>
+          <div class="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-teal-50/80 text-teal-600 flex items-center justify-center text-xl group-hover:scale-105 transition-transform duration-300">
+            <i class="fa-solid fa-receipt"></i>
           </div>
         </div>
 
         <!-- Tarjeta Cuentas por Cobrar (Total Deuda Pendiente) -->
-        <div onclick="navigate('cxc')" class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between cursor-pointer hover:shadow-md hover:border-amber-300 transition" title="Ir a Cuentas por Cobrar">
+        <div onclick="navigate('cxc')" class="soft-card-interactive p-6 flex items-center justify-between group" title="Ir a Cuentas por Cobrar">
           <div>
-            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Cuentas por Cobrar</p>
-            <h3 class="text-2xl font-bold text-amber-600 mt-1" id="dashTotalCxc">$0.00</h3>
-            <p class="text-xs text-amber-600 mt-1 font-medium" id="dashTotalCxcBs">0.00 Bs. (0 pendientes)</p>
+            <p class="text-[11px] font-bold uppercase text-slate-400 tracking-wider">Cuentas por Cobrar</p>
+            <h3 class="text-2xl sm:text-3xl font-extrabold text-amber-600 mt-1.5 tracking-tight" id="dashTotalCxc">$0.00</h3>
+            <p class="text-xs text-amber-600 mt-2 font-medium" id="dashTotalCxcBs">0.00 Bs. (0 pendientes)</p>
           </div>
-          <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl">
+          <div class="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-amber-50/80 text-amber-600 flex items-center justify-center text-xl group-hover:scale-105 transition-transform duration-300">
             <i class="fa-solid fa-hand-holding-dollar"></i>
           </div>
         </div>
 
         <!-- Tarjeta Cuentas por Pagar (Total Deuda a Proveedores) -->
-        <div onclick="navigate('cxp')" class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between cursor-pointer hover:shadow-md hover:border-rose-300 transition" title="Ir a Cuentas por Pagar">
+        <div onclick="navigate('cxp')" class="soft-card-interactive p-6 flex items-center justify-between group" title="Ir a Cuentas por Pagar">
           <div>
-            <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Cuentas por Pagar</p>
-            <h3 class="text-2xl font-bold text-rose-600 mt-1" id="dashTotalCxp">$0.00</h3>
-            <p class="text-xs text-rose-600 mt-1 font-medium" id="dashTotalCxpBs">0.00 Bs. (0 pendientes)</p>
+            <p class="text-[11px] font-bold uppercase text-slate-400 tracking-wider">Cuentas por Pagar</p>
+            <h3 class="text-2xl sm:text-3xl font-extrabold text-sky-600 mt-1.5 tracking-tight" id="dashTotalCxp">$0.00</h3>
+            <p class="text-xs text-sky-600 mt-2 font-medium" id="dashTotalCxpBs">0.00 Bs. (0 pendientes)</p>
           </div>
-          <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
-            <i class="fa-solid fa-receipt"></i>
+          <div class="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl bg-sky-50/80 text-sky-600 flex items-center justify-center text-xl group-hover:scale-105 transition-transform duration-300">
+            <i class="fa-solid fa-file-invoice"></i>
           </div>
         </div>
       </div>
@@ -284,33 +303,33 @@
       <!-- Sección de Alertas y Últimas Ventas -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Productos que necesitan reposición -->
-        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="font-bold text-slate-800 flex items-center">
-              <i class="fa-solid fa-triangle-exclamation text-amber-500 mr-2"></i>
+        <div class="soft-card p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h3 class="font-bold text-slate-800 flex items-center text-sm sm:text-base">
+              <i class="fa-solid fa-triangle-exclamation text-amber-500 mr-2.5"></i>
               Productos con Stock Mínimo o Agotados
             </h3>
-            <button onclick="navigate('compras')" class="text-xs font-semibold text-blue-600 hover:text-blue-700">
-              Cargar Compra &rarr;
+            <button onclick="navigate('compras')" class="text-xs font-semibold text-teal-600 hover:text-teal-700 transition flex items-center">
+              Cargar Compra <i class="fa-solid fa-arrow-right ml-1.5 text-[10px]"></i>
             </button>
           </div>
-          <div id="dashStockList" class="space-y-3 overflow-y-auto max-h-72">
+          <div id="dashStockList" class="space-y-3 overflow-y-auto max-h-72 pr-1">
             <!-- Dinámico -->
           </div>
         </div>
 
         <!-- Últimas Facturas Emitidas -->
-        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="font-bold text-slate-800 flex items-center">
-              <i class="fa-solid fa-receipt text-indigo-600 mr-2"></i>
+        <div class="soft-card p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h3 class="font-bold text-slate-800 flex items-center text-sm sm:text-base">
+              <i class="fa-solid fa-receipt text-teal-600 mr-2.5"></i>
               Últimas Facturas Registradas
             </h3>
-            <button onclick="navigate('facturacion')" class="text-xs font-semibold text-indigo-600 hover:text-indigo-700">
-              Ir a Facturación &rarr;
+            <button onclick="navigate('facturacion')" class="text-xs font-semibold text-teal-600 hover:text-teal-700 transition flex items-center">
+              Ir a Facturación <i class="fa-solid fa-arrow-right ml-1.5 text-[10px]"></i>
             </button>
           </div>
-          <div id="dashFacturasList" class="space-y-3 overflow-y-auto max-h-72">
+          <div id="dashFacturasList" class="space-y-3 overflow-y-auto max-h-72 pr-1">
             <!-- Dinámico -->
           </div>
         </div>
@@ -319,14 +338,14 @@
       <!-- Sección de Top 5 Productos y Top 5 Clientes -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Top 5 Productos Más Vendidos -->
-        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="font-bold text-slate-800 flex items-center">
-              <i class="fa-solid fa-trophy text-amber-500 mr-2"></i>
+        <div class="soft-card p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h3 class="font-bold text-slate-800 flex items-center text-sm sm:text-base">
+              <i class="fa-solid fa-trophy text-amber-500 mr-2.5"></i>
               Top 5 Productos Más Vendidos
             </h3>
-            <button onclick="navigate('reportes')" class="text-xs font-semibold text-indigo-600 hover:text-indigo-700">
-              Ver Reportes &rarr;
+            <button onclick="navigate('reportes')" class="text-xs font-semibold text-sky-600 hover:text-sky-700 transition flex items-center">
+              Ver Reportes <i class="fa-solid fa-arrow-right ml-1.5 text-[10px]"></i>
             </button>
           </div>
           <div id="dashTopProductosList" class="space-y-3">
@@ -3078,6 +3097,79 @@
     </div>
   </div>
 
+  <!-- Modal Rápido de Tasas de Cambio & Modo de Sincronización -->
+  <div id="modalTasas" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 m-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800 flex items-center">
+          <i class="fa-solid fa-coins text-amber-500 mr-2.5"></i>
+          Tasas de Cambio & Sincronización
+        </h3>
+        <button onclick="closeTasasModal()" class="text-slate-400 hover:text-slate-600">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <!-- Tarjeta del Interruptor de Modo Automático / Manual -->
+      <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <div class="pr-2">
+            <span class="text-xs font-bold text-slate-800 block" id="tasasModoTitle">Sincronización Oficial Automática</span>
+            <span class="text-[11px] text-slate-500" id="tasasModoDesc">Actualiza diariamente con BCV y TRM.</span>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer select-none shrink-0">
+            <input type="checkbox" id="switchTasasAuto" onchange="onToggleModoTasas(this.checked)" class="sr-only peer">
+            <div class="w-12 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+          </label>
+        </div>
+
+        <!-- Banner de Estado Dinámico -->
+        <div id="tasasModoBanner" class="text-xs p-2.5 rounded-lg border font-medium flex items-center">
+          <!-- Se actualiza por JS -->
+        </div>
+      </div>
+
+      <!-- Formulario de Tasas Editables Manualmente -->
+      <form id="formTasasManual" onsubmit="guardarTasasManual(event)" class="space-y-3.5">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1 flex items-center">
+              <i class="fa-solid fa-landmark text-amber-500 mr-1.5"></i>Tasa Bolívares (Bs.) *
+            </label>
+            <input type="number" step="any" id="modalTasaVes" required class="w-full bg-slate-50 border border-slate-300 focus:bg-white focus:border-amber-500 py-2 px-3 rounded-xl text-base font-bold text-amber-700">
+            <span class="text-[10px] text-slate-400 mt-0.5 block">Bs. por cada USD</span>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1 flex items-center">
+              <i class="fa-solid fa-scale-balanced text-emerald-500 mr-1.5"></i>Tasa Pesos (COP) *
+            </label>
+            <input type="number" step="any" id="modalTasaCop" required class="w-full bg-slate-50 border border-slate-300 focus:bg-white focus:border-emerald-500 py-2 px-3 rounded-xl text-base font-bold text-emerald-700">
+            <span class="text-[10px] text-slate-400 mt-0.5 block">COP por cada USD</span>
+          </div>
+        </div>
+
+        <div class="text-[11px] text-slate-500 flex items-center justify-between border-t pt-2 font-mono">
+          <span>Fuente: <strong id="modalTasasFuente" class="text-slate-700 font-sans">Oficial</strong></span>
+          <span id="modalTasasFecha">Hoy</span>
+        </div>
+
+        <div class="space-y-2 pt-1">
+          <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center transition shadow-xs">
+            <i class="fa-solid fa-floppy-disk mr-2"></i>Guardar Tasas Modificadas
+          </button>
+          
+          <button type="button" onclick="sincronizarTasasOficialesDesdeModal()" class="w-full bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-semibold py-2 px-4 rounded-xl text-xs flex items-center justify-center transition">
+            <i class="fa-solid fa-arrows-rotate mr-2 text-indigo-600" id="modalIconSync"></i>Consultar y Traer Tasas Oficiales (BCV & TRM)
+          </button>
+        </div>
+      </form>
+
+      <div class="flex justify-end pt-2 border-t">
+        <button type="button" onclick="closeTasasModal()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs font-medium hover:bg-slate-50">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 1. Modal Configuración de Tasas y Empresa -->
   <div id="modalConfig" class="modal-overlay hidden">
     <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4">
@@ -3089,6 +3181,18 @@
         <button onclick="closeConfigModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
       </div>
       <form id="formConfig" onsubmit="saveConfig(event)" class="space-y-4 text-sm">
+        <!-- Switch de Sincronización Automática -->
+        <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between">
+          <div>
+            <span class="font-bold text-xs text-slate-800 block">Sincronización Automática (BCV & TRM)</span>
+            <span class="text-[11px] text-slate-500">Apaga este botón para fijar tus tasas manualmente sin que se sobrescriban.</span>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer select-none ml-3 shrink-0">
+            <input type="checkbox" id="cfgTasasAutoSwitch" class="sr-only peer">
+            <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+          </label>
+        </div>
+
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">Tasa Bolívar (Bs. / USD) *</label>
@@ -3124,11 +3228,121 @@
             <input type="text" id="cfgDireccion" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
           </div>
         </div>
-        <div class="flex justify-end space-x-2 pt-2">
-          <button type="button" onclick="closeConfigModal()" class="px-4 py-2 border rounded-xl text-slate-600">Cancelar</button>
-          <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-semibold">Guardar Cambios</button>
+        <div class="flex justify-between items-center pt-2">
+          <button type="button" onclick="closeConfigModal(); openDatabaseModal();" class="text-xs text-emerald-600 hover:text-emerald-700 font-semibold flex items-center">
+            <i class="fa-solid fa-database mr-1.5"></i>Gestionar Base de Datos / Beta Tester &rarr;
+          </button>
+          <div class="flex space-x-2">
+            <button type="button" onclick="closeConfigModal()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs">Cancelar</button>
+            <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-semibold text-xs">Guardar Cambios</button>
+          </div>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Modal Base de Datos, Respaldos & Beta Tester -->
+  <div id="modalBaseDatos" class="modal-overlay hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-5 m-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800 flex items-center">
+          <i class="fa-solid fa-database text-emerald-600 mr-2.5"></i>
+          Base de Datos & Beta Tester
+        </h3>
+        <button onclick="closeDatabaseModal()" class="text-slate-400 hover:text-slate-600">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <!-- Estado y Persistencia -->
+      <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Estado de Persistencia</span>
+          <div id="dbPersistenceBadge">
+            <span class="bg-sky-100 text-sky-800 border border-sky-300 px-2.5 py-0.5 rounded-full text-xs font-semibold">
+              <i class="fa-solid fa-hard-drive mr-1"></i>Almacenamiento Local
+            </span>
+          </div>
+        </div>
+
+        <!-- Alerta de Render si no está conectado Supabase -->
+        <div id="dbWarningNotice" class="hidden bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg p-3 space-y-1">
+          <p class="font-bold flex items-center"><i class="fa-solid fa-triangle-exclamation mr-1.5 text-amber-600"></i>Aviso sobre Render (Plan Gratuito):</p>
+          <p>En el plan gratis de Render, el disco es temporal y se reinicia si no hay visitas por 15 min. Para que los datos de tu Beta Tester <strong>NUNCA</strong> se borren en Render, configura las 2 variables de Supabase Storage en Render o descarga tus respaldos antes de salir.</p>
+        </div>
+
+        <!-- Métricas Rápidas -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-center">
+          <div class="bg-white border rounded-lg p-2">
+            <p class="text-[10px] text-slate-400 uppercase font-semibold">Tamaño</p>
+            <p class="text-sm font-bold text-slate-700" id="dbStatTamano">0 KB</p>
+          </div>
+          <div class="bg-white border rounded-lg p-2">
+            <p class="text-[10px] text-slate-400 uppercase font-semibold">Facturas</p>
+            <p class="text-sm font-bold text-indigo-600" id="dbStatFacturas">0</p>
+          </div>
+          <div class="bg-white border rounded-lg p-2">
+            <p class="text-[10px] text-slate-400 uppercase font-semibold">Compras</p>
+            <p class="text-sm font-bold text-emerald-600" id="dbStatCompras">0</p>
+          </div>
+          <div class="bg-white border rounded-lg p-2">
+            <p class="text-[10px] text-slate-400 uppercase font-semibold">Productos</p>
+            <p class="text-sm font-bold text-slate-800" id="dbStatProductos">0</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Respaldos y Exportación -->
+      <div class="space-y-2">
+        <h4 class="text-xs font-bold uppercase text-slate-500 tracking-wider">Respaldos y Portabilidad</h4>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <button onclick="downloadDatabaseBackup()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center transition shadow-xs">
+            <i class="fa-solid fa-download mr-2"></i>Descargar Respaldo (.db)
+          </button>
+          <label class="w-full bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-semibold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center transition cursor-pointer text-center">
+            <i class="fa-solid fa-upload mr-2 text-indigo-600"></i>Restaurar Respaldo
+            <input type="file" accept=".db" onchange="handleRestoreFile(this)" class="hidden">
+          </label>
+        </div>
+      </div>
+
+      <!-- Limpieza de Datos para Pruebas del Beta Tester -->
+      <div class="space-y-2 border-t pt-4">
+        <h4 class="text-xs font-bold uppercase text-rose-500 tracking-wider flex items-center">
+          <i class="fa-solid fa-broom mr-1.5"></i>Zona de Limpieza para Pruebas
+        </h4>
+        <div class="space-y-2">
+          <button onclick="triggerDatabaseClean()" class="w-full bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 font-medium py-2.5 px-3 rounded-xl text-xs flex items-center justify-between transition">
+            <span class="flex items-center"><i class="fa-solid fa-eraser mr-2 text-amber-600"></i>Limpiar Ventas, Compras y Deudas</span>
+            <span class="text-[10px] bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-bold">Conserva Catálogo</span>
+          </button>
+          <button onclick="triggerFactoryReset()" class="w-full bg-rose-50 hover:bg-rose-100 border border-rose-300 text-rose-900 font-medium py-2.5 px-3 rounded-xl text-xs flex items-center justify-between transition">
+            <span class="flex items-center"><i class="fa-solid fa-rotate-left mr-2 text-rose-600"></i>Restablecer Base Limpia de Fábrica</span>
+            <span class="text-[10px] bg-rose-200 text-rose-800 px-2 py-0.5 rounded-full font-bold">100% Desde Cero</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Guía de Persistencia en Render con Supabase -->
+      <details class="border-t pt-3 text-xs text-slate-600">
+        <summary class="font-bold text-indigo-600 cursor-pointer flex items-center select-none py-1">
+          <i class="fa-solid fa-cloud-arrow-up mr-1.5"></i>¿Cómo activar la persistencia permanente con Supabase en Render?
+        </summary>
+        <div class="bg-slate-50 border rounded-xl p-3 mt-2 space-y-2 text-[11px] leading-relaxed">
+          <p><strong>Paso 1:</strong> Entra a tu cuenta gratuita en <a href="https://supabase.com" target="_blank" class="text-indigo-600 underline font-semibold">Supabase.com</a> y en tu proyecto ve a <strong>Storage &gt; New bucket</strong>. Nómbralo <code>database</code>.</p>
+          <p><strong>Paso 2:</strong> Ve a <strong>Project Settings &gt; API</strong> y copia la <code>Project URL</code> y la clave <code>anon / public</code>.</p>
+          <p><strong>Paso 3:</strong> En tu panel de <strong>Render</strong>, abre tu servicio web, entra a <strong>Environment Variables</strong> y agrega:</p>
+          <ul class="list-disc pl-4 space-y-1 font-mono text-[10px] text-slate-700">
+            <li><code>SUPABASE_URL</code> = Tu URL de Supabase</li>
+            <li><code>SUPABASE_KEY</code> = Tu clave de Supabase</li>
+          </ul>
+          <p class="text-emerald-700 font-semibold pt-1">¡Listo! Al reiniciar Render, el sistema descargará y mantendrá la base de datos de tu Beta Tester siempre guardada en la nube sin borrarse jamás.</p>
+        </div>
+      </details>
+
+      <div class="flex justify-end pt-2 border-t">
+        <button type="button" onclick="closeDatabaseModal()" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-semibold">Cerrar</button>
+      </div>
     </div>
   </div>
 

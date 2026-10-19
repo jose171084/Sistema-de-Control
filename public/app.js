@@ -77,19 +77,19 @@ const AppState = {
 // ========================================================
 const THEME_PRESETS = {
   zen_fresco: {
-    sidebarBg: '#1e293b',
+    sidebarBg: '#0f172a',
     sidebarText: '#f8fafc',
-    primaryColor: '#0284c7',
-    primaryHover: '#0369a1',
+    primaryColor: '#14b8a6',
+    primaryHover: '#0d9488',
     bgApp: '#f8fafc',
     headerBg: '#ffffff',
-    btnFactura: '#0284c7',
-    btnCompra: '#475569',
-    btnCxc: '#0d9488',
+    btnFactura: '#14b8a6',
+    btnCompra: '#0ea5e9',
+    btnCxc: '#10b981',
     btnCxp: '#64748b',
-    btnDevoluciones: '#0891b2',
-    btnKardex: '#0284c7',
-    btnFiscal: '#0369a1'
+    btnDevoluciones: '#06b6d4',
+    btnKardex: '#14b8a6',
+    btnFiscal: '#0284c7'
   },
   indigo: {
     sidebarBg: '#0f172a',
@@ -232,12 +232,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Iniciar con un pago por defecto en efectivo USD para mayor comodidad
   initDefaultPosPago();
 
-  // Sincronizar automáticamente tasas oficiales si no se han actualizado hoy
+  // Sincronizar automáticamente tasas oficiales SÓLO SI el modo automático está activado
   try {
-    const hoyStr = new Date().toISOString().split('T')[0];
-    const fechaActualizacion = AppState.config.fecha_tasas_actualizacion || '';
-    if (!fechaActualizacion.startsWith(hoyStr)) {
-      sincronizarTasasOficiales(true);
+    const modoAuto = !AppState.config || AppState.config.sincronizacion_tasas_auto !== 0;
+    if (modoAuto) {
+      const hoyStr = new Date().toISOString().split('T')[0];
+      const fechaActualizacion = (AppState.config && AppState.config.fecha_tasas_actualizacion) || '';
+      if (!fechaActualizacion.startsWith(hoyStr)) {
+        sincronizarTasasOficiales(true);
+      }
+    } else {
+      console.log('Modo manual de tasas activo: se preservan las tasas configuradas por el usuario.');
     }
   } catch(e) {}
 
@@ -699,13 +704,50 @@ function updateConfigUI() {
 
   const lblIva = document.getElementById('lblIvaPct');
   if (lblIva) lblIva.textContent = `${cfg.iva_porcentaje}%`;
+
+  // Badges Dinámicos de Modo de Tasas (Auto vs Manual)
+  const modoAuto = cfg.sincronizacion_tasas_auto !== 0;
+  const badgeSidebar = document.getElementById('badgeTasasOficiales');
+  if (badgeSidebar) {
+    if (modoAuto) {
+      badgeSidebar.className = 'text-[10px] text-emerald-400 font-mono flex items-center cursor-pointer';
+      badgeSidebar.innerHTML = '<i class="fa-solid fa-bolt text-[7px] mr-1 text-emerald-400"></i>Auto';
+    } else {
+      badgeSidebar.className = 'text-[10px] text-amber-400 font-mono flex items-center cursor-pointer';
+      badgeSidebar.innerHTML = '<i class="fa-solid fa-hand text-[8px] mr-1 text-amber-400"></i>Manual';
+    }
+  }
+
+  const badgeHeader = document.getElementById('headerTasasModoBadge');
+  if (badgeHeader) {
+    if (modoAuto) {
+      badgeHeader.className = 'text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 border border-emerald-300';
+      badgeHeader.innerHTML = '<i class="fa-solid fa-bolt mr-1"></i>Auto';
+    } else {
+      badgeHeader.className = 'text-[10px] px-2 py-0.5 rounded-full font-semibold bg-amber-100 text-amber-700 border border-amber-300';
+      badgeHeader.innerHTML = '<i class="fa-solid fa-hand mr-1"></i>Manual';
+    }
+  }
+
+  const badgeHeaderMob = document.getElementById('headerTasasModoBadgeMob');
+  if (badgeHeaderMob) {
+    if (modoAuto) {
+      badgeHeaderMob.className = 'ml-0.5 text-[8px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-sans font-bold';
+      badgeHeaderMob.textContent = 'Auto';
+    } else {
+      badgeHeaderMob.className = 'ml-0.5 text-[8px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-sans font-bold';
+      badgeHeaderMob.textContent = 'Manual';
+    }
+  }
 }
 
 // Sincronización Automática de Tasas Oficiales (BCV & TRM)
 async function sincronizarTasasOficiales(silent = false) {
   const icon = document.getElementById('iconSyncTasas');
   const btn = document.getElementById('btnSyncTasasSidebar');
+  const iconHead = document.getElementById('headerIconSync');
   if (icon) icon.classList.add('fa-spin');
+  if (iconHead) iconHead.classList.add('fa-spin');
   if (btn) btn.disabled = true;
 
   try {
@@ -741,7 +783,155 @@ async function sincronizarTasasOficiales(silent = false) {
     }
   } finally {
     if (icon) icon.classList.remove('fa-spin');
+    if (iconHead) iconHead.classList.remove('fa-spin');
     if (btn) btn.disabled = false;
+  }
+}
+
+// ========================================================
+// CONTROL DE MODO DE TASAS (AUTOMÁTICO VS MANUAL)
+// ========================================================
+function openTasasModal() {
+  const cfg = AppState.config;
+  const modal = document.getElementById('modalTasas');
+  if (!modal) return;
+
+  const inVes = document.getElementById('modalTasaVes');
+  const inCop = document.getElementById('modalTasaCop');
+  const swAuto = document.getElementById('switchTasasAuto');
+  const lblFuente = document.getElementById('modalTasasFuente');
+  const lblFecha = document.getElementById('modalTasasFecha');
+
+  if (inVes) inVes.value = cfg.tasa_ves || 45.0;
+  if (inCop) inCop.value = cfg.tasa_cop || 4100.0;
+  if (swAuto) swAuto.checked = cfg.sincronizacion_tasas_auto !== 0;
+  if (lblFuente) lblFuente.textContent = cfg.fuente_tasas || 'Oficial';
+  if (lblFecha) lblFecha.textContent = cfg.fecha_tasas_actualizacion ? cfg.fecha_tasas_actualizacion.split(' ')[0] : 'Hoy';
+
+  updateTasasModoBanner(cfg.sincronizacion_tasas_auto !== 0);
+  modal.classList.remove('hidden');
+}
+
+function closeTasasModal() {
+  const modal = document.getElementById('modalTasas');
+  if (modal) modal.classList.add('hidden');
+}
+
+function updateTasasModoBanner(isAuto) {
+  const banner = document.getElementById('tasasModoBanner');
+  const title = document.getElementById('tasasModoTitle');
+  const desc = document.getElementById('tasasModoDesc');
+
+  if (isAuto) {
+    if (title) title.textContent = 'Sincronización Oficial Automática (Encendida)';
+    if (desc) desc.textContent = 'Actualiza automáticamente las tasas oficiales de BCV y TRM.';
+    if (banner) {
+      banner.className = 'text-xs p-2.5 rounded-xl border bg-emerald-50 border-emerald-200 text-emerald-800 flex items-center';
+      banner.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-600 mr-2 text-sm shrink-0"></i><span><strong>Modo Automático:</strong> El sistema consulta el BCV y la TRM diariamente.</span>';
+    }
+  } else {
+    if (title) title.textContent = 'Modo Manual (Sincronización Apagada)';
+    if (desc) desc.textContent = 'Tus tasas personalizadas se respetan y nunca serán sobrescritas.';
+    if (banner) {
+      banner.className = 'text-xs p-2.5 rounded-xl border bg-amber-50 border-amber-200 text-amber-800 flex items-center';
+      banner.innerHTML = '<i class="fa-solid fa-hand text-amber-600 mr-2 text-sm shrink-0"></i><span><strong>Modo Manual:</strong> Sincronización oficial apagada. Las tasas que tú fijes se mantendrán protegidas.</span>';
+    }
+  }
+}
+
+async function onToggleModoTasas(isAuto) {
+  AppState.config.sincronizacion_tasas_auto = isAuto ? 1 : 0;
+  updateTasasModoBanner(isAuto);
+
+  try {
+    const res = await fetch('/api/tasas/toggle-auto', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sincronizacion_tasas_auto: isAuto ? 1 : 0 })
+    });
+    if (res.ok) {
+      updateConfigUI();
+      if (isAuto) {
+        if (confirm('✅ Sincronización oficial activada.\n\n¿Deseas consultar y actualizar las tasas oficiales del BCV y TRM ahora mismo?')) {
+          await sincronizarTasasOficiales(false);
+          const inVes = document.getElementById('modalTasaVes');
+          const inCop = document.getElementById('modalTasaCop');
+          if (inVes) inVes.value = AppState.config.tasa_ves;
+          if (inCop) inCop.value = AppState.config.tasa_cop;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error al cambiar modo de tasas:', err);
+  }
+}
+
+async function guardarTasasManual(e) {
+  e.preventDefault();
+  const tasaVes = parseFloat(document.getElementById('modalTasaVes').value);
+  const tasaCop = parseFloat(document.getElementById('modalTasaCop').value);
+
+  if (isNaN(tasaVes) || tasaVes <= 0 || isNaN(tasaCop) || tasaCop <= 0) {
+    alert('Por favor introduce valores numéricos válidos y mayores a 0 para ambas tasas.');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/tasas/manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tasa_ves: tasaVes,
+        tasa_cop: tasaCop,
+        apagar_auto: true,
+        fuente: 'Manual (Personalizado)'
+      })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      AppState.config.tasa_ves = tasaVes;
+      AppState.config.tasa_cop = tasaCop;
+      AppState.config.sincronizacion_tasas_auto = 0;
+      AppState.config.fuente_tasas = 'Manual (Personalizado)';
+      AppState.config.fecha_tasas_actualizacion = data.fecha_tasas_actualizacion;
+
+      const sw = document.getElementById('switchTasasAuto');
+      if (sw) sw.checked = false;
+      updateTasasModoBanner(false);
+      updateConfigUI();
+
+      if (AppState.currentView === 'facturacion') updatePosTotals();
+      if (AppState.currentView === 'devoluciones') actualizarTotalesDevolucion();
+      if (AppState.currentView === 'cxc') loadCxc();
+      if (AppState.currentView === 'reportes') loadReportes();
+      if (AppState.currentView === 'dashboard') loadDashboard();
+
+      alert(`✅ Tasas manuales guardadas con éxito:\n• Dólar en Bs: ${tasaVes.toFixed(2)} Bs.\n• Dólar en COP: ${tasaCop.toLocaleString('es-CO')} COP\n\nLa sincronización automática ha quedado apagada para preservar tus tasas.`);
+      closeTasasModal();
+    } else {
+      alert('Error guardando tasas: ' + (data.error || 'Ocurrió un error inesperado'));
+    }
+  } catch (err) {
+    alert('Error al conectar con el servidor: ' + err.message);
+  }
+}
+
+async function sincronizarTasasOficialesDesdeModal() {
+  const icon = document.getElementById('modalIconSync');
+  if (icon) icon.classList.add('fa-spin');
+  try {
+    await sincronizarTasasOficiales(false);
+    const inVes = document.getElementById('modalTasaVes');
+    const inCop = document.getElementById('modalTasaCop');
+    const lblFuente = document.getElementById('modalTasasFuente');
+    const lblFecha = document.getElementById('modalTasasFecha');
+
+    if (inVes) inVes.value = AppState.config.tasa_ves;
+    if (inCop) inCop.value = AppState.config.tasa_cop;
+    if (lblFuente) lblFuente.textContent = AppState.config.fuente_tasas || 'Oficial';
+    if (lblFecha) lblFecha.textContent = AppState.config.fecha_tasas_actualizacion ? AppState.config.fecha_tasas_actualizacion.split(' ')[0] : 'Hoy';
+  } finally {
+    if (icon) icon.classList.remove('fa-spin');
   }
 }
 
@@ -754,6 +944,8 @@ function openConfigModal() {
   document.getElementById('cfgRif').value = cfg.documento_fiscal;
   document.getElementById('cfgTelefono').value = cfg.telefono;
   document.getElementById('cfgDireccion').value = cfg.direccion;
+  const swAuto = document.getElementById('cfgTasasAutoSwitch');
+  if (swAuto) swAuto.checked = cfg.sincronizacion_tasas_auto !== 0;
   document.getElementById('modalConfig').classList.remove('hidden');
 }
 
@@ -763,6 +955,7 @@ function closeConfigModal() {
 
 async function saveConfig(e) {
   e.preventDefault();
+  const swAuto = document.getElementById('cfgTasasAutoSwitch');
   const payload = {
     tasa_ves: parseFloat(document.getElementById('cfgTasaVes').value),
     tasa_cop: parseFloat(document.getElementById('cfgTasaCop').value),
@@ -770,7 +963,8 @@ async function saveConfig(e) {
     nombre_negocio: document.getElementById('cfgNombreNegocio').value,
     documento_fiscal: document.getElementById('cfgRif').value,
     telefono: document.getElementById('cfgTelefono').value,
-    direccion: document.getElementById('cfgDireccion').value
+    direccion: document.getElementById('cfgDireccion').value,
+    sincronizacion_tasas_auto: swAuto ? (swAuto.checked ? 1 : 0) : 1
   };
 
   try {
@@ -789,6 +983,158 @@ async function saveConfig(e) {
   } catch (err) {
     alert('Error al guardar configuración: ' + err.message);
   }
+}
+
+// ========================================================
+// GESTIÓN DE BASE DE DATOS & BETA TESTER
+// ========================================================
+async function openDatabaseModal() {
+  const modal = document.getElementById('modalBaseDatos');
+  if (modal) {
+    modal.classList.remove('hidden');
+    await loadDatabaseStatus();
+  }
+}
+
+function closeDatabaseModal() {
+  const modal = document.getElementById('modalBaseDatos');
+  if (modal) modal.classList.add('hidden');
+}
+
+async function loadDatabaseStatus() {
+  try {
+    const res = await fetch('/api/database/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    
+    const badgeEl = document.getElementById('dbPersistenceBadge');
+    if (badgeEl) {
+      if (data.supabase_conectado) {
+        badgeEl.innerHTML = `<span class="bg-emerald-100 text-emerald-800 border border-emerald-300 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center">
+          <i class="fa-solid fa-cloud mr-1.5 text-emerald-600"></i>Persistencia Nube Supabase (Activa - No se borra)
+        </span>`;
+      } else {
+        badgeEl.innerHTML = `<span class="bg-sky-100 text-sky-800 border border-sky-300 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center">
+          <i class="fa-solid fa-hard-drive mr-1.5 text-sky-600"></i>Almacenamiento Local (SQLite en Disco)
+        </span>`;
+      }
+    }
+
+    const elTam = document.getElementById('dbStatTamano');
+    const elFac = document.getElementById('dbStatFacturas');
+    const elCom = document.getElementById('dbStatCompras');
+    const elPrd = document.getElementById('dbStatProductos');
+
+    if (elTam) elTam.textContent = data.tamano_formateado || '0 KB';
+    if (elFac) elFac.textContent = data.facturas_count || 0;
+    if (elCom) elCom.textContent = data.compras_count || 0;
+    if (elPrd) elPrd.textContent = data.productos_count || 0;
+
+    const noticeEl = document.getElementById('dbWarningNotice');
+    if (noticeEl) {
+      if (!data.supabase_conectado && window.location.hostname.includes('onrender.com')) {
+        noticeEl.classList.remove('hidden');
+      } else {
+        noticeEl.classList.add('hidden');
+      }
+    }
+  } catch (err) {
+    console.error('Error cargando estado de base de datos:', err);
+  }
+}
+
+function downloadDatabaseBackup() {
+  window.location.href = '/api/database/backup';
+}
+
+async function triggerDatabaseClean() {
+  if (!confirm('⚠️ ¿Estás seguro de que deseas LIMPIAR las ventas y compras de prueba?\n\nEsta acción vaciará todas las facturas, compras, devoluciones y deudas, reiniciando los stocks en 0 para comenzar un ciclo de pruebas nuevo.\n\nSe conservarán tus categorías, productos y clientes.')) {
+    return;
+  }
+  try {
+    const res = await fetch('/api/database/clean-transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert('✅ ' + data.message);
+      await loadDatabaseStatus();
+      if (typeof loadDashboard === 'function') loadDashboard();
+      if (typeof loadProducts === 'function') loadProducts();
+      if (typeof loadCategorias === 'function') loadCategorias();
+      if (typeof loadClientes === 'function') loadClientes();
+    } else {
+      alert('Error: ' + (data.message || 'No se pudo limpiar la base de datos'));
+    }
+  } catch (err) {
+    alert('Error al conectar con el servidor: ' + err.message);
+  }
+}
+
+async function triggerFactoryReset() {
+  const code = prompt('⚠️ ATENCIÓN: Esta acción restablecerá el sistema a una BASE DE DATOS 100% LIMPIA DE FÁBRICA.\n\nSe eliminarán todas las facturas, compras, productos y clientes creados, dejando únicamente la estructura limpia lista para el Beta Tester.\n\nEscribe "LIMPIAR" para confirmar:');
+  if (code !== 'LIMPIAR') {
+    if (code !== null) alert('Operación cancelada. El código ingresado no coincide.');
+    return;
+  }
+  try {
+    const res = await fetch('/api/database/factory-reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert('✅ ' + data.message);
+      window.location.reload();
+    } else {
+      alert('Error: ' + (data.message || 'No se pudo restablecer la base de datos'));
+    }
+  } catch (err) {
+    alert('Error al conectar con el servidor: ' + err.message);
+  }
+}
+
+async function handleRestoreFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  if (!confirm(`¿Deseas restaurar la base de datos desde el archivo "${file.name}"?\n\nLos datos actuales serán reemplazados por el archivo seleccionado.`)) {
+    input.value = '';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = async function(e) {
+    const arrayBuffer = e.target.result;
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64 = btoa(binary);
+
+    try {
+      const res = await fetch('/api/database/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_base64: base64 })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('✅ Base de datos restaurada exitosamente.');
+        window.location.reload();
+      } else {
+        alert('Error restaurando: ' + (data.message || 'Archivo no válido'));
+      }
+    } catch (err) {
+      alert('Error al conectar con el servidor: ' + err.message);
+    }
+    input.value = '';
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 // ========================================================

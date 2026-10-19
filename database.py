@@ -6,17 +6,130 @@ Utiliza únicamente la librería estándar de Python (sqlite3).
 import sqlite3
 import os
 import json
+import urllib.request
+import urllib.error
+import threading
+import time
+import shutil
 from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inventario.db")
+DB_LIMPIA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inventario_limpia.db")
+
+# ========================================================
+# PERSISTENCIA EN LA NUBE (SUPABASE STORAGE AUTO-SYNC)
+# ========================================================
+_sync_timer = None
+_sync_lock = threading.Lock()
+
+def get_supabase_config():
+    url = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+    key = os.environ.get("SUPABASE_KEY", "").strip()
+    bucket = os.environ.get("SUPABASE_BUCKET", "database").strip()
+    filename = os.environ.get("SUPABASE_FILENAME", "inventario.db").strip()
+    if url and key:
+        return {"url": url, "key": key, "bucket": bucket, "filename": filename}
+    return None
+
+def sync_from_supabase_storage():
+    """Descarga inventario.db desde Supabase Storage si está configurado (persistencia en Render)."""
+    cfg = get_supabase_config()
+    if not cfg:
+        return False
+
+    endpoints = [
+        f"{cfg['url']}/storage/v1/object/authenticated/{cfg['bucket']}/{cfg['filename']}",
+        f"{cfg['url']}/storage/v1/object/{cfg['bucket']}/{cfg['filename']}"
+    ]
+
+    for url in endpoints:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "apikey": cfg["key"],
+                "Authorization": f"Bearer {cfg['key']}",
+                "User-Agent": "SistemaInventario/1.0"
+            }
+        )
+        try:
+            print(f"[PERSISTENCIA NUBE] Consultando base persistente en Supabase Storage ({cfg['bucket']}/{cfg['filename']})...")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = resp.read()
+                if data and len(data) > 100:
+                    with open(DB_PATH, "wb") as f:
+                        f.write(data)
+                    print(f"[PERSISTENCIA NUBE] Base de datos persistente descargada exitosamente ({len(data)} bytes).")
+                    return True
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                continue
+            else:
+                print(f"[PERSISTENCIA NUBE] Error HTTP {e.code} en {url}: {e.reason}")
+        except Exception as e:
+            print(f"[PERSISTENCIA NUBE] Error de conexión a {url}: {str(e)}")
+
+    print(f"[PERSISTENCIA NUBE] Aún no existe '{cfg['filename']}' en Supabase Storage o no se pudo descargar. Se respaldará la base local actual.")
+    sync_to_supabase_storage()
+    return False
+
+def sync_to_supabase_storage():
+    """Sube el archivo inventario.db a Supabase Storage con x-upsert para persistencia permanente."""
+    cfg = get_supabase_config()
+    if not cfg or not os.path.exists(DB_PATH):
+        return False
+
+    try:
+        with open(DB_PATH, "rb") as f:
+            data = f.read()
+
+        url = f"{cfg['url']}/storage/v1/object/{cfg['bucket']}/{cfg['filename']}"
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "apikey": cfg["key"],
+                "Authorization": f"Bearer {cfg['key']}",
+                "x-upsert": "true",
+                "Content-Type": "application/x-sqlite3",
+                "User-Agent": "SistemaInventario/1.0"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            print(f"[PERSISTENCIA NUBE] Base de datos guardada en Supabase Storage ({len(data)} bytes).")
+            return True
+    except Exception as e:
+        print(f"[PERSISTENCIA NUBE] Error al sincronizar con Supabase Storage: {str(e)}")
+        return False
+
+def schedule_cloud_sync():
+    """Programa una sincronización diferida (espera 3 segundos tras el último commit)."""
+    global _sync_timer
+    if not get_supabase_config():
+        return
+    with _sync_lock:
+        if _sync_timer:
+            _sync_timer.cancel()
+        _sync_timer = threading.Timer(3.0, sync_to_supabase_storage)
+        _sync_timer.daemon = True
+        _sync_timer.start()
+
+class MonitoredConnection(sqlite3.Connection):
+    """Conexión SQLite que intercepta commit() para auto-guardar en la nube sin bloquear peticiones."""
+    def commit(self):
+        super().commit()
+        schedule_cloud_sync()
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, factory=MonitoredConnection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 def init_db():
+    # Sincronizar desde la nube al iniciar si está configurado en Render
+    sync_from_supabase_storage()
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -31,7 +144,8 @@ def init_db():
         iva_porcentaje REAL DEFAULT 16.0,
         tasa_ves REAL DEFAULT 45.00,
         tasa_cop REAL DEFAULT 4100.00,
-        moneda_principal TEXT DEFAULT 'USD'
+        moneda_principal TEXT DEFAULT 'USD',
+        sincronizacion_tasas_auto INTEGER DEFAULT 1
     )
     """)
 
@@ -145,6 +259,10 @@ def init_db():
         pass
     try:
         cursor.execute("ALTER TABLE configuracion ADD COLUMN fuente_tasas TEXT")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE configuracion ADD COLUMN sincronizacion_tasas_auto INTEGER DEFAULT 1")
     except Exception:
         pass
 
@@ -418,61 +536,69 @@ def init_db():
     cursor.execute("SELECT COUNT(*) FROM configuracion")
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
-        INSERT INTO configuracion (id, nombre_negocio, documento_fiscal, telefono, direccion, iva_porcentaje, tasa_ves, tasa_cop)
-        VALUES (1, 'TecnoServicios y Suministros C.A.', 'J-40982314-5', '+58 414 1234567', 'Av. Bolívar, Centro Comercial Plaza, Local 12', 16.0, 45.00, 4100.00)
+        INSERT INTO configuracion (id, nombre_negocio, documento_fiscal, telefono, direccion, iva_porcentaje, tasa_ves, tasa_cop, moneda_principal)
+        VALUES (1, 'Mi Negocio Comercial', 'J-12345678-9', '+58 412 0000000', 'Av. Principal, Edificio Central, Local 1', 16.0, 45.00, 4100.00, 'USD')
         """)
 
-    # Sembrar categorías de prueba si está vacío
+    # Sembrar categorías base si está vacío
     cursor.execute("SELECT COUNT(*) FROM categorias")
     if cursor.fetchone()[0] == 0:
         cursor.executemany("""
         INSERT INTO categorias (nombre, tipo, descripcion) VALUES (?, ?, ?)
         """, [
-            ('Servicios Técnicos', 'servicio', 'Mantenimiento, reparación e instalación (No manejan existencia)'),
-            ('Consultoría y Asesorías', 'servicio', 'Honorarios profesionales y asesorías técnicas (No manejan existencia)'),
-            ('Hardware y Componentes', 'producto', 'Partes de computadoras y dispositivos físicos (Controlan existencia)'),
-            ('Accesorios y Periféricos', 'producto', 'Teclados, mouse, cables, cargadores (Controlan existencia)'),
-            ('Consumibles de Oficina', 'producto', 'Papelería, tóner y suministros (Controlan existencia)')
+            ('Servicios Generales', 'servicio', 'Servicios profesionales, soporte técnico y mano de obra (No controlan stock)'),
+            ('Productos & Mercancía', 'producto', 'Artículos físicos con control de inventario y existencia (Controlan stock)')
         ])
 
-    # Sembrar productos y servicios iniciales de ejemplo si está vacío
-    cursor.execute("SELECT COUNT(*) FROM productos")
-    if cursor.fetchone()[0] == 0:
-        cursor.executemany("""
-        INSERT INTO productos (codigo, nombre, categoria_id, tipo, impuesto_tipo, precio_base, iva_monto, precio_total, costo, stock, stock_minimo, descripcion)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, [
-            ('SRV-001', 'Mantenimiento Preventivo de PC', 1, 'servicio', 'gravado', 25.0, 4.0, 29.0, 5.0, 0, 0, 'Limpieza física y optimización de software de computadoras'),
-            ('SRV-002', 'Formateo e Instalación de SO', 1, 'servicio', 'exento', 20.0, 0.0, 20.0, 0.0, 0, 0, 'Instalación de sistema operativo y programas esenciales'),
-            ('PRD-001', 'Mouse Inalámbrico Logitech M170', 4, 'producto', 'gravado', 15.0, 2.4, 17.4, 9.5, 25, 5, 'Mouse inalámbrico óptico USB'),
-            ('PRD-002', 'Disco Sólido SSD Kingston 480GB', 3, 'producto', 'gravado', 35.0, 5.6, 40.6, 24.0, 14, 3, 'Unidad de estado sólido SATA 2.5 pulg'),
-            ('PRD-003', 'Memoria USB Sandisk 64GB', 4, 'producto', 'exento', 8.0, 0.0, 8.0, 4.5, 30, 8, 'Pendrive USB 3.0 de alta velocidad'),
-            ('PRD-004', 'Resma de Papel Carta 500H', 5, 'producto', 'gravado', 6.0, 0.96, 6.96, 3.8, 40, 10, 'Papel fotocopia blanco alcalino')
-        ])
-
-    # Sembrar clientes de prueba
+    # Sembrar 1 cliente genérico de contado para facturación rápida
     cursor.execute("SELECT COUNT(*) FROM clientes")
     if cursor.fetchone()[0] == 0:
-        cursor.executemany("""
-        INSERT INTO clientes (nombre, cedula, telefono, correo, direccion) VALUES (?, ?, ?, ?, ?)
-        """, [
-            ('Juan Pérez', 'V-18765432', '+584145550101', 'juan.perez@email.com', 'Urb. Los Rosales, Calle 3, Casa #14'),
-            ('María Gómez', 'V-20123456', '+584245550202', 'maria.gomez@email.com', 'Av. Universidad, Edif. Altamira, Apto 4B'),
-            ('Inversiones Alfa C.A.', 'J-30456789-0', '+584125550303', 'contacto@inversionesalfa.com', 'Zona Industrial II, Galpón 5')
-        ])
-
-    # Sembrar proveedores de prueba
-    cursor.execute("SELECT COUNT(*) FROM proveedores")
-    if cursor.fetchone()[0] == 0:
-        cursor.executemany("""
-        INSERT INTO proveedores (nombre, cedula, telefono, correo, direccion) VALUES (?, ?, ?, ?, ?)
-        """, [
-            ('Mayorista Tecnológico del Centro', 'J-29876543-1', '+584149991122', 'ventas@mayotec.com', 'Av. Este 4, Centro Empresarial Torre Este, Piso 8'),
-            ('Distribuidora Global Office S.A.', 'J-31456123-8', '+584249993344', 'pedidos@globaloffice.com', 'Calle Los Sauces, Depósito Principal #22')
-        ])
+        cursor.execute("""
+        INSERT INTO clientes (nombre, cedula, telefono, correo, direccion)
+        VALUES (?, ?, ?, ?, ?)
+        """, ('Cliente Ocasional / Contado', 'V-00000000', '+58 412 0000000', 'cliente@ejemplo.com', 'Ventas de mostrador'))
 
     conn.commit()
     conn.close()
+
+def limpiar_transacciones_db():
+    """
+    Limpia todas las transacciones para pruebas del Beta Tester:
+    - Facturas, detalles y pagos
+    - Compras, detalles y pagos
+    - Cuentas por cobrar y abonos
+    - Cuentas por pagar y abonos
+    - Devoluciones y notas de crédito
+    - Reinicia el stock de todos los productos a 0
+    Conserva intactos las categorías, productos, clientes y configuración.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    tablas = [
+        "factura_pagos", "factura_detalles", "facturas",
+        "compra_pagos", "compra_detalles", "compras",
+        "abono_cxc_pagos", "abonos_cxc", "cuentas_por_cobrar",
+        "abono_cxp_pagos", "abonos_cxp", "cuentas_por_pagar",
+        "devolucion_pagos", "devolucion_detalles", "devoluciones"
+    ]
+    for t in tablas:
+        try:
+            c.execute(f"DELETE FROM {t}")
+        except Exception:
+            pass
+    # Reiniciar stock a 0
+    c.execute("UPDATE productos SET stock = 0")
+    conn.commit()
+    conn.close()
+    sync_to_supabase_storage()
+    return True
+
+def restablecer_fabrica_db():
+    """Restaura completamente la base de datos limpia de fábrica."""
+    from crear_base_datos_limpia import crear_base_limpia
+    crear_base_limpia(DB_PATH)
+    sync_to_supabase_storage()
+    return True
 
 if __name__ == "__main__":
     init_db()

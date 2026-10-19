@@ -15,8 +15,13 @@ import mimetypes
 import base64
 import time
 import re
+import shutil
 from datetime import datetime, timedelta
-from database import get_connection, init_db
+from database import (
+    get_connection, init_db, DB_PATH, 
+    limpiar_transacciones_db, restablecer_fabrica_db, 
+    schedule_cloud_sync, get_supabase_config
+)
 
 PORT = int(os.environ.get("PORT", 8000))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -244,6 +249,50 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "fuente": fuente,
                     "error": err
                 })
+
+            # Respaldo y Descarga de Base de Datos (.db)
+            elif path == "/api/database/backup":
+                if not os.path.exists(DB_PATH):
+                    self.send_error_json("Archivo de base de datos no encontrado", 404)
+                    return
+                try:
+                    with open(DB_PATH, "rb") as f:
+                        content = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/x-sqlite3")
+                    self.send_header("Content-Disposition", f'attachment; filename="inventario_respaldo_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db"')
+                    self.send_header("Content-Length", str(len(content)))
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(content)
+                    return
+                except Exception as e:
+                    self.send_error_json(f"Error al exportar base de datos: {str(e)}", 500)
+                    return
+
+            # Estado de Persistencia y Estadísticas de la Base de Datos
+            elif path == "/api/database/status":
+                cfg_supabase = get_supabase_config()
+                size_bytes = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
+                c_facturas = cursor.execute("SELECT count(*) FROM facturas").fetchone()[0]
+                c_productos = cursor.execute("SELECT count(*) FROM productos").fetchone()[0]
+                c_clientes = cursor.execute("SELECT count(*) FROM clientes").fetchone()[0]
+                c_compras = cursor.execute("SELECT count(*) FROM compras").fetchone()[0]
+                c_devoluciones = cursor.execute("SELECT count(*) FROM devoluciones").fetchone()[0]
+                self.send_json({
+                    "modo_persistencia": "supabase_storage" if cfg_supabase else "local_disk",
+                    "supabase_conectado": bool(cfg_supabase),
+                    "supabase_bucket": cfg_supabase["bucket"] if cfg_supabase else None,
+                    "tamano_bytes": size_bytes,
+                    "tamano_formateado": f"{size_bytes / 1024:.1f} KB",
+                    "facturas_count": c_facturas,
+                    "productos_count": c_productos,
+                    "clientes_count": c_clientes,
+                    "compras_count": c_compras,
+                    "devoluciones_count": c_devoluciones,
+                    "tiene_datos_prueba": (c_facturas > 0 or c_compras > 0 or c_devoluciones > 0)
+                })
+                return
 
             # 2. Resumen del Dashboard
             elif path == "/api/dashboard":
@@ -1737,8 +1786,61 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         cursor = conn.cursor()
 
         try:
+            # 0. Mantenimiento y Gestión de Base de Datos para Beta Tester
+            if path == "/api/database/clean-transactions":
+                limpiar_transacciones_db()
+                self.send_json({
+                    "success": True,
+                    "message": "Datos de prueba eliminados correctamente. Facturas, compras y deudas en 0. Stock reiniciado."
+                })
+                return
+
+            elif path == "/api/database/factory-reset":
+                restablecer_fabrica_db()
+                self.send_json({
+                    "success": True,
+                    "message": "Base de datos restablecida a valores de fábrica limpios para el Beta Tester."
+                })
+                return
+
+            elif path == "/api/database/restore":
+                db_b64 = body.get("file_base64")
+                if not db_b64:
+                    self.send_error_json("Falta file_base64 en la solicitud", 400)
+                    return
+                try:
+                    db_bytes = base64.b64decode(db_b64)
+                    if len(db_bytes) < 100 or not db_bytes.startswith(b"SQLite format 3\x00"):
+                        self.send_error_json("El archivo subido no es una base de datos SQLite válida", 400)
+                        return
+                    
+                    backup_path = os.path.join(BASE_DIR, "inventario_pre_restore.db")
+                    if os.path.exists(DB_PATH):
+                        shutil.copy2(DB_PATH, backup_path)
+                    
+                    with open(DB_PATH, "wb") as f:
+                        f.write(db_bytes)
+                    
+                    schedule_cloud_sync()
+                    self.send_json({
+                        "success": True,
+                        "message": "Base de datos restaurada exitosamente."
+                    })
+                    return
+                except Exception as e:
+                    self.send_error_json(f"Error al restaurar archivo: {str(e)}", 500)
+                    return
+
+            elif path == "/api/database/sync-now":
+                ok = sync_to_supabase_storage()
+                self.send_json({
+                    "success": ok,
+                    "message": "Sincronización manual con Supabase completada." if ok else "No se pudo sincronizar con Supabase (verifique credenciales)."
+                })
+                return
+
             # 1. Crear Categoría
-            if path == "/api/categorias":
+            elif path == "/api/categorias":
                 nombre = body.get("nombre", "").strip()
                 tipo = body.get("tipo", "").strip().lower()
                 descripcion = body.get("descripcion", "").strip()
@@ -2388,6 +2490,48 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "message": "Tasas oficiales de BCV y TRM sincronizadas correctamente"
                 })
 
+            # Toggle de Sincronización Automática con Páginas Oficiales
+            elif path == "/api/tasas/toggle-auto":
+                nuevo_modo = 1 if body.get("sincronizacion_tasas_auto", True) else 0
+                cursor.execute("""
+                    UPDATE configuracion 
+                    SET sincronizacion_tasas_auto = ?
+                    WHERE id = 1
+                """, (nuevo_modo,))
+                conn.commit()
+                self.send_json({
+                    "success": True,
+                    "sincronizacion_tasas_auto": nuevo_modo,
+                    "message": "Sincronización automática activada (BCV/TRM)" if nuevo_modo == 1 else "Sincronización automática desactivada (Modo Manual)"
+                })
+
+            # Guardar Tasas de Cambio Manualmente
+            elif path == "/api/tasas/manual":
+                tasa_ves = float(body.get("tasa_ves", 45.0))
+                tasa_cop = float(body.get("tasa_cop", 4100.0))
+                # 0 para desactivar sincronización automática al guardar manual, o según lo enviado
+                desactivar_auto = 0 if body.get("apagar_auto", True) else 1
+                ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                fuente = body.get("fuente", "Manual (Personalizado)")
+
+                cursor.execute("""
+                    UPDATE configuracion 
+                    SET tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?, 
+                        fecha_tasas_actualizacion = ?, fuente_tasas = ?
+                    WHERE id = 1
+                """, (tasa_ves, tasa_cop, desactivar_auto, ahora, fuente))
+                conn.commit()
+
+                self.send_json({
+                    "success": True,
+                    "tasa_ves": tasa_ves,
+                    "tasa_cop": tasa_cop,
+                    "sincronizacion_tasas_auto": desactivar_auto,
+                    "fecha_tasas_actualizacion": ahora,
+                    "fuente_tasas": fuente,
+                    "message": "Tasas manuales guardadas correctamente."
+                })
+
             # 9. Guardar Personalización Visual y Textos (Temas, Colores y Nombres)
             elif path == "/api/config/personalizacion":
                 tema = body.get("tema_config")
@@ -2650,20 +2794,38 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         try:
             # 1. Configuración & Tasas
             if path == "/api/config":
-                cursor.execute("""
-                    UPDATE configuracion 
-                    SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
-                        iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?
-                    WHERE id = 1
-                """, (
-                    body.get("nombre_negocio"),
-                    body.get("documento_fiscal"),
-                    body.get("telefono"),
-                    body.get("direccion"),
-                    float(body.get("iva_porcentaje", 16.0)),
-                    float(body.get("tasa_ves", 45.0)),
-                    float(body.get("tasa_cop", 4100.0))
-                ))
+                auto_sync = int(body.get("sincronizacion_tasas_auto", 1)) if "sincronizacion_tasas_auto" in body else None
+                if auto_sync is not None:
+                    cursor.execute("""
+                        UPDATE configuracion 
+                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?
+                        WHERE id = 1
+                    """, (
+                        body.get("nombre_negocio"),
+                        body.get("documento_fiscal"),
+                        body.get("telefono"),
+                        body.get("direccion"),
+                        float(body.get("iva_porcentaje", 16.0)),
+                        float(body.get("tasa_ves", 45.0)),
+                        float(body.get("tasa_cop", 4100.0)),
+                        auto_sync
+                    ))
+                else:
+                    cursor.execute("""
+                        UPDATE configuracion 
+                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?
+                        WHERE id = 1
+                    """, (
+                        body.get("nombre_negocio"),
+                        body.get("documento_fiscal"),
+                        body.get("telefono"),
+                        body.get("direccion"),
+                        float(body.get("iva_porcentaje", 16.0)),
+                        float(body.get("tasa_ves", 45.0)),
+                        float(body.get("tasa_cop", 4100.0))
+                    ))
                 conn.commit()
                 self.send_json({"success": True, "message": "Configuración y tasas actualizadas correctamente"})
 

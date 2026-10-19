@@ -1,35 +1,67 @@
 /* styles.css - Variables de tema, navegación vertical y reglas de impresión */
 
 :root {
-  /* Variables de Color Dinámicas - Tema Fresco, Moderno, Tranquilo y Proactivo */
-  --color-primary: #0284c7;        /* Azul Cielo Sereno - Calma, claridad y proactividad */
-  --color-primary-hover: #0369a1;  /* Sky 700 */
-  --color-primary-light: #e0f2fe;  /* Sky 100 */
-  --color-sidebar: #1e293b;        /* Slate 800 - Suave, moderno, no agresivo a la vista */
+  /* Variables de Color Dinámicas - Sistema Soft UI Fresco, Relajante y Proactivo */
+  --color-primary: #14b8a6;        /* Teal 500 - Calma, claridad, frescura y proactividad */
+  --color-primary-hover: #0d9488;  /* Teal 600 */
+  --color-primary-light: #ccfbf1;  /* Teal 100 */
+  --color-sidebar: #0f172a;        /* Slate 900 - Suave, moderno, profundo pero no agresivo */
   --color-sidebar-text: #f8fafc;   /* Slate 50 */
-  --color-sidebar-active: #0284c7; /* Sky 600 */
-  --color-bg-app: #f8fafc;         /* Slate 50 - Limpio, fresco, descansado para la vista */
+  --color-sidebar-active: #14b8a6; /* Teal 500 */
+  --color-bg-app: #f8fafc;         /* Slate 50 - Fondo relajante ultra suave, sin fatiga visual */
   --color-card-bg: #ffffff;
-  --color-text-main: #1e293b;
-  --color-btn-factura: #0284c7;    /* Azul cielo activo */
-  --color-btn-compra: #475569;     /* Pizarra neutro moderno */
-  --color-btn-cxc: #0d9488;        /* Teal pacífico y equilibrado */
+  --color-text-main: #1e293b;       /* Slate 800 - Sin negro puro */
+  --color-btn-factura: #14b8a6;    /* Teal 500 positivo */
+  --color-btn-compra: #0ea5e9;     /* Sky 500 proactivo */
+  --color-btn-cxc: #10b981;        /* Emerald 500 */
   --color-btn-cxp: #64748b;        /* Slate suave */
-  --color-btn-devoluciones: #0891b2; /* Cian océano */
+  --color-btn-devoluciones: #06b6d4; /* Cian refrescante */
   --color-header-bg: #ffffff;
-  --color-btn-kardex: #0284c7;     /* Sky moderno */
-  --color-btn-fiscal: #0369a1;     /* Azul profesional confiable */
+  --color-btn-kardex: #14b8a6;     /* Teal 500 */
+  --color-btn-fiscal: #0284c7;     /* Sky 600 */
 }
 
 body {
   background-color: var(--color-bg-app);
   color: var(--color-text-main);
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* Header dinámico */
+/* ========================================================
+   SISTEMA DE DISEÑO SOFT UI (ELEVACIÓN, TARJETAS Y BOTONES)
+   ======================================================== */
+.soft-card {
+  background-color: #ffffff;
+  border: 1px solid rgba(241, 245, 249, 0.95);
+  border-radius: 1.25rem; /* rounded-2xl */
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.05);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.soft-card:hover {
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.07);
+}
+
+.soft-card-interactive {
+  background-color: #ffffff;
+  border: 1px solid rgba(241, 245, 249, 0.95);
+  border-radius: 1.25rem;
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.05);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.soft-card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px -6px rgba(15, 23, 42, 0.08);
+  border-color: rgba(20, 184, 166, 0.3);
+}
+
+/* Header dinámico con efecto cristal suave */
 header.app-header {
   background-color: var(--color-header-bg) !important;
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.03);
+  border-bottom: 1px solid rgba(241, 245, 249, 0.9);
 }
 
 /* Modal Backdrop */
