@@ -37,8 +37,12 @@ def crear_base_limpia(destino_path=DB_LIMPIA):
         moneda_principal TEXT DEFAULT 'USD',
         tema TEXT,
         labels TEXT,
+        tema_config TEXT,
+        labels_config TEXT,
         tasas_ultima_actualizacion TEXT,
         tasas_fuente TEXT,
+        fecha_tasas_actualizacion TEXT,
+        fuente_tasas TEXT,
         sincronizacion_tasas_auto INTEGER DEFAULT 1
     )
     """)
@@ -375,19 +379,19 @@ def crear_base_limpia(destino_path=DB_LIMPIA):
     # ========================================================
 
     tema_zen = {
-        "sidebarBg": "#1e293b",
+        "sidebarBg": "#0f172a",
         "sidebarText": "#f8fafc",
-        "primaryColor": "#0284c7",
-        "primaryHover": "#0369a1",
+        "primaryColor": "#14b8a6",
+        "primaryHover": "#0d9488",
         "bgApp": "#f8fafc",
         "headerBg": "#ffffff",
-        "btnFactura": "#0284c7",
-        "btnCompra": "#475569",
-        "btnCxc": "#0d9488",
+        "btnFactura": "#14b8a6",
+        "btnCompra": "#0ea5e9",
+        "btnCxc": "#10b981",
         "btnCxp": "#64748b",
-        "btnDevoluciones": "#0891b2",
-        "btnKardex": "#0284c7",
-        "btnFiscal": "#0369a1"
+        "btnDevoluciones": "#06b6d4",
+        "btnKardex": "#14b8a6",
+        "btnFiscal": "#0284c7"
     }
 
     labels_default = {
@@ -418,16 +422,20 @@ def crear_base_limpia(destino_path=DB_LIMPIA):
     }
 
     # Configuración limpia
+    tema_json = json.dumps(tema_zen)
+    labels_json = json.dumps(labels_default)
     cursor.execute("""
     INSERT INTO configuracion (
         id, nombre_negocio, documento_fiscal, telefono, direccion, iva_porcentaje, 
-        tasa_ves, tasa_cop, moneda_principal, tema, labels, tasas_ultima_actualizacion, tasas_fuente,
+        tasa_ves, tasa_cop, moneda_principal, tema, labels, tema_config, labels_config,
+        tasas_ultima_actualizacion, tasas_fuente, fecha_tasas_actualizacion, fuente_tasas,
         sincronizacion_tasas_auto
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, datetime('now', 'localtime'), ?, ?)
     """, (
         1, 'Empresa Comercial (Beta Tester)', 'J-12345678-9', '+58 412 0000000',
         'Av. Principal, Edificio Central, Local 1', 16.0, 45.00, 4100.00, 'USD',
-        json.dumps(tema_zen), json.dumps(labels_default), 'BCV Oficial / TRM', 1
+        tema_json, labels_json, tema_json, labels_json,
+        'BCV Oficial / TRM', 'BCV Oficial / TRM Colombia', 1
     ))
 
     # Categorías base limpias

@@ -19,7 +19,7 @@
     <!-- Encabezado / Marca en Sidebar -->
     <div class="p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
       <div class="flex items-center space-x-3 cursor-pointer" onclick="navigate('dashboard')">
-        <div class="bg-indigo-600 p-2.5 rounded-xl shadow-inner text-white flex items-center justify-center">
+        <div class="btn-theme-primary p-2.5 rounded-xl shadow-inner text-white flex items-center justify-center">
           <i class="fa-solid fa-boxes-stacked text-xl"></i>
         </div>
         <div>
@@ -185,12 +185,12 @@
           </button>
         </div>
 
-        <!-- Botones de Acción Rápida (Proactivos, Soft UI) -->
-        <button onclick="navigate('facturacion')" class="bg-teal-500 hover:bg-teal-600 active:scale-[0.98] text-white px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-[0_4px_14px_rgba(20,184,166,0.22)] hover:shadow-[0_6px_20px_rgba(20,184,166,0.32)] flex items-center transition-all duration-300" title="Nueva Venta">
+        <!-- Botones de Acción Rápida (Personalizables en Tiempo Real) -->
+        <button onclick="navigate('facturacion')" class="btn-theme-factura text-white px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-sm flex items-center transition-all duration-300" title="Nueva Venta">
           <i class="fa-solid fa-cash-register sm:mr-1.5"></i>
           <span class="hidden sm:inline" data-label-key="btn_nueva_venta">Nueva Venta</span>
         </button>
-        <button onclick="navigate('compras')" class="bg-sky-500 hover:bg-sky-600 active:scale-[0.98] text-white px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-[0_4px_14px_rgba(14,165,233,0.22)] hover:shadow-[0_6px_20px_rgba(14,165,233,0.32)] flex items-center transition-all duration-300" title="Cargar Compra">
+        <button onclick="navigate('compras')" class="btn-theme-compra text-white px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-sm flex items-center transition-all duration-300" title="Cargar Compra">
           <i class="fa-solid fa-cart-shopping sm:mr-1.5"></i>
           <span class="hidden sm:inline" data-label-key="btn_cargar_compra">Cargar Compra</span>
         </button>

@@ -21,10 +21,15 @@
   --color-btn-fiscal: #0284c7;     /* Sky 600 */
 }
 
-body {
-  background-color: var(--color-bg-app);
-  color: var(--color-text-main);
+body, body.bg-slate-50, body.bg-slate-100 {
+  background-color: var(--color-bg-app) !important;
+  color: var(--color-text-main) !important;
   transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.app-main-wrapper {
+  background-color: var(--color-bg-app) !important;
+  transition: background-color 0.3s ease;
 }
 
 /* ========================================================
@@ -87,8 +92,8 @@ header.app-header {
    BARRA LATERAL IZQUIERDA (VERTICAL SIDEBAR)
    ========================================== */
 #appSidebar {
-  background-color: var(--color-sidebar);
-  color: var(--color-sidebar-text);
+  background-color: var(--color-sidebar) !important;
+  color: var(--color-sidebar-text) !important;
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease, color 0.2s ease;
   overflow: hidden;
 }

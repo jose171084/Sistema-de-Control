@@ -275,16 +275,16 @@ function initPersonalizacion() {
   let temaGuardado = null;
   let labelsGuardados = null;
 
-  // 1. Preferir lo devuelto por la Base de Datos
-  if (AppState.config && AppState.config.tema_config) {
-    temaGuardado = typeof AppState.config.tema_config === 'string' 
-      ? JSON.parse(AppState.config.tema_config) 
-      : AppState.config.tema_config;
-  }
-  if (AppState.config && AppState.config.labels_config) {
-    labelsGuardados = typeof AppState.config.labels_config === 'string'
-      ? JSON.parse(AppState.config.labels_config)
-      : AppState.config.labels_config;
+  // 1. Preferir lo devuelto por la Base de Datos (soporte para tema_config y tema)
+  if (AppState.config) {
+    const rawT = AppState.config.tema_config || AppState.config.tema;
+    if (rawT) {
+      temaGuardado = typeof rawT === 'string' ? JSON.parse(rawT) : rawT;
+    }
+    const rawL = AppState.config.labels_config || AppState.config.labels;
+    if (rawL) {
+      labelsGuardados = typeof rawL === 'string' ? JSON.parse(rawL) : rawL;
+    }
   }
 
   // 2. Si no viene en BD, consultar localStorage
@@ -299,12 +299,6 @@ function initPersonalizacion() {
       const local = localStorage.getItem('sis_labels');
       if (local) labelsGuardados = JSON.parse(local);
     } catch(e) {}
-  }
-
-  // Si el tema guardado correspondía al tema antiguo por defecto, actualizar al nuevo tema Zen Fresco
-  if (temaGuardado && (temaGuardado.primaryColor === '#4f46e5' || temaGuardado.sidebarBg === '#0f172a' || temaGuardado.sidebarBg === '#2d2e2f')) {
-    temaGuardado = { ...DEFAULT_THEME, ...THEME_PRESETS.zen_fresco };
-    try { localStorage.setItem('sis_tema', JSON.stringify(temaGuardado)); } catch(e) {}
   }
 
   // Asegurar que la pestaña 8 quede con su nombre consolidado
@@ -324,6 +318,7 @@ function aplicarTema(tema) {
   if (!tema) tema = DEFAULT_THEME;
   const root = document.documentElement;
 
+  // 1. Asignar variables CSS en :root
   if (tema.sidebarBg) root.style.setProperty('--color-sidebar', tema.sidebarBg);
   if (tema.sidebarText) root.style.setProperty('--color-sidebar-text', tema.sidebarText);
   if (tema.primaryColor) {
@@ -341,7 +336,113 @@ function aplicarTema(tema) {
   if (tema.btnKardex) root.style.setProperty('--color-btn-kardex', tema.btnKardex);
   if (tema.btnFiscal) root.style.setProperty('--color-btn-fiscal', tema.btnFiscal);
 
-  // Sincronizar pickers
+  // 2. Inyectar o actualizar hoja de estilos dinámica de máxima especificidad (!important)
+  let styleTag = document.getElementById('dynamicThemeStyles');
+  if (!styleTag) {
+    styleTag = document.createElement('style');
+    styleTag.id = 'dynamicThemeStyles';
+    document.head.appendChild(styleTag);
+  }
+
+  const pColor = tema.primaryColor || '#14b8a6';
+  const pHover = tema.primaryHover || '#0d9488';
+  const sBg = tema.sidebarBg || '#0f172a';
+  const sText = tema.sidebarText || '#f8fafc';
+  const bgApp = tema.bgApp || '#f8fafc';
+  const hBg = tema.headerBg || '#ffffff';
+  const bFactura = tema.btnFactura || '#14b8a6';
+  const bCompra = tema.btnCompra || '#0ea5e9';
+  const bCxc = tema.btnCxc || '#10b981';
+  const bCxp = tema.btnCxp || '#64748b';
+  const bDev = tema.btnDevoluciones || '#06b6d4';
+  const bKardex = tema.btnKardex || '#14b8a6';
+  const bFiscal = tema.btnFiscal || '#0284c7';
+
+  styleTag.textContent = `
+    :root {
+      --color-primary: ${pColor} !important;
+      --color-primary-hover: ${pHover} !important;
+      --color-sidebar: ${sBg} !important;
+      --color-sidebar-text: ${sText} !important;
+      --color-sidebar-active: ${pColor} !important;
+      --color-bg-app: ${bgApp} !important;
+      --color-header-bg: ${hBg} !important;
+      --color-btn-factura: ${bFactura} !important;
+      --color-btn-compra: ${bCompra} !important;
+      --color-btn-cxc: ${bCxc} !important;
+      --color-btn-cxp: ${bCxp} !important;
+      --color-btn-devoluciones: ${bDev} !important;
+      --color-btn-kardex: ${bKardex} !important;
+      --color-btn-fiscal: ${bFiscal} !important;
+    }
+    body, body.bg-slate-50, body.bg-slate-100 {
+      background-color: ${bgApp} !important;
+    }
+    .app-main-wrapper {
+      background-color: ${bgApp} !important;
+    }
+    #appSidebar {
+      background-color: ${sBg} !important;
+      color: ${sText} !important;
+    }
+    header.app-header {
+      background-color: ${hBg} !important;
+    }
+    .sidebar-nav-btn.active-nav {
+      background-color: ${pColor} !important;
+      color: #ffffff !important;
+    }
+    .btn-theme-primary {
+      background-color: ${pColor} !important;
+      color: #ffffff !important;
+    }
+    .btn-theme-primary:hover {
+      background-color: ${pHover} !important;
+      filter: brightness(0.95);
+    }
+    .btn-theme-factura {
+      background-color: ${bFactura} !important;
+      color: #ffffff !important;
+    }
+    .btn-theme-compra {
+      background-color: ${bCompra} !important;
+      color: #ffffff !important;
+    }
+    .btn-theme-cxc {
+      background-color: ${bCxc} !important;
+      color: #ffffff !important;
+    }
+    .btn-theme-cxp {
+      background-color: ${bCxp} !important;
+      color: #ffffff !important;
+    }
+    .btn-theme-devoluciones {
+      background-color: ${bDev} !important;
+      color: #ffffff !important;
+    }
+    .btn-theme-kardex {
+      background-color: ${bKardex} !important;
+      color: #ffffff !important;
+    }
+    .btn-theme-fiscal {
+      background-color: ${bFiscal} !important;
+      color: #ffffff !important;
+    }
+  `;
+
+  // 3. Forzar repintado directo en elementos clave del DOM para feedback instantáneo
+  document.body.style.backgroundColor = bgApp;
+  const mainWrapper = document.querySelector('.app-main-wrapper');
+  if (mainWrapper) mainWrapper.style.backgroundColor = bgApp;
+  const sidebarEl = document.getElementById('appSidebar');
+  if (sidebarEl) {
+    sidebarEl.style.backgroundColor = sBg;
+    sidebarEl.style.color = sText;
+  }
+  const headerEl = document.querySelector('header.app-header');
+  if (headerEl) headerEl.style.backgroundColor = hBg;
+
+  // 4. Sincronizar pickers
   syncPickersWithTheme(tema);
 }
 
@@ -357,7 +458,7 @@ function syncPickersWithTheme(tema) {
     pickerBtnCxc: tema.btnCxc,
     pickerBtnCxp: tema.btnCxp,
     pickerBtnDevoluciones: tema.btnDevoluciones,
-    pickerBtnKardex: tema.btnKardex || '#4f46e5',
+    pickerBtnKardex: tema.btnKardex || '#14b8a6',
     pickerBtnFiscal: tema.btnFiscal || '#0284c7'
   };
   for (const [id, val] of Object.entries(map)) {
@@ -369,13 +470,16 @@ function syncPickersWithTheme(tema) {
 function previewColorChange(key, value) {
   if (!AppState.temaActual) AppState.temaActual = { ...DEFAULT_THEME };
   AppState.temaActual[key] = value;
+  if (key === 'primaryColor') {
+    AppState.temaActual.primaryHover = value;
+  }
   aplicarTema(AppState.temaActual);
 }
 
 function aplicarPresetTema(presetKey) {
   const preset = THEME_PRESETS[presetKey];
   if (!preset) return;
-  AppState.temaActual = { ...preset };
+  AppState.temaActual = { ...DEFAULT_THEME, ...preset };
   aplicarTema(AppState.temaActual);
 }
 
@@ -479,9 +583,9 @@ async function guardarPersonalizacion() {
     btnFactura: document.getElementById('pickerBtnFactura').value,
     btnCompra: document.getElementById('pickerBtnCompra').value,
     btnCxc: document.getElementById('pickerBtnCxc').value,
-    btnCxp: document.getElementById('pickerBtnCxp')?.value || '#e11d48',
-    btnDevoluciones: document.getElementById('pickerBtnDevoluciones')?.value || '#0891b2',
-    btnKardex: document.getElementById('pickerBtnKardex')?.value || '#4f46e5',
+    btnCxp: document.getElementById('pickerBtnCxp')?.value || '#64748b',
+    btnDevoluciones: document.getElementById('pickerBtnDevoluciones')?.value || '#06b6d4',
+    btnKardex: document.getElementById('pickerBtnKardex')?.value || '#14b8a6',
     btnFiscal: document.getElementById('pickerBtnFiscal')?.value || '#0284c7'
   };
 

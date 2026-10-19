@@ -265,6 +265,13 @@ def init_db():
         cursor.execute("ALTER TABLE configuracion ADD COLUMN sincronizacion_tasas_auto INTEGER DEFAULT 1")
     except Exception:
         pass
+    try:
+        cursor.execute("UPDATE configuracion SET tema_config = tema WHERE tema_config IS NULL AND tema IS NOT NULL")
+        cursor.execute("UPDATE configuracion SET labels_config = labels WHERE labels_config IS NULL AND labels IS NOT NULL")
+        cursor.execute("UPDATE configuracion SET tema = tema_config WHERE tema IS NULL AND tema_config IS NOT NULL")
+        cursor.execute("UPDATE configuracion SET labels = labels_config WHERE labels IS NULL AND labels_config IS NOT NULL")
+    except Exception:
+        pass
 
     # Tabla de Cuentas por Cobrar (CXC)
     cursor.execute("""

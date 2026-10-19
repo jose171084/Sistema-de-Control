@@ -227,16 +227,32 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 row = cursor.fetchone()
                 if row:
                     res = dict(row)
-                    if res.get("tema_config"):
+                    raw_tema = res.get("tema_config") or res.get("tema")
+                    if raw_tema:
                         try:
-                            res["tema_config"] = json.loads(res["tema_config"])
+                            parsed_tema = json.loads(raw_tema) if isinstance(raw_tema, str) else raw_tema
+                            res["tema_config"] = parsed_tema
+                            res["tema"] = parsed_tema
                         except Exception:
-                            pass
-                    if res.get("labels_config"):
+                            res["tema_config"] = raw_tema
+                            res["tema"] = raw_tema
+                    else:
+                        res["tema_config"] = None
+                        res["tema"] = None
+
+                    raw_labels = res.get("labels_config") or res.get("labels")
+                    if raw_labels:
                         try:
-                            res["labels_config"] = json.loads(res["labels_config"])
+                            parsed_labels = json.loads(raw_labels) if isinstance(raw_labels, str) else raw_labels
+                            res["labels_config"] = parsed_labels
+                            res["labels"] = parsed_labels
                         except Exception:
-                            pass
+                            res["labels_config"] = raw_labels
+                            res["labels"] = raw_labels
+                    else:
+                        res["labels_config"] = None
+                        res["labels"] = None
+
                     self.send_json(res)
                 else:
                     self.send_error_json("Configuración no encontrada", 404)
@@ -2534,18 +2550,19 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             # 9. Guardar Personalización Visual y Textos (Temas, Colores y Nombres)
             elif path == "/api/config/personalizacion":
-                tema = body.get("tema_config")
-                labels = body.get("labels_config")
+                tema = body.get("tema_config") or body.get("tema")
+                labels = body.get("labels_config") or body.get("labels")
 
                 tema_str = json.dumps(tema, ensure_ascii=False) if tema is not None else None
                 labels_str = json.dumps(labels, ensure_ascii=False) if labels is not None else None
 
                 cursor.execute("""
                     UPDATE configuracion 
-                    SET tema_config = ?, labels_config = ?
+                    SET tema_config = ?, labels_config = ?, tema = ?, labels = ?
                     WHERE id = 1
-                """, (tema_str, labels_str))
+                """, (tema_str, labels_str, tema_str, labels_str))
                 conn.commit()
+                schedule_cloud_sync()
 
                 self.send_json({
                     "success": True,
@@ -2556,10 +2573,11 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             elif path == "/api/config/personalizacion/reset":
                 cursor.execute("""
                     UPDATE configuracion 
-                    SET tema_config = NULL, labels_config = NULL
+                    SET tema_config = NULL, labels_config = NULL, tema = NULL, labels = NULL
                     WHERE id = 1
                 """)
                 conn.commit()
+                schedule_cloud_sync()
 
                 self.send_json({
                     "success": True,
