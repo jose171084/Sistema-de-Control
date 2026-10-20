@@ -126,6 +126,152 @@ def get_connection():
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
+def auditar_y_migrar_db(conn=None, cursor=None):
+    """
+    Auditoría profunda y migración automática de la base de datos SQLite.
+    Garantiza:
+    1. Integridad física (PRAGMA integrity_check).
+    2. Integridad referencial (PRAGMA foreign_key_check).
+    3. Normalización y migración preventiva de columnas en todas las tablas existentes
+       (evitando errores como 'table facturas has no column named total_usd').
+    4. Sincronización bidireccional de valores (total_usd <-> total, estado, fechas).
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    if cursor is None:
+        cursor = conn.cursor()
+
+    reporte = {
+        "estado": "saludable",
+        "integridad_fisica": "OK",
+        "claves_foraneas": "OK",
+        "migraciones_aplicadas": [],
+        "tablas": {}
+    }
+
+    # 1. Integridad física
+    try:
+        cursor.execute("PRAGMA integrity_check")
+        rows = cursor.fetchall()
+        if rows and rows[0][0].lower() != "ok":
+            reporte["integridad_fisica"] = [r[0] for r in rows]
+            reporte["estado"] = "advertencia_integridad"
+    except Exception as e:
+        reporte["integridad_fisica"] = str(e)
+
+    # 2. Integridad referencial
+    try:
+        cursor.execute("PRAGMA foreign_key_check")
+        fk_errs = cursor.fetchall()
+        if fk_errs:
+            reporte["claves_foraneas"] = [list(r) for r in fk_errs]
+            reporte["estado"] = "advertencia_fk"
+    except Exception as e:
+        reporte["claves_foraneas"] = str(e)
+
+    def col_exists(table, col):
+        try:
+            cursor.execute(f"PRAGMA table_info({table})")
+            return any(r[1].lower() == col.lower() for r in cursor.fetchall())
+        except Exception:
+            return False
+
+    def add_col_if_missing(table, col, col_def):
+        if not col_exists(table, col):
+            try:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}")
+                reporte["migraciones_aplicadas"].append(f"{table}.{col}")
+                print(f"[MIGRACIÓN AUTO] Columna '{col}' agregada a tabla '{table}'.")
+            except Exception as e:
+                print(f"[MIGRACIÓN AVISO] No se pudo agregar {col} a {table}: {e}")
+
+    # ========================================================
+    # MIGRACIONES PREVENTIVAS Y CORRECTIVAS POR TABLA
+    # ========================================================
+
+    # 1. FACTURAS (Resuelve error total_usd, estado, saldos y notas)
+    add_col_if_missing("facturas", "total_usd", "REAL DEFAULT 0.0")
+    add_col_if_missing("facturas", "total", "REAL DEFAULT 0.0")
+    add_col_if_missing("facturas", "estado", "TEXT DEFAULT 'pagada'")
+    add_col_if_missing("facturas", "tipo_venta", "TEXT DEFAULT 'contado'")
+    add_col_if_missing("facturas", "fecha_vencimiento", "TEXT")
+    add_col_if_missing("facturas", "saldo_pendiente", "REAL DEFAULT 0.0")
+    add_col_if_missing("facturas", "notas", "TEXT")
+
+    # Sincronización de totales en facturas existentes
+    try:
+        cursor.execute("""
+            UPDATE facturas 
+            SET total_usd = total 
+            WHERE (total_usd IS NULL OR total_usd = 0.0) AND (total IS NOT NULL AND total > 0.0)
+        """)
+        cursor.execute("""
+            UPDATE facturas 
+            SET total = total_usd 
+            WHERE (total IS NULL OR total = 0.0) AND (total_usd IS NOT NULL AND total_usd > 0.0)
+        """)
+        cursor.execute("UPDATE facturas SET estado = 'pagada' WHERE estado IS NULL")
+        cursor.execute("UPDATE facturas SET tipo_venta = 'contado' WHERE tipo_venta IS NULL")
+    except Exception as e:
+        print(f"[MIGRACIÓN AVISO] Error sincronizando facturas: {e}")
+
+    # 2. CUENTAS POR COBRAR (CXC)
+    add_col_if_missing("cuentas_por_cobrar", "fecha_emision", "TEXT")
+    add_col_if_missing("cuentas_por_cobrar", "notas", "TEXT")
+    try:
+        cursor.execute("UPDATE cuentas_por_cobrar SET fecha_emision = created_at WHERE fecha_emision IS NULL")
+    except Exception:
+        pass
+
+    # 3. COMPRAS
+    add_col_if_missing("compras", "tipo_compra", "TEXT DEFAULT 'contado'")
+    add_col_if_missing("compras", "fecha_vencimiento", "TEXT")
+    add_col_if_missing("compras", "saldo_pendiente", "REAL DEFAULT 0.0")
+    add_col_if_missing("compras", "numero_factura", "TEXT")
+
+    # 4. CUENTAS POR PAGAR (CXP)
+    add_col_if_missing("cuentas_por_pagar", "tipo_registro", "TEXT DEFAULT 'compra'")
+
+    # 5. CONFIGURACION
+    add_col_if_missing("configuracion", "tema_config", "TEXT")
+    add_col_if_missing("configuracion", "labels_config", "TEXT")
+    add_col_if_missing("configuracion", "fecha_tasas_actualizacion", "TEXT")
+    add_col_if_missing("configuracion", "fuente_tasas", "TEXT")
+    add_col_if_missing("configuracion", "sincronizacion_tasas_auto", "INTEGER DEFAULT 1")
+
+    try:
+        cursor.execute("UPDATE configuracion SET tema_config = tema WHERE tema_config IS NULL AND tema IS NOT NULL")
+        cursor.execute("UPDATE configuracion SET labels_config = labels WHERE labels_config IS NULL AND labels IS NOT NULL")
+        cursor.execute("UPDATE configuracion SET tema = tema_config WHERE tema IS NULL AND tema_config IS NOT NULL")
+        cursor.execute("UPDATE configuracion SET labels = labels_config WHERE labels IS NULL AND labels_config IS NOT NULL")
+    except Exception:
+        pass
+
+    conn.commit()
+
+    # 6. Estadísticas y conteos de tablas
+    try:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        tablas = [r[0] for r in cursor.fetchall()]
+        for t in tablas:
+            cursor.execute(f"PRAGMA table_info({t})")
+            cols = [r[1] for r in cursor.fetchall()]
+            cursor.execute(f"SELECT COUNT(*) FROM {t}")
+            cnt = cursor.fetchone()[0]
+            reporte["tablas"][t] = {
+                "registros": cnt,
+                "columnas": cols
+            }
+    except Exception as e:
+        reporte["error_stats"] = str(e)
+
+    if should_close:
+        conn.close()
+
+    return reporte
+
 def init_db():
     # Sincronizar desde la nube al iniciar si está configurado en Render
     sync_from_supabase_storage()
@@ -219,6 +365,7 @@ def init_db():
         subtotal REAL NOT NULL DEFAULT 0.0,
         iva_total REAL NOT NULL DEFAULT 0.0,
         total_usd REAL NOT NULL DEFAULT 0.0,
+        total REAL NOT NULL DEFAULT 0.0,
         tasa_ves REAL NOT NULL DEFAULT 0.0,
         tasa_cop REAL NOT NULL DEFAULT 0.0,
         total_ves REAL NOT NULL DEFAULT 0.0,
@@ -232,46 +379,8 @@ def init_db():
     )
     """)
 
-    # Migración de columnas para bases de datos existentes
-    try:
-        cursor.execute("ALTER TABLE facturas ADD COLUMN tipo_venta TEXT DEFAULT 'contado'")
-    except Exception:
-        pass
-    try:
-        cursor.execute("ALTER TABLE facturas ADD COLUMN fecha_vencimiento TEXT")
-    except Exception:
-        pass
-    try:
-        cursor.execute("ALTER TABLE facturas ADD COLUMN saldo_pendiente REAL DEFAULT 0.0")
-    except Exception:
-        pass
-    try:
-        cursor.execute("ALTER TABLE configuracion ADD COLUMN tema_config TEXT")
-    except Exception:
-        pass
-    try:
-        cursor.execute("ALTER TABLE configuracion ADD COLUMN labels_config TEXT")
-    except Exception:
-        pass
-    try:
-        cursor.execute("ALTER TABLE configuracion ADD COLUMN fecha_tasas_actualizacion TEXT")
-    except Exception:
-        pass
-    try:
-        cursor.execute("ALTER TABLE configuracion ADD COLUMN fuente_tasas TEXT")
-    except Exception:
-        pass
-    try:
-        cursor.execute("ALTER TABLE configuracion ADD COLUMN sincronizacion_tasas_auto INTEGER DEFAULT 1")
-    except Exception:
-        pass
-    try:
-        cursor.execute("UPDATE configuracion SET tema_config = tema WHERE tema_config IS NULL AND tema IS NOT NULL")
-        cursor.execute("UPDATE configuracion SET labels_config = labels WHERE labels_config IS NULL AND labels IS NOT NULL")
-        cursor.execute("UPDATE configuracion SET tema = tema_config WHERE tema IS NULL AND tema_config IS NOT NULL")
-        cursor.execute("UPDATE configuracion SET labels = labels_config WHERE labels IS NULL AND labels_config IS NOT NULL")
-    except Exception:
-        pass
+    # Ejecutar migración y normalización automática de esquemas
+    auditar_y_migrar_db(conn, cursor)
 
     # Tabla de Cuentas por Cobrar (CXC)
     cursor.execute("""

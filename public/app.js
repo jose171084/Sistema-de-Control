@@ -1201,6 +1201,50 @@ function downloadDatabaseBackup() {
   window.location.href = '/api/database/backup';
 }
 
+async function ejecutarAuditoriaBD() {
+  const btn = document.getElementById('btnAuditarBD');
+  const container = document.getElementById('dbAuditResultContainer');
+  const details = document.getElementById('dbAuditDetails');
+  const badge = document.getElementById('dbAuditStatusBadge');
+
+  if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Auditando base de datos...';
+  try {
+    const res = await fetch('/api/database/audit');
+    if (!res.ok) throw new Error('Error HTTP ' + res.status);
+    const data = await res.json();
+    if (container) container.classList.remove('hidden');
+    if (badge) {
+      if (data.estado === 'saludable') {
+        badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800';
+        badge.textContent = '● 100% Saludable';
+      } else {
+        badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800';
+        badge.textContent = '● ' + data.estado;
+      }
+    }
+    let html = `<div><strong>Integridad Física:</strong> ${data.integridad_fisica}</div>`;
+    html += `<div><strong>Claves Foráneas:</strong> ${data.claves_foraneas}</div>`;
+    if (data.migraciones_aplicadas && data.migraciones_aplicadas.length > 0) {
+      html += `<div class="text-teal-700"><strong>Columnas Reparadas / Migradas:</strong> ${data.migraciones_aplicadas.join(', ')}</div>`;
+    } else {
+      html += `<div class="text-emerald-700"><strong>Esquema:</strong> 100% Sincronizado (0 columnas faltantes).</div>`;
+    }
+    if (data.tablas) {
+      html += `<div class="pt-1.5 border-t border-slate-200 text-slate-500 font-sans text-[11px] grid grid-cols-2 gap-1">`;
+      for (const [tbl, info] of Object.entries(data.tablas)) {
+        html += `<div>• ${tbl}: <strong>${info.registros}</strong> reg.</div>`;
+      }
+      html += `</div>`;
+    }
+    if (details) details.innerHTML = html;
+    await loadDatabaseStatus();
+  } catch (err) {
+    alert('Error al ejecutar auditoría: ' + err.message);
+  } finally {
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-clipboard-check mr-2 text-teal-400"></i>Auditar y Reparar Esquema Automáticamente';
+  }
+}
+
 async function triggerDatabaseClean() {
   if (!confirm('⚠️ ¿Estás seguro de que deseas LIMPIAR las ventas y compras de prueba?\n\nEsta acción vaciará todas las facturas, compras, devoluciones y deudas, reiniciando los stocks en 0 para comenzar un ciclo de pruebas nuevo.\n\nSe conservarán tus categorías, productos y clientes.')) {
     return;

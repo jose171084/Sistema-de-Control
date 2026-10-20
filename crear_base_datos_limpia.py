@@ -117,12 +117,15 @@ def crear_base_limpia(destino_path=DB_LIMPIA):
         tipo_venta TEXT NOT NULL CHECK(tipo_venta IN ('contado', 'credito')),
         subtotal REAL NOT NULL,
         iva_total REAL NOT NULL,
-        total REAL NOT NULL,
+        total_usd REAL NOT NULL DEFAULT 0.0,
+        total REAL NOT NULL DEFAULT 0.0,
         tasa_ves REAL NOT NULL,
         tasa_cop REAL NOT NULL,
         total_ves REAL NOT NULL,
         total_cop REAL NOT NULL,
+        estado TEXT DEFAULT 'pagada' CHECK(estado IN ('pagada', 'anulada')),
         fecha_vencimiento TEXT,
+        saldo_pendiente REAL DEFAULT 0.0,
         notas TEXT,
         FOREIGN KEY (cliente_id) REFERENCES clientes(id)
     )
@@ -171,8 +174,10 @@ def crear_base_limpia(destino_path=DB_LIMPIA):
         monto_total REAL NOT NULL,
         monto_pagado REAL NOT NULL DEFAULT 0.0,
         saldo_pendiente REAL NOT NULL,
+        fecha_emision TEXT NOT NULL,
         fecha_vencimiento TEXT NOT NULL,
         estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente', 'parcial', 'pagada')),
+        notas TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (factura_id) REFERENCES facturas(id) ON DELETE CASCADE,
         FOREIGN KEY (cliente_id) REFERENCES clientes(id)

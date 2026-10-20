@@ -20,7 +20,8 @@ from datetime import datetime, timedelta
 from database import (
     get_connection, init_db, DB_PATH, 
     limpiar_transacciones_db, restablecer_fabrica_db, 
-    schedule_cloud_sync, get_supabase_config
+    schedule_cloud_sync, get_supabase_config,
+    auditar_y_migrar_db
 )
 
 PORT = int(os.environ.get("PORT", 8000))
@@ -308,6 +309,16 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "devoluciones_count": c_devoluciones,
                     "tiene_datos_prueba": (c_facturas > 0 or c_compras > 0 or c_devoluciones > 0)
                 })
+                return
+
+            # Auditoría Completa y Diagnóstico de Base de Datos
+            elif path == "/api/database/audit":
+                reporte = auditar_y_migrar_db(conn, cursor)
+                cfg_supabase = get_supabase_config()
+                reporte["modo_persistencia"] = "supabase_storage" if cfg_supabase else "local_disk"
+                reporte["tamano_bytes"] = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
+                reporte["tamano_formateado"] = f"{reporte['tamano_bytes'] / 1024:.1f} KB"
+                self.send_json(reporte)
                 return
 
             # 2. Resumen del Dashboard
@@ -2084,9 +2095,9 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 numero_factura = f"FAC-{correlativo:06d}"
 
                 cursor.execute("""
-                    INSERT INTO facturas (numero_factura, cliente_id, subtotal, iva_total, total_usd, tasa_ves, tasa_cop, total_ves, total_cop, estado, tipo_venta, fecha_vencimiento, saldo_pendiente, notas)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (numero_factura, cliente_id, subtotal, iva_total, total_usd, tasa_ves, tasa_cop, total_ves, total_cop, estado_factura, tipo_venta, fecha_vencimiento if tipo_venta == 'credito' else None, saldo_pendiente, notas))
+                    INSERT INTO facturas (numero_factura, cliente_id, subtotal, iva_total, total_usd, total, tasa_ves, tasa_cop, total_ves, total_cop, estado, tipo_venta, fecha_vencimiento, saldo_pendiente, notas)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (numero_factura, cliente_id, subtotal, iva_total, total_usd, total_usd, tasa_ves, tasa_cop, total_ves, total_cop, estado_factura, tipo_venta, fecha_vencimiento if tipo_venta == 'credito' else None, saldo_pendiente, notas))
                 factura_id = cursor.lastrowid
 
                 # Guardar detalles

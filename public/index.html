@@ -3332,6 +3332,24 @@
         </div>
       </div>
 
+      <!-- Herramienta de Auditoria e Integridad -->
+      <div class="space-y-2 border-t pt-4">
+        <h4 class="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center">
+          <i class="fa-solid fa-microchip mr-1.5 text-teal-600"></i>Auditoría e Integridad de Datos
+        </h4>
+        <button type="button" onclick="ejecutarAuditoriaBD()" id="btnAuditarBD" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-semibold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center transition shadow-xs">
+          <i class="fa-solid fa-clipboard-check mr-2 text-teal-400"></i>Auditar y Reparar Esquema Automáticamente
+        </button>
+        
+        <div id="dbAuditResultContainer" class="hidden bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-2">
+          <div class="flex items-center justify-between font-bold text-slate-800">
+            <span>Diagnóstico de Auditoría:</span>
+            <span id="dbAuditStatusBadge" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800">● 100% Saludable</span>
+          </div>
+          <div id="dbAuditDetails" class="space-y-1 text-slate-600 font-mono text-[11px]"></div>
+        </div>
+      </div>
+
       <!-- Limpieza de Datos para Pruebas del Beta Tester -->
       <div class="space-y-2 border-t pt-4">
         <h4 class="text-xs font-bold uppercase text-rose-500 tracking-wider flex items-center">
