@@ -1783,6 +1783,13 @@ function renderProductosTable() {
 function openProductoModal(isEdit = false, origen = 'productos') {
   AppState.productoModalOrigen = origen;
   document.getElementById('prodModalTitle').textContent = isEdit ? 'Editar Ítem' : 'Crear Producto o Servicio';
+  const prodStockEl = document.getElementById('prodStock');
+  if (prodStockEl) {
+    prodStockEl.readOnly = false;
+    prodStockEl.classList.remove('bg-slate-100', 'cursor-not-allowed');
+    prodStockEl.classList.add('bg-white');
+    prodStockEl.title = '';
+  }
   if (!isEdit) {
     document.getElementById('prodId').value = '';
     document.getElementById('prodCodigo').value = '';
@@ -1879,7 +1886,12 @@ function editProducto(id) {
   document.getElementById('prodTipo').value = prod.tipo;
   document.getElementById('prodImpuestoTipo').value = prod.impuesto_tipo;
   document.getElementById('prodPrecioBase').value = prod.precio_base;
-  document.getElementById('prodStock').value = prod.stock;
+  const editStockEl = document.getElementById('prodStock');
+  editStockEl.value = prod.stock;
+  editStockEl.readOnly = true;
+  editStockEl.classList.remove('bg-white');
+  editStockEl.classList.add('bg-slate-100', 'cursor-not-allowed');
+  editStockEl.title = 'El stock no se puede editar directamente. Utilice Ajuste de Inventario o Compras.';
   document.getElementById('prodStockMinimo').value = prod.stock_minimo;
   document.getElementById('prodCosto').value = prod.costo;
   document.getElementById('prodDescripcion').value = prod.descripcion || '';
@@ -1913,6 +1925,9 @@ async function saveProducto(e) {
   };
 
   try {
+    if (id) {
+      delete payload.stock; // FASE 2C: Neutralizar envío de stock en PUT
+    }
     const url = id ? `/api/productos/${id}` : '/api/productos';
     const method = id ? 'PUT' : 'POST';
     const res = await fetch(url, {
@@ -4537,12 +4552,20 @@ function setCompraTipo(tipo) {
   if (tipo === 'contado') {
     if (btnContado) btnContado.className = "px-3 py-1 rounded-md text-xs font-bold bg-white text-blue-700 shadow-xs transition";
     if (btnCredito) btnCredito.className = "px-3 py-1 rounded-md text-xs font-bold text-slate-600 hover:text-slate-900 transition";
-    if (containerPagos) containerPagos.classList.remove('hidden');
+    if (containerPagos) {
+      containerPagos.classList.remove('hidden');
+      const spanPago = containerPagos.querySelector('span');
+      if (spanPago) spanPago.textContent = 'Formas de Pago de la Compra:';
+    }
     if (containerCredito) containerCredito.classList.add('hidden');
   } else {
     if (btnCredito) btnCredito.className = "px-3 py-1 rounded-md text-xs font-bold bg-rose-600 text-white shadow-xs transition";
     if (btnContado) btnContado.className = "px-3 py-1 rounded-md text-xs font-bold text-slate-600 hover:text-slate-900 transition";
-    if (containerPagos) containerPagos.classList.add('hidden');
+    if (containerPagos) {
+      containerPagos.classList.remove('hidden');
+      const spanPago = containerPagos.querySelector('span');
+      if (spanPago) spanPago.textContent = 'Abono Inicial / Anticipo (Opcional):';
+    }
     if (containerCredito) containerCredito.classList.remove('hidden');
 
     const fechaVencInput = document.getElementById('compraFechaVencimiento');
@@ -4745,6 +4768,14 @@ async function guardarCompra() {
       alert('Por favor especifica la fecha de vencimiento de la compra a crédito.');
       return;
     }
+    // Si especificó abono o pago inicial en la compra a crédito, procesarlo
+    pagos = AppState.compraPagos.filter(p => (parseFloat(p.monto) || 0) > 0).map(p => ({
+      moneda: p.moneda,
+      metodo: p.metodo,
+      monto_moneda: parseFloat(p.monto),
+      tasa_cambio: p.moneda === 'VES' ? AppState.config.tasa_ves : (p.moneda === 'COP' ? AppState.config.tasa_cop : 1.0),
+      referencia: ''
+    }));
   } else {
     const totalCompra = calcularTotalCompraUSD();
     const totalPagado = AppState.compraPagos.reduce((acc, p) => acc + (p.equiv_usd || 0), 0);
@@ -8173,5 +8204,269 @@ function formatFecha(str) {
     return d.toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' });
   } catch {
     return str;
+  }
+}
+
+
+// ========================================================
+// MÓDULO DE AJUSTES FORMALES DE INVENTARIO (FASE 2C)
+// ========================================================
+
+function openAjusteModal(tipo = 'CARGO') {
+  const modal = document.getElementById('modalAjusteInventario');
+  if (!modal) return;
+  document.getElementById('ajusteTipo').value = tipo;
+  onAjusteTipoChange();
+  const hoy = new Date().toISOString().split('T')[0];
+  document.getElementById('ajusteFecha').value = hoy;
+  document.getElementById('ajusteObservaciones').value = '';
+  const itemsContainer = document.getElementById('ajusteItemsList');
+  itemsContainer.innerHTML = '';
+  addAjusteRow();
+  modal.classList.remove('hidden');
+}
+
+function closeAjusteModal() {
+  const modal = document.getElementById('modalAjusteInventario');
+  if (modal) modal.classList.add('hidden');
+}
+
+function onAjusteTipoChange() {
+  const tipo = document.getElementById('ajusteTipo').value;
+  const motivoSelect = document.getElementById('ajusteMotivo');
+  motivoSelect.innerHTML = '';
+
+  const motivosCargo = [
+    { value: 'sobrante', label: 'Sobrante físico en almacén' },
+    { value: 'regularizacion', label: 'Regularización de inventario físico' },
+    { value: 'ajuste_manual', label: 'Ajuste manual justificado' }
+  ];
+
+  const motivosDescargo = [
+    { value: 'merma', label: 'Merma operativa' },
+    { value: 'vencimiento', label: 'Vencimiento de producto' },
+    { value: 'rotura', label: 'Rotura o daño físico' },
+    { value: 'uso_interno', label: 'Consumo o uso interno' },
+    { value: 'perdida_no_explicada', label: 'Pérdida no explicada / Faltante' },
+    { value: 'ajuste_manual', label: 'Ajuste manual justificado' }
+  ];
+
+  const lista = (tipo === 'CARGO') ? motivosCargo : motivosDescargo;
+  lista.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.value;
+    opt.textContent = m.label;
+    motivoSelect.appendChild(opt);
+  });
+
+  recalcularAjusteTotales();
+}
+
+function addAjusteRow(selectedProdId = null) {
+  const container = document.getElementById('ajusteItemsList');
+  if (!container) return;
+
+  const prods = (AppState.productos || []).filter(p => p.tipo === 'producto' && p.activo !== 0);
+  if (prods.length === 0) {
+    container.innerHTML = '<p class="text-xs text-slate-500 py-2 text-center">No hay productos físicos registrados disponibles.</p>';
+    return;
+  }
+
+  const row = document.createElement('div');
+  row.className = 'ajuste-item-row bg-slate-50 p-3 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-12 gap-2 items-center';
+
+  let optionsHtml = '<option value="">Seleccionar producto...</option>';
+  prods.forEach(p => {
+    const isSel = selectedProdId && p.id === parseInt(selectedProdId) ? 'selected' : '';
+    optionsHtml += `<option value="${p.id}" data-stock="${p.stock}" data-costo="${p.costo}" ${isSel}>${p.codigo || 'SIN-COD'} - ${p.nombre} (Stock: ${p.stock})</option>`;
+  });
+
+  row.innerHTML = `
+    <div class="sm:col-span-5">
+      <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Producto</label>
+      <select class="ajuste-prod-select w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs focus:outline-none focus:border-amber-500" onchange="recalcularAjusteTotales()">
+        ${optionsHtml}
+      </select>
+    </div>
+    <div class="sm:col-span-2">
+      <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Cantidad</label>
+      <input type="number" step="any" min="0.01" value="1" class="ajuste-cant-input w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs text-center font-bold focus:outline-none focus:border-amber-500" oninput="recalcularAjusteTotales()">
+    </div>
+    <div class="sm:col-span-2">
+      <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Costo ($)</label>
+      <input type="number" step="any" min="0" value="0.00" class="ajuste-costo-input w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs text-right focus:outline-none focus:border-amber-500" oninput="recalcularAjusteTotales()">
+    </div>
+    <div class="sm:col-span-2 text-center">
+      <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Stock Final</label>
+      <span class="ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold bg-slate-200 text-slate-700">--</span>
+    </div>
+    <div class="sm:col-span-1 flex items-center justify-center pt-3 sm:pt-0">
+      <button type="button" onclick="removeAjusteRow(this)" class="text-rose-500 hover:text-rose-700 p-1 rounded transition" title="Eliminar producto">
+        <i class="fa-solid fa-trash-can text-sm"></i>
+      </button>
+    </div>
+  `;
+
+  container.appendChild(row);
+  recalcularAjusteTotales();
+}
+
+function removeAjusteRow(btn) {
+  const row = btn.closest('.ajuste-item-row');
+  if (row) {
+    row.remove();
+    recalcularAjusteTotales();
+  }
+}
+
+function recalcularAjusteTotales() {
+  const tipo = document.getElementById('ajusteTipo').value;
+  const rows = document.querySelectorAll('.ajuste-item-row');
+  let totalItems = 0;
+  let totalCantidad = 0;
+  let totalCosto = 0;
+
+  rows.forEach(row => {
+    const select = row.querySelector('.ajuste-prod-select');
+    const cantInput = row.querySelector('.ajuste-cant-input');
+    const costoInput = row.querySelector('.ajuste-costo-input');
+    const badge = row.querySelector('.ajuste-result-badge');
+
+    if (!select || !cantInput || !badge) return;
+
+    const opt = select.selectedOptions[0];
+    if (!opt || !opt.value) {
+      badge.textContent = '--';
+      badge.className = 'ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold bg-slate-200 text-slate-700';
+      return;
+    }
+
+    const currentStock = parseFloat(opt.getAttribute('data-stock') || 0);
+    const prodCosto = parseFloat(opt.getAttribute('data-costo') || 0);
+
+    // Auto-completar costo si está en 0
+    if (costoInput && (parseFloat(costoInput.value) <= 0 || costoInput.value === '')) {
+      costoInput.value = prodCosto.toFixed(2);
+    }
+
+    const cant = parseFloat(cantInput.value) || 0;
+    const costo = parseFloat(costoInput.value) || prodCosto;
+
+    let nuevoStock = currentStock;
+    if (tipo === 'CARGO') {
+      nuevoStock = currentStock + cant;
+      badge.textContent = `${nuevoStock.toFixed(2)}`;
+      badge.className = 'ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold bg-emerald-100 text-emerald-800';
+    } else {
+      nuevoStock = currentStock - cant;
+      if (nuevoStock < 0) {
+        badge.textContent = `Insuficiente (${currentStock})`;
+        badge.className = 'ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold bg-rose-100 text-rose-800 animate-pulse';
+      } else {
+        badge.textContent = `${nuevoStock.toFixed(2)}`;
+        badge.className = 'ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold bg-amber-100 text-amber-800';
+      }
+    }
+
+    if (cant > 0) {
+      totalItems += 1;
+      totalCantidad += cant;
+      totalCosto += (cant * costo);
+    }
+  });
+
+  const sumItemsEl = document.getElementById('ajusteSummaryItems');
+  const sumCantEl = document.getElementById('ajusteSummaryCantidad');
+  const sumCostoEl = document.getElementById('ajusteSummaryCosto');
+
+  if (sumItemsEl) sumItemsEl.textContent = totalItems;
+  if (sumCantEl) sumCantEl.textContent = totalCantidad.toFixed(2);
+  if (sumCostoEl) sumCostoEl.textContent = totalCosto.toFixed(2);
+}
+
+async function saveAjuste(e) {
+  e.preventDefault();
+  const tipo = document.getElementById('ajusteTipo').value;
+  const motivo = document.getElementById('ajusteMotivo').value;
+  const fecha = document.getElementById('ajusteFecha').value;
+  const observaciones = document.getElementById('ajusteObservaciones').value.trim();
+
+  const rows = document.querySelectorAll('.ajuste-item-row');
+  const detalles = [];
+
+  for (let row of rows) {
+    const select = row.querySelector('.ajuste-prod-select');
+    const cantInput = row.querySelector('.ajuste-cant-input');
+    const costoInput = row.querySelector('.ajuste-costo-input');
+
+    if (!select || !select.value) continue;
+
+    const producto_id = parseInt(select.value);
+    const cantidad = parseFloat(cantInput.value) || 0;
+    const costo_unitario = parseFloat(costoInput.value) || 0;
+
+    if (cantidad <= 0) {
+      showToast('Cada producto debe tener una cantidad mayor a 0', 'error');
+      return;
+    }
+
+    const currentStock = parseFloat(select.selectedOptions[0].getAttribute('data-stock') || 0);
+    if (tipo === 'DESCARGO' && cantidad > currentStock) {
+      showToast(`Stock insuficiente para el producto seleccionado (Disponible: ${currentStock}, Solicitado: ${cantidad})`, 'error');
+      return;
+    }
+
+    detalles.push({
+      producto_id,
+      cantidad,
+      costo_unitario
+    });
+  }
+
+  if (detalles.length === 0) {
+    showToast('Debe seleccionar al menos un producto válido para el ajuste', 'error');
+    return;
+  }
+
+  const payload = {
+    tipo_ajuste: tipo,
+    motivo,
+    fecha,
+    observaciones,
+    detalles
+  };
+
+  const btnGuardar = document.getElementById('btnGuardarAjuste');
+  if (btnGuardar) {
+    btnGuardar.disabled = true;
+    btnGuardar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando...';
+  }
+
+  try {
+    const res = await fetch('/api/inventario/ajustes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Error al procesar el ajuste de inventario');
+    }
+
+    showToast(`Ajuste ${data.numero_ajuste || ''} aplicado con éxito`, 'success');
+    closeAjusteModal();
+    await loadProductos();
+    await loadDashboard();
+    if (typeof loadReporteKardex === 'function' && AppState.currentView === 'reportes') {
+      loadReporteKardex();
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    if (btnGuardar) {
+      btnGuardar.disabled = false;
+      btnGuardar.innerHTML = '<i class="fa-solid fa-check"></i> <span>Confirmar y Aplicar Ajuste</span>';
+    }
   }
 }

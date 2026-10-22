@@ -123,7 +123,7 @@ def crear_base_limpia(destino_path=DB_LIMPIA):
         tasa_cop REAL NOT NULL,
         total_ves REAL NOT NULL,
         total_cop REAL NOT NULL,
-        estado TEXT DEFAULT 'pagada' CHECK(estado IN ('pagada', 'anulada')),
+        estado TEXT DEFAULT 'pagada' CHECK(estado IN ('pagada', 'pendiente', 'anulada')),
         fecha_vencimiento TEXT,
         saldo_pendiente REAL DEFAULT 0.0,
         notas TEXT,
@@ -378,6 +378,93 @@ def crear_base_limpia(destino_path=DB_LIMPIA):
         FOREIGN KEY (devolucion_id) REFERENCES devoluciones(id) ON DELETE CASCADE
     )
     """)
+
+    # 21. Libro Mayor de Inventario (FASE 2A)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_movimientos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TEXT NOT NULL,
+        producto_id INTEGER NOT NULL,
+        tipo_movimiento TEXT NOT NULL CHECK(tipo_movimiento IN (
+            'inventario_inicial',
+            'compra',
+            'venta',
+            'devolucion_cliente',
+            'devolucion_proveedor',
+            'cargo_ajuste',
+            'descargo_merma',
+            'descargo_vencimiento',
+            'descargo_rotura',
+            'descargo_uso_interno',
+            'APERTURA_MIGRACION'
+        )),
+        sentido TEXT NOT NULL CHECK(sentido IN ('ENTRADA', 'SALIDA')),
+        cantidad REAL NOT NULL CHECK(cantidad > 0),
+        costo_unitario REAL NOT NULL DEFAULT 0.0 CHECK(costo_unitario >= 0),
+        costo_total REAL NOT NULL DEFAULT 0.0 CHECK(costo_total >= 0),
+        stock_anterior REAL NOT NULL DEFAULT 0.0,
+        stock_nuevo REAL NOT NULL DEFAULT 0.0,
+        documento_tipo TEXT NOT NULL,
+        documento_id INTEGER,
+        documento_numero TEXT,
+        motivo TEXT,
+        usuario_id INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE RESTRICT
+    )
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_prod_fecha ON inventario_movimientos(producto_id, fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_doc ON inventario_movimientos(documento_tipo, documento_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_fecha ON inventario_movimientos(fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_prod_fecha_id ON inventario_movimientos(producto_id, fecha, id)")
+
+    # 22. Control de Migraciones de Inventario
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_migraciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        version TEXT NOT NULL,
+        fecha_corte TEXT NOT NULL,
+        estado TEXT NOT NULL CHECK(estado IN ('PENDIENTE', 'COMPLETADO', 'FALLIDO')),
+        registros_generados INTEGER DEFAULT 0,
+        observaciones TEXT
+    )
+    """)
+
+    # 23. Ajustes de Inventario (FASE 2C)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_ajustes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_ajuste TEXT UNIQUE NOT NULL,
+        fecha TEXT NOT NULL,
+        tipo_ajuste TEXT NOT NULL CHECK(tipo_ajuste IN ('CARGO', 'DESCARGO')),
+        motivo TEXT NOT NULL,
+        observaciones TEXT,
+        usuario_id INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_ajuste_detalles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ajuste_id INTEGER NOT NULL,
+        producto_id INTEGER NOT NULL,
+        cantidad REAL NOT NULL CHECK(cantidad > 0),
+        costo_unitario REAL NOT NULL DEFAULT 0.0,
+        costo_total REAL NOT NULL DEFAULT 0.0,
+        stock_anterior REAL NOT NULL DEFAULT 0.0,
+        stock_nuevo REAL NOT NULL DEFAULT 0.0,
+        motivo_detalle TEXT,
+        FOREIGN KEY (ajuste_id) REFERENCES inventario_ajustes(id) ON DELETE CASCADE,
+        FOREIGN KEY (producto_id) REFERENCES productos(id)
+    )
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajustes_fecha ON inventario_ajustes(fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajuste_det_ajuste ON inventario_ajuste_detalles(ajuste_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajuste_det_prod ON inventario_ajuste_detalles(producto_id)")
 
     # ========================================================
     # SEEDING DE DATOS LIMPIOS Y ESTRUCTURALES

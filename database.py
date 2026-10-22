@@ -249,6 +249,92 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     except Exception:
         pass
 
+    # 6. TABLAS DEL LIBRO MAYOR DE INVENTARIO (FASE 2A)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_movimientos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TEXT NOT NULL,
+        producto_id INTEGER NOT NULL,
+        tipo_movimiento TEXT NOT NULL CHECK(tipo_movimiento IN (
+            'inventario_inicial',
+            'compra',
+            'venta',
+            'devolucion_cliente',
+            'devolucion_proveedor',
+            'cargo_ajuste',
+            'descargo_merma',
+            'descargo_vencimiento',
+            'descargo_rotura',
+            'descargo_uso_interno',
+            'APERTURA_MIGRACION'
+        )),
+        sentido TEXT NOT NULL CHECK(sentido IN ('ENTRADA', 'SALIDA')),
+        cantidad REAL NOT NULL CHECK(cantidad > 0),
+        costo_unitario REAL NOT NULL DEFAULT 0.0 CHECK(costo_unitario >= 0),
+        costo_total REAL NOT NULL DEFAULT 0.0 CHECK(costo_total >= 0),
+        stock_anterior REAL NOT NULL DEFAULT 0.0,
+        stock_nuevo REAL NOT NULL DEFAULT 0.0,
+        documento_tipo TEXT NOT NULL,
+        documento_id INTEGER,
+        documento_numero TEXT,
+        motivo TEXT,
+        usuario_id INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE RESTRICT
+    )
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_prod_fecha ON inventario_movimientos(producto_id, fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_doc ON inventario_movimientos(documento_tipo, documento_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_fecha ON inventario_movimientos(fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_prod_fecha_id ON inventario_movimientos(producto_id, fecha, id)")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_migraciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        version TEXT NOT NULL,
+        fecha_corte TEXT NOT NULL,
+        estado TEXT NOT NULL CHECK(estado IN ('PENDIENTE', 'COMPLETADO', 'FALLIDO')),
+        registros_generados INTEGER DEFAULT 0,
+        observaciones TEXT
+    )
+    """)
+
+    # 7. TABLAS DE AJUSTES DE INVENTARIO (FASE 2C)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_ajustes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_ajuste TEXT UNIQUE NOT NULL,
+        fecha TEXT NOT NULL,
+        tipo_ajuste TEXT NOT NULL CHECK(tipo_ajuste IN ('CARGO', 'DESCARGO')),
+        motivo TEXT NOT NULL,
+        observaciones TEXT,
+        usuario_id INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_ajuste_detalles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ajuste_id INTEGER NOT NULL,
+        producto_id INTEGER NOT NULL,
+        cantidad REAL NOT NULL CHECK(cantidad > 0),
+        costo_unitario REAL NOT NULL DEFAULT 0.0,
+        costo_total REAL NOT NULL DEFAULT 0.0,
+        stock_anterior REAL NOT NULL DEFAULT 0.0,
+        stock_nuevo REAL NOT NULL DEFAULT 0.0,
+        motivo_detalle TEXT,
+        FOREIGN KEY (ajuste_id) REFERENCES inventario_ajustes(id) ON DELETE CASCADE,
+        FOREIGN KEY (producto_id) REFERENCES productos(id)
+    )
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajustes_fecha ON inventario_ajustes(fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajuste_det_ajuste ON inventario_ajuste_detalles(ajuste_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajuste_det_prod ON inventario_ajuste_detalles(producto_id)")
+
     conn.commit()
 
     # 6. Estadísticas y conteos de tablas
@@ -370,7 +456,7 @@ def init_db():
         tasa_cop REAL NOT NULL DEFAULT 0.0,
         total_ves REAL NOT NULL DEFAULT 0.0,
         total_cop REAL NOT NULL DEFAULT 0.0,
-        estado TEXT DEFAULT 'pagada' CHECK(estado IN ('pagada', 'anulada')),
+        estado TEXT DEFAULT 'pagada' CHECK(estado IN ('pagada', 'pendiente', 'anulada')),
         tipo_venta TEXT DEFAULT 'contado' CHECK(tipo_venta IN ('contado', 'credito')),
         fecha_vencimiento TEXT,
         saldo_pendiente REAL DEFAULT 0.0,
@@ -648,6 +734,97 @@ def init_db():
     )
     """)
 
+    # ==========================================
+    # LIBRO MAYOR DE INVENTARIO (FASE 2A)
+    # ==========================================
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_movimientos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TEXT NOT NULL,
+        producto_id INTEGER NOT NULL,
+        tipo_movimiento TEXT NOT NULL CHECK(tipo_movimiento IN (
+            'inventario_inicial',
+            'compra',
+            'venta',
+            'devolucion_cliente',
+            'devolucion_proveedor',
+            'cargo_ajuste',
+            'descargo_merma',
+            'descargo_vencimiento',
+            'descargo_rotura',
+            'descargo_uso_interno',
+            'APERTURA_MIGRACION'
+        )),
+        sentido TEXT NOT NULL CHECK(sentido IN ('ENTRADA', 'SALIDA')),
+        cantidad REAL NOT NULL CHECK(cantidad > 0),
+        costo_unitario REAL NOT NULL DEFAULT 0.0 CHECK(costo_unitario >= 0),
+        costo_total REAL NOT NULL DEFAULT 0.0 CHECK(costo_total >= 0),
+        stock_anterior REAL NOT NULL DEFAULT 0.0,
+        stock_nuevo REAL NOT NULL DEFAULT 0.0,
+        documento_tipo TEXT NOT NULL,
+        documento_id INTEGER,
+        documento_numero TEXT,
+        motivo TEXT,
+        usuario_id INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE RESTRICT
+    )
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_prod_fecha ON inventario_movimientos(producto_id, fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_doc ON inventario_movimientos(documento_tipo, documento_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_fecha ON inventario_movimientos(fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_prod_fecha_id ON inventario_movimientos(producto_id, fecha, id)")
+
+    # Tabla de Control de Migraciones de Inventario
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_migraciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        version TEXT NOT NULL,
+        fecha_corte TEXT NOT NULL,
+        estado TEXT NOT NULL CHECK(estado IN ('PENDIENTE', 'COMPLETADO', 'FALLIDO')),
+        registros_generados INTEGER DEFAULT 0,
+        observaciones TEXT
+    )
+    """)
+
+    # ==========================================
+    # TABLAS DE AJUSTES DE INVENTARIO (FASE 2C)
+    # ==========================================
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_ajustes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_ajuste TEXT UNIQUE NOT NULL,
+        fecha TEXT NOT NULL,
+        tipo_ajuste TEXT NOT NULL CHECK(tipo_ajuste IN ('CARGO', 'DESCARGO')),
+        motivo TEXT NOT NULL,
+        observaciones TEXT,
+        usuario_id INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_ajuste_detalles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ajuste_id INTEGER NOT NULL,
+        producto_id INTEGER NOT NULL,
+        cantidad REAL NOT NULL CHECK(cantidad > 0),
+        costo_unitario REAL NOT NULL DEFAULT 0.0,
+        costo_total REAL NOT NULL DEFAULT 0.0,
+        stock_anterior REAL NOT NULL DEFAULT 0.0,
+        stock_nuevo REAL NOT NULL DEFAULT 0.0,
+        motivo_detalle TEXT,
+        FOREIGN KEY (ajuste_id) REFERENCES inventario_ajustes(id) ON DELETE CASCADE,
+        FOREIGN KEY (producto_id) REFERENCES productos(id)
+    )
+    """)
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajustes_fecha ON inventario_ajustes(fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajuste_det_ajuste ON inventario_ajuste_detalles(ajuste_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajuste_det_prod ON inventario_ajuste_detalles(producto_id)")
+
     # Sembrar configuración inicial si no existe
     cursor.execute("SELECT COUNT(*) FROM configuracion")
     if cursor.fetchone()[0] == 0:
@@ -706,6 +883,8 @@ def limpiar_transacciones_db():
     conn = get_connection()
     c = conn.cursor()
     tablas = [
+        "inventario_ajuste_detalles", "inventario_ajustes",
+        "inventario_movimientos", "inventario_migraciones",
         "factura_pagos", "factura_detalles", "facturas",
         "compra_pagos", "compra_detalles", "compras",
         "abono_cxc_pagos", "abonos_cxc", "cuentas_por_cobrar",
@@ -730,6 +909,434 @@ def restablecer_fabrica_db():
     crear_base_limpia(DB_PATH)
     sync_to_supabase_storage()
     return True
+
+# ========================================================
+# FUNCIONES TRANSACCIONALES DE INVENTARIO (FASE 2A Y 2B)
+# ========================================================
+
+def registrar_movimiento_inventario(
+    cursor,
+    producto_id,
+    fecha,
+    tipo_movimiento,
+    sentido,
+    cantidad,
+    costo_unitario,
+    costo_total,
+    stock_anterior,
+    stock_nuevo,
+    documento_tipo,
+    documento_id,
+    documento_numero=None,
+    motivo=None,
+    usuario_id=1
+):
+    """
+    Función central para registrar movimientos en el libro mayor persistente (FASE 2B).
+    - Valida producto y tipo (omite servicios según Regla 22).
+    - Valida cantidad > 0.
+    - Valida sentido ('ENTRADA' o 'SALIDA').
+    - Valida tipo_movimiento.
+    - Idempotencia / Protección contra duplicados (Sección 8):
+      Si ya existe un movimiento idéntico para (documento_tipo, documento_id, producto_id, tipo_movimiento),
+      evita duplicidad y retorna el id existente.
+    - Inserta el registro inmutable en inventario_movimientos.
+    - No realiza commit directo: opera dentro de la transacción activa del llamador (Principio de Atomicidad).
+    """
+    cursor.execute("SELECT id, tipo, stock, costo FROM productos WHERE id = ?", (producto_id,))
+    prod = cursor.fetchone()
+    if not prod:
+        raise ValueError(f"Producto ID {producto_id} no existe en catálogo")
+    
+    prod_dict = dict(prod)
+    if prod_dict["tipo"] == "servicio":
+        return None
+
+    cant = float(cantidad)
+    if cant <= 0:
+        raise ValueError(f"La cantidad del movimiento debe ser mayor a 0, recibido: {cant}")
+
+    sent = str(sentido).strip().upper()
+    if sent not in ("ENTRADA", "SALIDA"):
+        raise ValueError(f"Sentido inválido: {sentido}. Debe ser 'ENTRADA' o 'SALIDA'.")
+
+    tipos_validos = (
+        'inventario_inicial', 'compra', 'venta', 
+        'devolucion_cliente', 'devolucion_proveedor', 
+        'cargo_ajuste', 'descargo_merma', 'descargo_vencimiento', 
+        'descargo_rotura', 'descargo_uso_interno', 'APERTURA_MIGRACION'
+    )
+    if tipo_movimiento not in tipos_validos:
+        raise ValueError(f"Tipo de movimiento inválido: {tipo_movimiento}")
+
+    # Protección contra duplicados (Sección 8)
+    cursor.execute("""
+        SELECT id FROM inventario_movimientos 
+        WHERE documento_tipo = ? AND documento_id = ? AND producto_id = ? AND tipo_movimiento = ?
+    """, (documento_tipo, documento_id, producto_id, tipo_movimiento))
+    existente = cursor.fetchone()
+    if existente:
+        return existente[0]
+
+    c_unit = max(0.0, float(costo_unitario or 0.0))
+    c_tot = max(0.0, float(costo_total if costo_total is not None else round(cant * c_unit, 2)))
+    stk_ant = float(stock_anterior)
+    stk_nue = float(stock_nuevo)
+    fec = str(fecha) if fecha else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    cursor.execute("""
+        INSERT INTO inventario_movimientos (
+            fecha, producto_id, tipo_movimiento, sentido, cantidad,
+            costo_unitario, costo_total, stock_anterior, stock_nuevo,
+            documento_tipo, documento_id, documento_numero, motivo, usuario_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        fec, producto_id, tipo_movimiento, sent, cant,
+        c_unit, c_tot, stk_ant, stk_nue,
+        documento_tipo, documento_id, documento_numero, motivo, usuario_id
+    ))
+    return cursor.lastrowid
+
+def migrar_historico_inventario(conn=None, cursor=None, fecha_corte=None):
+    """
+    Migración histórica idempotente para FASE 2A:
+    - Reconstruye ordenadamente movimientos históricos a partir de compras, ventas y devoluciones existentes.
+    - Excluye productos tipo 'servicio' (Regla 22).
+    - Registra para cada movimiento histórico:
+        * Compras: ENTRADA al costo unitario registrado en compra_detalles.
+        * Ventas: SALIDA con costo_unitario = 0.0 (debido a que el sistema histórico no preservaba costo a fecha de venta, Regla 10).
+        * Devoluciones: ENTRADA con costo_unitario = 0.0 (condición física apto/dañado no determinada en origen, Regla 10).
+    - Para cada producto físico, calcula el saldo reconstruido.
+      Compara con productos.stock actual.
+      Si diferencia != 0:
+        Genera un movimiento de regularización:
+        * tipo_movimiento: 'APERTURA_MIGRACION'
+        * documento_tipo: 'APERTURA_MIGRACION'
+        * sentido: 'ENTRADA' si diff > 0 else 'SALIDA'
+        * cantidad: abs(diff)
+        * costo_unitario: 0.0
+        * fecha: fecha_corte
+    - Idempotencia: Si la migración 'FASE_2A' ya figura como 'COMPLETADO' en inventario_migraciones,
+      no duplica ningún movimiento y retorna estado previo.
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    if cursor is None:
+        cursor = conn.cursor()
+
+    if not fecha_corte:
+        fecha_corte = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # 1. Idempotencia: Verificar si ya fue ejecutada
+    cursor.execute("""
+        SELECT id, version, fecha_corte, estado, registros_generados, observaciones 
+        FROM inventario_migraciones 
+        WHERE version = 'FASE_2A' AND estado = 'COMPLETADO'
+    """)
+    migracion_previa = cursor.fetchone()
+    if migracion_previa:
+        resultado = {
+            "ya_ejecutado": True,
+            "migracion_id": migracion_previa["id"],
+            "version": migracion_previa["version"],
+            "fecha_corte": migracion_previa["fecha_corte"],
+            "registros_generados": migracion_previa["registros_generados"],
+            "observaciones": migracion_previa["observaciones"],
+            "mensaje": "La migración FASE_2A ya fue completada previamente. No se duplicaron movimientos."
+        }
+        if should_close:
+            conn.close()
+        return resultado
+
+    # Obtener productos físicos (excluyendo servicios según Regla 22)
+    cursor.execute("SELECT id, codigo, nombre, tipo, stock, costo FROM productos WHERE tipo != 'servicio' ORDER BY id ASC")
+    productos = [dict(r) for r in cursor.fetchall()]
+    running_stock = {p["id"]: 0.0 for p in productos}
+
+    # Recopilar eventos históricos
+    eventos = []
+
+    # A. Compras
+    cursor.execute("""
+        SELECT 
+            cd.id as detalle_id,
+            c.id as compra_id,
+            coalesce(c.numero_factura, 'COM-' || printf('%04d', c.id)) as doc_numero,
+            c.fecha,
+            cd.producto_id,
+            cd.cantidad,
+            cd.costo_unitario
+        FROM compra_detalles cd
+        JOIN compras c ON cd.compra_id = c.id
+        JOIN productos p ON cd.producto_id = p.id
+        WHERE p.tipo != 'servicio'
+        ORDER BY c.fecha ASC, c.id ASC, cd.id ASC
+    """)
+    for r in cursor.fetchall():
+        eventos.append({
+            "fecha": str(r["fecha"] or "2026-01-01 00:00:00"),
+            "tipo_evento": "compra",
+            "tipo_movimiento": "compra",
+            "sentido": "ENTRADA",
+            "producto_id": r["producto_id"],
+            "cantidad": float(r["cantidad"]),
+            "costo_unitario": float(r["costo_unitario"] or 0.0),
+            "costo_total": round(float(r["cantidad"]) * float(r["costo_unitario"] or 0.0), 2),
+            "documento_tipo": "COMPRA",
+            "documento_id": r["compra_id"],
+            "documento_numero": r["doc_numero"],
+            "motivo": "Migración histórica: Entrada por compra a proveedor",
+            "orden_prioridad": 1,
+            "ref_id": r["detalle_id"]
+        })
+
+    # B. Ventas (facturas no anuladas)
+    cursor.execute("""
+        SELECT 
+            fd.id as detalle_id,
+            f.id as factura_id,
+            f.numero_factura as doc_numero,
+            f.fecha,
+            fd.producto_id,
+            fd.cantidad
+        FROM factura_detalles fd
+        JOIN facturas f ON fd.factura_id = f.id
+        JOIN productos p ON fd.producto_id = p.id
+        WHERE p.tipo != 'servicio' AND coalesce(f.estado, '') != 'anulada'
+        ORDER BY f.fecha ASC, f.id ASC, fd.id ASC
+    """)
+    for r in cursor.fetchall():
+        eventos.append({
+            "fecha": str(r["fecha"] or "2026-01-01 00:00:00"),
+            "tipo_evento": "venta",
+            "tipo_movimiento": "venta",
+            "sentido": "SALIDA",
+            "producto_id": r["producto_id"],
+            "cantidad": float(r["cantidad"]),
+            "costo_unitario": 0.0,  # Regla 10: Costo histórico no determinado en sistema origen
+            "costo_total": 0.0,
+            "documento_tipo": "FACTURA",
+            "documento_id": r["factura_id"],
+            "documento_numero": r["doc_numero"],
+            "motivo": "Migración histórica: Salida por facturación al cliente (Costo histórico no determinado en sistema origen)",
+            "orden_prioridad": 2,
+            "ref_id": r["detalle_id"]
+        })
+
+    # C. Devoluciones de clientes
+    cursor.execute("""
+        SELECT 
+            dd.id as detalle_id,
+            d.id as devolucion_id,
+            d.numero_devolucion as doc_numero,
+            d.fecha_emision as fecha,
+            dd.producto_id,
+            dd.cantidad
+        FROM devolucion_detalles dd
+        JOIN devoluciones d ON dd.devolucion_id = d.id
+        JOIN productos p ON dd.producto_id = p.id
+        WHERE p.tipo != 'servicio'
+        ORDER BY d.fecha_emision ASC, d.id ASC, dd.id ASC
+    """)
+    for r in cursor.fetchall():
+        eventos.append({
+            "fecha": str(r["fecha"] or "2026-01-01 00:00:00"),
+            "tipo_evento": "devolucion_cliente",
+            "tipo_movimiento": "devolucion_cliente",
+            "sentido": "ENTRADA",
+            "producto_id": r["producto_id"],
+            "cantidad": float(r["cantidad"]),
+            "costo_unitario": 0.0,  # Regla 10: Condición física apto/dañado no determinada
+            "costo_total": 0.0,
+            "documento_tipo": "DEVOLUCION",
+            "documento_id": r["devolucion_id"],
+            "documento_numero": r["doc_numero"],
+            "motivo": "Migración histórica: Entrada por devolución de cliente (Condición física apto/dañado no determinada en sistema origen)",
+            "orden_prioridad": 3,
+            "ref_id": r["detalle_id"]
+        })
+
+    # Ordenar estrictamente cronológico determinista
+    eventos.sort(key=lambda x: (x["fecha"], x["orden_prioridad"], x["ref_id"]))
+
+    cant_compras = 0
+    cant_ventas = 0
+    cant_devoluciones = 0
+    cant_regularizaciones = 0
+    total_movimientos = 0
+
+    # Insertar movimientos históricos
+    for ev in eventos:
+        pid = ev["producto_id"]
+        ant = running_stock[pid]
+        cant = ev["cantidad"]
+        if ev["sentido"] == "ENTRADA":
+            nuevo = round(ant + cant, 4)
+            running_stock[pid] = nuevo
+            if ev["tipo_evento"] == "compra":
+                cant_compras += 1
+            elif ev["tipo_evento"] == "devolucion_cliente":
+                cant_devoluciones += 1
+        else:
+            nuevo = round(ant - cant, 4)
+            running_stock[pid] = nuevo
+            cant_ventas += 1
+
+        cursor.execute("""
+            INSERT INTO inventario_movimientos (
+                fecha, producto_id, tipo_movimiento, sentido, cantidad,
+                costo_unitario, costo_total, stock_anterior, stock_nuevo,
+                documento_tipo, documento_id, documento_numero, motivo, usuario_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        """, (
+            ev["fecha"], pid, ev["tipo_movimiento"], ev["sentido"], cant,
+            ev["costo_unitario"], ev["costo_total"], ant, nuevo,
+            ev["documento_tipo"], ev["documento_id"], ev["documento_numero"], ev["motivo"]
+        ))
+        total_movimientos += 1
+
+    # D. Regularización de Apertura por Migración (Secciones 13, 14, 15)
+    for prod in productos:
+        pid = prod["id"]
+        stock_fisico = float(prod.get("stock") or 0.0)
+        reconstruido = running_stock[pid]
+        diferencia = round(stock_fisico - reconstruido, 4)
+
+        if abs(diferencia) > 0.0001:
+            if diferencia > 0:
+                sentido = "ENTRADA"
+                cant_reg = diferencia
+                nuevo = round(reconstruido + cant_reg, 4)
+            else:
+                sentido = "SALIDA"
+                cant_reg = abs(diferencia)
+                nuevo = round(reconstruido - cant_reg, 4)
+
+            cursor.execute("""
+                INSERT INTO inventario_movimientos (
+                    fecha, producto_id, tipo_movimiento, sentido, cantidad,
+                    costo_unitario, costo_total, stock_anterior, stock_nuevo,
+                    documento_tipo, documento_id, documento_numero, motivo, usuario_id
+                ) VALUES (?, ?, 'APERTURA_MIGRACION', ?, ?, 0.0, 0.0, ?, ?, 'APERTURA_MIGRACION', ?, ?, ?, 1)
+            """, (
+                fecha_corte, pid, sentido, cant_reg, reconstruido, nuevo,
+                pid, f"REG-MIG-{prod['codigo']}",
+                "Regularización de apertura por migración Fase 2A (Diferencia histórica no documentada)"
+            ))
+            running_stock[pid] = nuevo
+            cant_regularizaciones += 1
+            total_movimientos += 1
+
+    # Registrar en inventario_migraciones
+    obs = f"Compras: {cant_compras}, Ventas: {cant_ventas}, Devoluciones: {cant_devoluciones}, Regularizaciones: {cant_regularizaciones}"
+    cursor.execute("""
+        INSERT INTO inventario_migraciones (
+            version, fecha_corte, estado, registros_generados, observaciones
+        ) VALUES ('FASE_2A', ?, 'COMPLETADO', ?, ?)
+    """, (fecha_corte, total_movimientos, obs))
+    migracion_id = cursor.lastrowid
+
+    conn.commit()
+
+    resultado = {
+        "ya_ejecutado": False,
+        "migracion_id": migracion_id,
+        "version": "FASE_2A",
+        "fecha_corte": fecha_corte,
+        "compras_migradas": cant_compras,
+        "ventas_migradas": cant_ventas,
+        "devoluciones_migradas": cant_devoluciones,
+        "regularizaciones_generadas": cant_regularizaciones,
+        "total_registros_generados": total_movimientos,
+        "observaciones": obs,
+        "mensaje": "Migración histórica FASE_2A completada exitosamente."
+    }
+
+    if should_close:
+        conn.close()
+
+    return resultado
+
+def conciliar_inventario(conn=None, cursor=None):
+    """
+    Compara para cada producto:
+    - productos.stock (stock registrado en catálogo)
+    - SUM(entradas) - SUM(salidas) en inventario_movimientos
+    Determina si estado es 'OK' o 'DIFERENCIA'.
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    if cursor is None:
+        cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT 
+            p.id, 
+            p.codigo, 
+            p.nombre, 
+            p.tipo, 
+            p.stock as stock_registrado,
+            COALESCE(SUM(CASE WHEN m.sentido = 'ENTRADA' THEN m.cantidad WHEN m.sentido = 'SALIDA' THEN -m.cantidad ELSE 0.0 END), 0.0) as stock_movimientos
+        FROM productos p
+        LEFT JOIN inventario_movimientos m ON p.id = m.producto_id
+        GROUP BY p.id
+        ORDER BY p.id ASC
+    """)
+    rows = cursor.fetchall()
+    conciliacion = []
+    total_ok = 0
+    total_dif = 0
+
+    for r in rows:
+        stock_reg = float(r["stock_registrado"] or 0.0)
+        stock_mov = float(r["stock_movimientos"] or 0.0)
+        tipo = r["tipo"]
+
+        if tipo == "servicio":
+            # Regla 22: Los servicios no gestionan stock ni movimientos
+            diferencia = 0.0
+            estado = "OK"
+            nota = "Servicio (Excluido de libro mayor)"
+            total_ok += 1
+        else:
+            diferencia = round(stock_reg - stock_mov, 4)
+            if abs(diferencia) < 0.0001:
+                estado = "OK"
+                nota = "Conciliado exacto"
+                total_ok += 1
+            else:
+                estado = "DIFERENCIA"
+                nota = f"Descuadre de {diferencia:+.4f} unidades"
+                total_dif += 1
+
+        conciliacion.append({
+            "producto_id": r["id"],
+            "codigo": r["codigo"],
+            "nombre": r["nombre"],
+            "tipo": tipo,
+            "stock_registrado": stock_reg,
+            "stock_movimientos": stock_mov,
+            "diferencia": diferencia,
+            "estado": estado,
+            "nota": nota
+        })
+
+    resumen = {
+        "total_productos": len(conciliacion),
+        "total_ok": total_ok,
+        "total_diferencia": total_dif,
+        "estado_general": "CONCILIADO_OK" if total_dif == 0 else "DESCUADRE_DETECTADO",
+        "detalles": conciliacion
+    }
+
+    if should_close:
+        conn.close()
+
+    return resumen
 
 if __name__ == "__main__":
     init_db()
