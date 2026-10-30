@@ -17,12 +17,17 @@ import time
 import re
 import shutil
 from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from database import (
     get_connection, init_db, DB_PATH, 
     limpiar_transacciones_db, restablecer_fabrica_db, 
     schedule_cloud_sync, get_supabase_config,
     auditar_y_migrar_db, migrar_historico_inventario,
-    conciliar_inventario, registrar_movimiento_inventario
+    conciliar_inventario, registrar_movimiento_inventario,
+    calcular_cpp_entrada, calcular_valor_salida_cpp, validar_stock_no_negativo,
+    validar_movimiento_no_retroactivo, ErrorStockNegativo, 
+    ErrorMovimientoRetroactivoNoPermitido, ErrorInconsistenciaCPP,
+    ErrorCostoHistoricoNoRecuperable, ErrorCantidadDevolucionExcedeDisponible
 )
 
 PORT = int(os.environ.get("PORT", 8000))
@@ -737,6 +742,34 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 res_row["total_saldo_cop"] = round(total_saldo_usd * cfg["tasa_cop"], 2)
                 self.send_json(res_row)
 
+            elif path == "/api/cxc/consolidado":
+                search = query.get("q", [None])[0]
+                sql = """
+                    SELECT c.id as cliente_id, c.nombre as cliente_nombre, c.cedula as cliente_cedula, c.telefono as cliente_telefono,
+                           COUNT(CASE WHEN cxc.saldo_pendiente > 0.001 THEN 1 END) as facturas_pendientes_count,
+                           COUNT(cxc.id) as total_facturas_count,
+                           COALESCE(SUM(cxc.monto_total), 0.0) as total_facturado_usd,
+                           COALESCE(SUM(cxc.monto_pagado), 0.0) as total_cobrado_usd,
+                           COALESCE(SUM(cxc.saldo_pendiente), 0.0) as saldo_pendiente_total_usd,
+                           SUM(CASE WHEN cxc.saldo_pendiente > 0.001 AND date(cxc.fecha_vencimiento) < date('now') THEN 1 ELSE 0 END) as facturas_vencidas_count,
+                           cfg.tasa_ves, cfg.tasa_cop,
+                           ROUND(COALESCE(SUM(cxc.saldo_pendiente), 0.0) * cfg.tasa_ves, 2) as saldo_pendiente_total_ves,
+                           ROUND(COALESCE(SUM(cxc.saldo_pendiente), 0.0) * cfg.tasa_cop, 2) as saldo_pendiente_total_cop
+                    FROM clientes c
+                    JOIN cuentas_por_cobrar cxc ON cxc.cliente_id = c.id
+                    CROSS JOIN configuracion cfg ON cfg.id = 1
+                    WHERE 1=1
+                """
+                params = []
+                if search:
+                    sql += " AND (c.nombre LIKE ? OR c.cedula LIKE ?)"
+                    params.append(f"%{search}%")
+                    params.append(f"%{search}%")
+                sql += " GROUP BY c.id HAVING total_facturas_count > 0 ORDER BY saldo_pendiente_total_usd DESC, c.nombre ASC"
+                cursor.execute(sql, params)
+                rows = [dict(r) for r in cursor.fetchall()]
+                self.send_json(rows)
+
             elif path == "/api/cxc":
                 estado = query.get("estado", [None])[0]
                 cliente_id = query.get("cliente_id", [None])[0]
@@ -841,6 +874,54 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(res_row)
 
             # 9.2 Cuentas por Pagar (CXP) - Listado con filtros
+            elif path == "/api/cxp/consolidado":
+                search = query.get("q", [None])[0]
+                sql = """
+                    SELECT p.id as proveedor_id, p.nombre as proveedor_nombre, p.cedula as proveedor_cedula, p.telefono as proveedor_telefono,
+                           COUNT(CASE WHEN cxp.saldo_pendiente > 0.001 THEN 1 END) as cuentas_pendientes_count,
+                           COUNT(cxp.id) as total_cuentas_count,
+                           COALESCE(SUM(cxp.monto_total), 0.0) as total_deuda_usd,
+                           COALESCE(SUM(cxp.monto_pagado), 0.0) as total_pagado_usd,
+                           COALESCE(SUM(cxp.saldo_pendiente), 0.0) as saldo_pendiente_total_usd,
+                           SUM(CASE WHEN cxp.saldo_pendiente > 0.001 AND date(cxp.fecha_vencimiento) < date('now') THEN 1 ELSE 0 END) as cuentas_vencidas_count,
+                           cfg.tasa_ves, cfg.tasa_cop,
+                           ROUND(COALESCE(SUM(cxp.saldo_pendiente), 0.0) * cfg.tasa_ves, 2) as saldo_pendiente_total_ves,
+                           ROUND(COALESCE(SUM(cxp.saldo_pendiente), 0.0) * cfg.tasa_cop, 2) as saldo_pendiente_total_cop
+                    FROM proveedores p
+                    JOIN cuentas_por_pagar cxp ON cxp.proveedor_id = p.id
+                    CROSS JOIN configuracion cfg ON cfg.id = 1
+                    WHERE 1=1
+                """
+                params = []
+                if search:
+                    sql += " AND (p.nombre LIKE ? OR p.cedula LIKE ?)"
+                    params.append(f"%{search}%")
+                    params.append(f"%{search}%")
+                sql += " GROUP BY p.id HAVING total_cuentas_count > 0 ORDER BY saldo_pendiente_total_usd DESC, p.nombre ASC"
+                cursor.execute(sql, params)
+                rows = [dict(r) for r in cursor.fetchall()]
+                self.send_json(rows)
+
+            elif path == "/api/notas-ajuste":
+                modulo = query.get("modulo", [None])[0]
+                tercero_id = query.get("tercero_id", [None])[0]
+                cuenta_id = query.get("cuenta_id", [None])[0]
+                sql = "SELECT * FROM notas_ajuste_comercial WHERE 1=1"
+                params = []
+                if modulo:
+                    sql += " AND modulo = ?"
+                    params.append(modulo)
+                if tercero_id:
+                    sql += " AND tercero_id = ?"
+                    params.append(tercero_id)
+                if cuenta_id:
+                    sql += " AND cuenta_id = ?"
+                    params.append(cuenta_id)
+                sql += " ORDER BY id DESC"
+                cursor.execute(sql, params)
+                rows = [dict(r) for r in cursor.fetchall()]
+                self.send_json(rows)
+
             elif path == "/api/cxp":
                 estado = query.get("estado", [None])[0]
                 proveedor_id = query.get("proveedor_id", [None])[0]
@@ -1405,6 +1486,205 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "producto": prod,
                     "movimientos": movimientos_filtrados,
                     "resumen": resumen
+                })
+
+            # 15b. Reporte de Kardex Oficial V2 (Basado directamente en inventario_movimientos - FASE 2D)
+            elif path == "/api/reportes/kardex-v2":
+                producto_id = query.get("producto_id", [None])[0]
+                desde = query.get("desde", [None])[0]
+                hasta = query.get("hasta", [None])[0]
+                tipo_movimiento = query.get("tipo_movimiento", [None])[0]
+                sentido = query.get("sentido", [None])[0]
+                limit_q = query.get("limit", [100])[0]
+                page_q = query.get("page", [1])[0]
+
+                cursor.execute("""
+                    SELECT id, codigo, nombre, tipo, stock, costo, precio_total 
+                    FROM productos 
+                    WHERE tipo = 'producto' 
+                    ORDER BY nombre ASC
+                """ )
+                todos_productos = [dict(r) for r in cursor.fetchall()]
+
+                producto_seleccionado = None
+                if producto_id and str(producto_id).strip() not in ("", "0", "all"):
+                    cursor.execute("""
+                        SELECT p.*, c.nombre as categoria_nombre
+                        FROM productos p
+                        LEFT JOIN categorias c ON p.categoria_id = c.id
+                        WHERE p.id = ?
+                    """, (producto_id,))
+                    p_row = cursor.fetchone()
+                    if p_row:
+                        producto_seleccionado = dict(p_row)
+
+                sql = """
+                    SELECT m.id, m.fecha, m.producto_id, m.tipo_movimiento, m.sentido,
+                           m.cantidad, m.costo_unitario, m.costo_total,
+                           m.stock_anterior, m.stock_nuevo,
+                           m.documento_tipo, m.documento_id, m.documento_numero,
+                           m.motivo, m.usuario_id, m.created_at,
+                           p.codigo as producto_codigo, p.nombre as producto_nombre
+                    FROM inventario_movimientos m
+                    JOIN productos p ON m.producto_id = p.id
+                    WHERE 1=1
+                """
+                params = []
+
+                if producto_seleccionado:
+                    sql += " AND m.producto_id = ?"
+                    params.append(producto_seleccionado["id"])
+
+                if desde and str(desde).strip():
+                    sql += " AND m.fecha >= ?"
+                    params.append(f"{desde.strip()} 00:00:00" if len(desde.strip()) == 10 else desde.strip())
+
+                if hasta and str(hasta).strip():
+                    sql += " AND m.fecha <= ?"
+                    params.append(f"{hasta.strip()} 23:59:59" if len(hasta.strip()) == 10 else hasta.strip())
+
+                if sentido and str(sentido).strip().upper() in ("ENTRADA", "SALIDA"):
+                    sql += " AND m.sentido = ?"
+                    params.append(sentido.strip().upper())
+
+                if tipo_movimiento and str(tipo_movimiento).strip() not in ("", "all"):
+                    tm = str(tipo_movimiento).strip().lower()
+                    if tm == "compras":
+                        sql += " AND m.tipo_movimiento = 'compra'"
+                    elif tm == "ventas":
+                        sql += " AND m.tipo_movimiento = 'venta'"
+                    elif tm == "devoluciones":
+                        sql += " AND m.tipo_movimiento IN ('devolucion_cliente', 'devolucion_proveedor')"
+                    elif tm == "cargos":
+                        sql += " AND m.tipo_movimiento = 'cargo_ajuste'"
+                    elif tm == "descargos":
+                        sql += " AND m.tipo_movimiento LIKE 'descargo_%'"
+                    else:
+                        sql += " AND m.tipo_movimiento = ?"
+                        params.append(tipo_movimiento)
+
+                # Orden cronológico determinístico
+                sql += " ORDER BY m.fecha ASC, m.id ASC"
+
+                cursor.execute(sql, tuple(params))
+                raw_movs = [dict(r) for r in cursor.fetchall()]
+
+                TIPO_MOVIMIENTO_LABELS = {
+                    "inventario_inicial": "Inventario inicial",
+                    "compra": "Compra",
+                    "venta": "Venta",
+                    "devolucion_cliente": "Devolución de cliente",
+                    "devolucion_proveedor": "Devolución a proveedor",
+                    "cargo_ajuste": "Cargo de inventario",
+                    "descargo_merma": "Descargo por merma",
+                    "descargo_vencimiento": "Descargo por vencimiento",
+                    "descargo_rotura": "Descargo por rotura",
+                    "descargo_uso_interno": "Descargo por uso interno",
+                    "APERTURA_MIGRACION": "Apertura migración histórica"
+                }
+
+                movimientos_formateados = []
+                total_entradas_cant = 0.0
+                total_salidas_cant = 0.0
+                total_entradas_costo = 0.0
+                total_salidas_costo = 0.0
+
+                for m in raw_movs:
+                    cant = float(m["cantidad"] or 0.0)
+                    c_unit = float(m["costo_unitario"] or 0.0)
+                    c_tot = float(m["costo_total"] or round(cant * c_unit, 4))
+                    sent = str(m["sentido"]).strip().upper()
+
+                    if sent == "ENTRADA":
+                        entrada_cant = cant
+                        salida_cant = 0.0
+                        total_entradas_cant += cant
+                        total_entradas_costo += c_tot
+                    else:
+                        entrada_cant = 0.0
+                        salida_cant = cant
+                        total_salidas_cant += cant
+                        total_salidas_costo += c_tot
+
+                    doc_num = m["documento_numero"]
+                    if not doc_num or str(doc_num).strip().upper() in ("NONE", "NULL", ""):
+                        doc_num = "—"
+
+                    doc_tipo = m["documento_tipo"]
+                    if not doc_tipo or str(doc_tipo).strip().upper() in ("NONE", "NULL", ""):
+                        doc_tipo = "—"
+
+                    motivo = m["motivo"]
+                    if not motivo or str(motivo).strip().upper() in ("NONE", "NULL", ""):
+                        motivo = "—"
+
+                    m_fmt = {
+                        "id": m["id"],
+                        "fecha": m["fecha"],
+                        "producto_id": m["producto_id"],
+                        "producto_codigo": m["producto_codigo"],
+                        "producto_nombre": m["producto_nombre"],
+                        "tipo_movimiento": m["tipo_movimiento"],
+                        "tipo_movimiento_label": TIPO_MOVIMIENTO_LABELS.get(m["tipo_movimiento"], m["tipo_movimiento"].replace("_", " ").capitalize()),
+                        "sentido": sent,
+                        "cantidad": cant,
+                        "entrada": entrada_cant,
+                        "salida": salida_cant,
+                        "costo_unitario": c_unit,
+                        "costo_total": c_tot,
+                        "stock_anterior": float(m["stock_anterior"] or 0.0),
+                        "stock_nuevo": float(m["stock_nuevo"] or 0.0),
+                        "saldo": float(m["stock_nuevo"] or 0.0),
+                        "documento_tipo": doc_tipo,
+                        "documento_id": m["documento_id"],
+                        "documento_numero": doc_num,
+                        "motivo": motivo,
+                        "usuario_id": m["usuario_id"] or 1,
+                        "created_at": m["created_at"]
+                    }
+                    movimientos_formateados.append(m_fmt)
+
+                resumen = {
+                    "total_movimientos": len(movimientos_formateados),
+                    "total_entradas": round(total_entradas_cant, 2),
+                    "total_salidas": round(total_salidas_cant, 2),
+                    "total_costo_entradas": round(total_entradas_costo, 2),
+                    "total_costo_salidas": round(total_salidas_costo, 2),
+                    "stock_actual": float(producto_seleccionado["stock"]) if producto_seleccionado else None
+                }
+
+                total_items = len(movimientos_formateados)
+                limit = None
+                try:
+                    if str(limit_q).lower() != "all":
+                        limit = int(limit_q)
+                except ValueError:
+                    limit = 100
+
+                page = 1
+                try:
+                    page = max(1, int(page_q))
+                except ValueError:
+                    page = 1
+
+                if limit and total_items > limit:
+                    offset = (page - 1) * limit
+                    movs_paged = movimientos_formateados[offset:offset + limit]
+                else:
+                    movs_paged = movimientos_formateados
+
+                self.send_json({
+                    "success": True,
+                    "productos": todos_productos,
+                    "producto": producto_seleccionado,
+                    "movimientos": movs_paged,
+                    "resumen": resumen,
+                    "paginacion": {
+                        "total_items": total_items,
+                        "pagina_actual": page,
+                        "limite": limit,
+                        "total_paginas": (total_items + limit - 1) // limit if limit else 1
+                    }
                 })
 
             # 16. Reporte de Inventario Simple (Código, Nombre y Stock Actual con Filtro de Categoría)
@@ -2092,7 +2372,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 conn.commit()
                 self.send_json({"id": cursor.lastrowid, "success": True}, 201)
 
-            # 5. Crear Factura (Venta Contado o Crédito con descuento de stock y pagos multimoneda)
+            # 5. Crear Factura (Integración Transaccional Motor CPP - FASE 2F-3B)
             elif path == "/api/facturas":
                 cliente_id = body.get("cliente_id")
                 items = body.get("items", [])
@@ -2100,13 +2380,64 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 notas = body.get("notas", "")
                 tipo_venta = body.get("tipo_venta", "contado").strip().lower()
                 fecha_vencimiento = body.get("fecha_vencimiento", "")
+                fecha_factura_input = body.get("fecha")
+                numero_factura_input = (body.get("numero_factura") or "").strip()
+                idempotency_key = (body.get("idempotency_key") or body.get("client_tx_id") or "").strip()
 
                 if not cliente_id or not items or len(items) == 0:
                     self.send_error_json("Se requiere un cliente y al menos un producto o servicio", 400)
                     return
 
+                cursor.execute("SELECT id FROM clientes WHERE id = ?", (cliente_id,))
+                if not cursor.fetchone():
+                    self.send_error_json(f"Cliente ID {cliente_id} no encontrado", 404)
+                    return
+
                 if tipo_venta == "credito" and not fecha_vencimiento:
                     fecha_vencimiento = (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")
+
+                # Normalización de fecha de factura
+                if fecha_factura_input and str(fecha_factura_input).strip():
+                    f_str = str(fecha_factura_input).strip()
+                    if len(f_str) == 10:
+                        ahora_h = datetime.now().strftime("%H:%M:%S")
+                        fecha_factura = f"{f_str} {ahora_h}"
+                    else:
+                        fecha_factura = f_str
+                else:
+                    fecha_factura = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # Idempotencia: Verificar si ya existe factura con ese número o clave de idempotencia
+                if numero_factura_input:
+                    cursor.execute("""
+                        SELECT id, numero_factura, total_usd, saldo_pendiente, tipo_venta 
+                        FROM facturas 
+                        WHERE numero_factura = ?
+                    """, (numero_factura_input,))
+                    fact_existente = cursor.fetchone()
+                    if fact_existente:
+                        self.send_error_json(
+                            f"IDEMPOTENCIA: Ya existe una factura registrada con el número '{numero_factura_input}' (Factura ID {fact_existente['id']}). Operación rechazada.",
+                            409
+                        )
+                        return
+
+                if idempotency_key:
+                    cursor.execute("""
+                        SELECT id, numero_factura, total_usd, saldo_pendiente, tipo_venta 
+                        FROM facturas 
+                        WHERE notas LIKE ?
+                    """, (f"%[IDEMPOTENCY:{idempotency_key}]%",))
+                    fact_idem = cursor.fetchone()
+                    if fact_idem:
+                        self.send_error_json(
+                            f"IDEMPOTENCIA: La transacción con clave '{idempotency_key}' ya fue procesada (Factura {fact_idem['numero_factura']} ID {fact_idem['id']}). Operación rechazada.",
+                            409
+                        )
+                        return
+
+                # BEGIN IMMEDIATE: Candado exclusivo para aislar lecturas y escrituras de stock y CPP
+                cursor.execute("BEGIN IMMEDIATE")
 
                 # Obtener configuración de tasas e IVA
                 cursor.execute("SELECT * FROM configuracion WHERE id = 1")
@@ -2115,68 +2446,30 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 tasa_cop = cfg["tasa_cop"]
                 iva_pct = cfg["iva_porcentaje"] / 100.0
 
-                # Iniciar procesamiento
+                # Pre-validación de ítems y cálculo de subtotales financieros
                 subtotal = 0.0
                 iva_total = 0.0
-                detalles_procesados = []
 
                 for itm in items:
                     prod_id = itm.get("producto_id")
-                    cant = float(itm.get("cantidad", 1))
+                    cant_v = float(itm.get("cantidad", 1))
+                    if cant_v <= 0:
+                        raise ValueError(f"La cantidad vendida debe ser mayor a 0, recibido: {cant_v}")
 
-                    cursor.execute("SELECT * FROM productos WHERE id = ?", (prod_id,))
-                    prod = cursor.fetchone()
-                    if not prod:
-                        conn.rollback()
-                        self.send_error_json(f"Producto ID {prod_id} no existe", 400)
-                        return
+                    cursor.execute("SELECT id, nombre, tipo, impuesto_tipo, precio_base FROM productos WHERE id = ?", (prod_id,))
+                    p_info = cursor.fetchone()
+                    if not p_info:
+                        raise ValueError(f"Producto ID {prod_id} no existe en catálogo")
 
-                    prod_dict = dict(prod)
-                    tipo = prod_dict["tipo"]
-                    impuesto_tipo = prod_dict["impuesto_tipo"]
-                    precio_unitario = float(itm.get("precio_unitario", prod_dict["precio_base"]))
-                    costo_producto = float(prod_dict.get("costo") or 0.0)
-                    stock_ant = float(prod_dict.get("stock") or 0.0)
-                    stock_nue = stock_ant
+                    p_dict = dict(p_info)
+                    precio_u_v = float(itm.get("precio_unitario", p_dict["precio_base"]))
+                    if precio_u_v < 0:
+                        raise ValueError(f"El precio unitario no puede ser negativo, recibido: {precio_u_v}")
 
-                    # Si es producto, validar y descontar existencia
-                    if tipo == "producto":
-                        if prod_dict["stock"] < cant:
-                            conn.rollback()
-                            self.send_error_json(f"Stock insuficiente para '{prod_dict['nombre']}'. Disponible: {prod_dict['stock']}, Solicitado: {cant}", 400)
-                            return
-                        # Restar del inventario
-                        stock_nue = round(stock_ant - cant, 4)
-                        cursor.execute("UPDATE productos SET stock = stock - ? WHERE id = ?", (cant, prod_id))
-                    # Si es servicio, no se resta stock!
-
-                    # Cálculo de IVA
-                    if impuesto_tipo == "gravado":
-                        iva_u = round(precio_unitario * iva_pct, 4)
-                    else:
-                        iva_u = 0.0
-
-                    item_subtotal = round(precio_unitario * cant, 4)
-                    item_iva = round(iva_u * cant, 4)
-                    item_total = round(item_subtotal + item_iva, 4)
-
-                    subtotal += item_subtotal
-                    iva_total += item_iva
-
-                    detalles_procesados.append({
-                        "producto_id": prod_id,
-                        "nombre_producto": prod_dict["nombre"],
-                        "tipo": tipo,
-                        "impuesto_tipo": impuesto_tipo,
-                        "cantidad": cant,
-                        "precio_unitario": precio_unitario,
-                        "iva_unitario": iva_u,
-                        "subtotal": item_subtotal,
-                        "total": item_total,
-                        "stock_anterior": stock_ant,
-                        "stock_nuevo": stock_nue,
-                        "costo_producto": costo_producto
-                    })
+                    imp_tipo_v = p_dict["impuesto_tipo"]
+                    iva_u_v = round(precio_u_v * iva_pct, 4) if imp_tipo_v == "gravado" else 0.0
+                    subtotal += round(precio_u_v * cant_v, 4)
+                    iva_total += round(iva_u_v * cant_v, 4)
 
                 total_usd = round(subtotal + iva_total, 2)
                 total_ves = round(total_usd * tasa_ves, 2)
@@ -2186,18 +2479,16 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 total_pagado_usd = 0.0
                 pagos_procesados = []
                 for p in pagos:
-                    moneda = p.get("moneda", "USD").upper()
-                    metodo = p.get("metodo", "Efectivo")
+                    moneda = (p.get("moneda") or "USD").upper()
+                    metodo = p.get("metodo") or "Efectivo"
                     monto_moneda = float(p.get("monto_moneda", 0))
-                    tasa_cambio = float(p.get("tasa_cambio", 1.0))
+                    tasa_cambio = float(p.get("tasa_cambio") or 1.0)
                     referencia = p.get("referencia", "")
 
                     if moneda == "USD":
                         equiv_usd = monto_moneda
-                    elif moneda == "VES":
-                        equiv_usd = round(monto_moneda / tasa_cambio, 2) if tasa_cambio > 0 else 0
-                    elif moneda == "COP":
-                        equiv_usd = round(monto_moneda / tasa_cambio, 2) if tasa_cambio > 0 else 0
+                    elif moneda in ("VES", "COP"):
+                        equiv_usd = round(monto_moneda / tasa_cambio, 2) if tasa_cambio > 0 else 0.0
                     else:
                         equiv_usd = monto_moneda
 
@@ -2208,7 +2499,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                             "metodo": metodo,
                             "monto_moneda": monto_moneda,
                             "tasa_cambio": tasa_cambio,
-                            "equivalente_usd": equiv_usd,
+                            "equivalente_usd": round(equiv_usd, 2),
                             "referencia": referencia
                         })
 
@@ -2221,45 +2512,125 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     saldo_pendiente = 0.0
                     estado_factura = "pagada"
 
-                # Generar número correlativo de factura
-                cursor.execute("SELECT COUNT(*) FROM facturas")
-                correlativo = cursor.fetchone()[0] + 1
-                numero_factura = f"FAC-{correlativo:06d}"
+                # Generar número correlativo de factura protegido bajo BEGIN IMMEDIATE
+                if numero_factura_input:
+                    numero_factura = numero_factura_input
+                else:
+                    cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM facturas")
+                    correlativo = cursor.fetchone()[0]
+                    numero_factura = f"FAC-{correlativo:06d}"
+
+                notas_final = notas
+                if idempotency_key and f"[IDEMPOTENCY:{idempotency_key}]" not in notas_final:
+                    notas_final = f"{notas_final} [IDEMPOTENCY:{idempotency_key}]".strip()
 
                 cursor.execute("""
-                    INSERT INTO facturas (numero_factura, cliente_id, subtotal, iva_total, total_usd, total, tasa_ves, tasa_cop, total_ves, total_cop, estado, tipo_venta, fecha_vencimiento, saldo_pendiente, notas)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (numero_factura, cliente_id, subtotal, iva_total, total_usd, total_usd, tasa_ves, tasa_cop, total_ves, total_cop, estado_factura, tipo_venta, fecha_vencimiento if tipo_venta == 'credito' else None, saldo_pendiente, notas))
+                    INSERT INTO facturas (numero_factura, cliente_id, subtotal, iva_total, total_usd, total, tasa_ves, tasa_cop, total_ves, total_cop, estado, tipo_venta, fecha_vencimiento, saldo_pendiente, notas, fecha)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (numero_factura, cliente_id, subtotal, iva_total, total_usd, total_usd, tasa_ves, tasa_cop, total_ves, total_cop, estado_factura, tipo_venta, fecha_vencimiento if tipo_venta == 'credito' else None, saldo_pendiente, notas_final, fecha_factura))
                 factura_id = cursor.lastrowid
 
-                # Guardar detalles y movimientos de inventario en Libro Mayor (FASE 2B)
-                fecha_factura = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                for d in detalles_procesados:
-                    cursor.execute("""
-                        INSERT INTO factura_detalles (factura_id, producto_id, nombre_producto, tipo, impuesto_tipo, cantidad, precio_unitario, iva_unitario, subtotal, total)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (factura_id, d["producto_id"], d["nombre_producto"], d["tipo"], d["impuesto_tipo"], d["cantidad"], d["precio_unitario"], d["iva_unitario"], d["subtotal"], d["total"]))
+                # Procesamiento secuencial renglón por renglón con integración transaccional CPP
+                for itm in items:
+                    prod_id = itm.get("producto_id")
+                    cant_dec = Decimal(str(itm.get("cantidad", 1)))
 
-                    # REGISTRO EN LIBRO MAYOR DE INVENTARIO (FASE 2B)
-                    if d["tipo"] == "producto":
-                        c_unit = d["costo_producto"]
+                    # Lectura atómica del estado del producto bajo BEGIN IMMEDIATE
+                    cursor.execute("""
+                        SELECT id, codigo, nombre, tipo, impuesto_tipo, precio_base, stock, costo, costo_cpp 
+                        FROM productos WHERE id = ?
+                    """, (prod_id,))
+                    prod = dict(cursor.fetchone())
+
+                    precio_unitario = float(itm.get("precio_unitario", prod["precio_base"]))
+                    impuesto_tipo = prod["impuesto_tipo"]
+                    tipo = prod["tipo"]
+
+                    iva_u = round(precio_unitario * iva_pct, 4) if impuesto_tipo == "gravado" else 0.0
+                    item_subtotal = round(precio_unitario * float(cant_dec), 4)
+                    item_iva = round(iva_u * float(cant_dec), 4)
+                    item_total = round(item_subtotal + item_iva, 4)
+
+                    costo_u_val = None
+                    costo_tot_val = None
+
+                    # Si es producto físico, aplicar máquina de estados CPP, validar retroactividad y descontar stock
+                    if tipo == "producto":
+                        # Validar fecha retroactiva para este SKU
+                        validar_movimiento_no_retroactivo(cursor, prod_id, fecha_factura)
+
+                        stock_ant_dec = Decimal(str(prod.get("stock") or 0.0))
+                        cpp_ant_val = prod.get("costo_cpp")
+
+                        # 1. Bloqueo estricto ante stock físico negativo preexistente (Caso C)
+                        if stock_ant_dec < Decimal("0"):
+                            raise ErrorStockNegativo(
+                                f"STOCK_NEGATIVO: Imposible operar con stock físico negativo ({stock_ant_dec}) en SKU {prod['codigo']}. Operación bloqueada."
+                            )
+
+                        # 2. Bloqueo estricto ante stock insuficiente (Caso B)
+                        if cant_dec > stock_ant_dec:
+                            raise ErrorStockNegativo(
+                                f"STOCK_INSUFICIENTE: Salida solicitada ({cant_dec}) supera existencia disponible ({stock_ant_dec}) en SKU '{prod['nombre']}' ({prod['codigo']}). Stock < 0 prohibido."
+                            )
+
+                        # 3. Bloqueo estricto ante stock positivo con CPP inválido (Caso D)
+                        if cpp_ant_val is None or Decimal(str(cpp_ant_val)) <= Decimal("0"):
+                            raise ErrorInconsistenciaCPP(
+                                f"INCONSISTENCIA_CPP: Producto {prod['codigo']} tiene stock positivo ({stock_ant_dec}) "
+                                f"pero costo_cpp inválido ({cpp_ant_val}). Operación bloqueada. Prohibido usar productos.costo como sustituto."
+                            )
+
+                        # 4. Caso A: Stock suficiente y CPP válido -> Cálculo puro de salida CPP
+                        cpp_dec = Decimal(str(cpp_ant_val))
+                        nuevo_stk_dec = (stock_ant_dec - cant_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                        costo_u_dec = cpp_dec.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                        costo_tot_dec = (cant_dec * cpp_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+                        costo_u_val = float(costo_u_dec)
+                        costo_tot_val = float(costo_tot_dec)
+
+                        # Inserción en factura_detalles conservando copia documental congelada del costo
+                        cursor.execute("""
+                            INSERT INTO factura_detalles (factura_id, producto_id, nombre_producto, tipo, impuesto_tipo, cantidad, precio_unitario, iva_unitario, subtotal, total, costo_unitario, costo_total)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (factura_id, prod_id, prod["nombre"], tipo, impuesto_tipo, float(cant_dec), precio_unitario, iva_u, item_subtotal, item_total, costo_u_val, costo_tot_val))
+                        factura_detalle_id = cursor.lastrowid
+
+                        # Registrar movimiento inmutable en Libro Mayor con costo CPP de salida y documento_linea_id
                         registrar_movimiento_inventario(
                             cursor=cursor,
-                            producto_id=d["producto_id"],
+                            producto_id=prod_id,
                             fecha=fecha_factura,
                             tipo_movimiento="venta",
                             sentido="SALIDA",
-                            cantidad=d["cantidad"],
-                            costo_unitario=c_unit,
-                            costo_total=round(d["cantidad"] * c_unit, 2),
-                            stock_anterior=d["stock_anterior"],
-                            stock_nuevo=d["stock_nuevo"],
+                            cantidad=float(cant_dec),
+                            costo_unitario=costo_u_val,
+                            costo_total=costo_tot_val,
+                            stock_anterior=float(stock_ant_dec),
+                            stock_nuevo=float(nuevo_stk_dec),
                             documento_tipo="FACTURA",
                             documento_id=factura_id,
                             documento_numero=numero_factura,
-                            motivo=f"Salida por venta según factura {numero_factura}",
-                            usuario_id=1
+                            motivo=f"Salida por venta según factura {numero_factura} (Línea {factura_detalle_id})",
+                            usuario_id=1,
+                            documento_linea_id=factura_detalle_id
                         )
+
+                        # Actualización atómica de productos: stock descontado, costo_cpp permanece INVARIANTE
+                        cursor.execute("""
+                            UPDATE productos 
+                            SET stock = ?
+                            WHERE id = ?
+                        """, (float(nuevo_stk_dec), prod_id))
+
+                    else:
+                        # Tipo servicio: no afecta stock ni costo ni libro mayor
+                        cursor.execute("""
+                            INSERT INTO factura_detalles (factura_id, producto_id, nombre_producto, tipo, impuesto_tipo, cantidad, precio_unitario, iva_unitario, subtotal, total, costo_unitario, costo_total)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (factura_id, prod_id, prod["nombre"], tipo, impuesto_tipo, float(cant_dec), precio_unitario, iva_u, item_subtotal, item_total, None, None))
+                        factura_detalle_id = cursor.lastrowid
 
                 # Guardar pagos iniciales de la factura
                 for pp in pagos_procesados:
@@ -2272,12 +2643,12 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 # Si es crédito, registrar en Cuentas por Cobrar
                 if tipo_venta == "credito":
                     cxc_estado = "pagada" if saldo_pendiente <= 0.001 else ("parcial" if total_pagado_usd > 0 else "pendiente")
-                    fecha_emision = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    fecha_emision = fecha_factura
 
                     cursor.execute("""
                         INSERT INTO cuentas_por_cobrar (factura_id, cliente_id, monto_total, monto_pagado, saldo_pendiente, fecha_emision, fecha_vencimiento, estado, notas)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (factura_id, cliente_id, total_usd, total_pagado_usd, saldo_pendiente, fecha_emision, fecha_vencimiento, cxc_estado, notas))
+                    """, (factura_id, cliente_id, total_usd, total_pagado_usd, saldo_pendiente, fecha_emision, fecha_vencimiento, cxc_estado, notas_final))
                     cxc_id = cursor.lastrowid
 
                 conn.commit()
@@ -2392,106 +2763,81 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "nuevo_estado": nuevo_estado
                 }, 201)
 
-            # 6. Crear Compra (Incremento de stock, foto de factura y creación ágil de productos)
+            # 6. Crear Compra (Integración Transaccional Motor CPP - FASE 2F-2B)
             elif path == "/api/compras":
                 proveedor_id = body.get("proveedor_id")
                 numero_control = body.get("numero_control", f"CMP-{int(time.time()) % 100000:05d}")
                 foto_factura = body.get("foto_factura", "")
                 items = body.get("items", [])
                 notas = body.get("notas", "")
+                numero_factura = body.get("numero_factura", numero_control)
+                tipo_compra = body.get("tipo_compra", "contado")
+                fecha_compra_input = body.get("fecha")
 
                 if not proveedor_id or not items or len(items) == 0:
                     self.send_error_json("Se requiere un proveedor y al menos un ítem comprado", 400)
                     return
+
+                cursor.execute("SELECT id FROM proveedores WHERE id = ?", (proveedor_id,))
+                if not cursor.fetchone():
+                    self.send_error_json(f"Proveedor ID {proveedor_id} no encontrado", 404)
+                    return
+
+                # Normalización de fecha de compra
+                if fecha_compra_input and str(fecha_compra_input).strip():
+                    f_str = str(fecha_compra_input).strip()
+                    if len(f_str) == 10:
+                        ahora_h = datetime.now().strftime("%H:%M:%S")
+                        fecha_compra = f"{f_str} {ahora_h}"
+                    else:
+                        fecha_compra = f_str
+                else:
+                    fecha_compra = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # Idempotencia: Verificar si ya existe compra registrada con ese proveedor y factura/control
+                if numero_factura:
+                    cursor.execute("""
+                        SELECT id, numero_control, total, tipo_compra, saldo_pendiente 
+                        FROM compras 
+                        WHERE proveedor_id = ? AND (numero_factura = ? OR numero_control = ?)
+                        ORDER BY id DESC LIMIT 1
+                    """, (proveedor_id, numero_factura, numero_control))
+                    compra_existente = cursor.fetchone()
+                    if compra_existente:
+                        self.send_error_json(
+                            f"IDEMPOTENCIA: Ya existe una compra registrada con la factura/control '{numero_factura}' para este proveedor (Compra ID {compra_existente['id']}).",
+                            409
+                        )
+                        return
+
+                # BEGIN IMMEDIATE: Candado exclusivo para aislar lecturas y escrituras de stock y CPP
+                cursor.execute("BEGIN IMMEDIATE")
 
                 cursor.execute("SELECT iva_porcentaje FROM configuracion WHERE id = 1")
                 iva_pct = cursor.fetchone()[0] / 100.0
 
                 subtotal = 0.0
                 iva_total = 0.0
-                detalles_procesados = []
 
+                # Pre-validar ítems y calcular totales financieros
                 for itm in items:
-                    prod_id = itm.get("producto_id")
-                    # Si no existe, crearlo al vuelo
-                    if not prod_id or itm.get("crear_nuevo") is True:
-                        nombre_nuevo = itm.get("nombre", "").strip()
-                        cat_id = itm.get("categoria_id")
-                        impuesto_tipo = itm.get("impuesto_tipo", "gravado")
-                        costo_u = float(itm.get("costo_unitario", 0.0))
-                        precio_venta = float(itm.get("precio_venta", costo_u * 1.3))
-                        tipo = itm.get("tipo", "producto")
-
-                        if not cat_id:
-                            # Obtener una categoría de tipo producto por defecto
-                            cursor.execute("SELECT id FROM categorias WHERE tipo = 'producto' LIMIT 1")
-                            cat_row = cursor.fetchone()
-                            cat_id = cat_row[0] if cat_row else 1
-
-                        codigo_nuevo = f"PRD-{int(time.time() * 100) % 1000000:06d}"
-                        iva_v = round(precio_venta * iva_pct, 4) if impuesto_tipo == "gravado" else 0.0
-
-                        cursor.execute("""
-                            INSERT INTO productos (codigo, nombre, categoria_id, tipo, impuesto_tipo, precio_base, iva_monto, precio_total, costo, stock, stock_minimo)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 5)
-                        """, (codigo_nuevo, nombre_nuevo, cat_id, tipo, impuesto_tipo, precio_venta, iva_v, round(precio_venta + iva_v, 4), costo_u))
-                        prod_id = cursor.lastrowid
-
-                    cant = float(itm.get("cantidad", 1))
-                    costo_unitario = float(itm.get("costo_unitario", 0))
-                    impuesto_tipo = itm.get("impuesto_tipo", "gravado")
-
-                    cursor.execute("SELECT * FROM productos WHERE id = ?", (prod_id,))
-                    prod = dict(cursor.fetchone())
-
-                    # Si es producto, INCREMENTAR stock y actualizar costo de reposición
-                    stock_ant = float(prod.get("stock") or 0.0)
-                    stock_nue = stock_ant
-                    # Si es producto, INCREMENTAR stock y actualizar costo de reposición
-                    if prod["tipo"] == "producto":
-                        stock_nue = round(stock_ant + cant, 4)
-                        cursor.execute("""
-                            UPDATE productos 
-                            SET stock = stock + ?, costo = ?
-                            WHERE id = ?
-                        """, (cant, costo_unitario, prod_id))
-
-                    # Cálculo de IVA de compra
-                    if impuesto_tipo == "gravado":
-                        iva_u = round(costo_unitario * iva_pct, 4)
-                    else:
-                        iva_u = 0.0
-
-                    item_subtotal = round(costo_unitario * cant, 4)
-                    item_iva = round(iva_u * cant, 4)
-                    item_total = round(item_subtotal + item_iva, 4)
-
-                    subtotal += item_subtotal
-                    iva_total += item_iva
-
-                    detalles_procesados.append({
-                        "producto_id": prod_id,
-                        "nombre_producto": prod["nombre"],
-                        "tipo": prod.get("tipo", "producto"),
-                        "cantidad": cant,
-                        "costo_unitario": costo_unitario,
-                        "impuesto_tipo": impuesto_tipo,
-                        "iva_unitario": iva_u,
-                        "total": item_total,
-                        "stock_anterior": stock_ant,
-                        "stock_nuevo": stock_nue
-                    })
+                    cant_v = float(itm.get("cantidad", 1))
+                    costo_u_v = float(itm.get("costo_unitario", 0))
+                    if cant_v <= 0:
+                        raise ValueError(f"La cantidad comprada debe ser mayor a 0, recibido: {cant_v}")
+                    if costo_u_v < 0:
+                        raise ValueError(f"El costo unitario no puede ser negativo, recibido: {costo_u_v}")
+                    imp_tipo_v = itm.get("impuesto_tipo", "gravado")
+                    iva_u_v = round(costo_u_v * iva_pct, 4) if imp_tipo_v == "gravado" else 0.0
+                    subtotal += round(costo_u_v * cant_v, 4)
+                    iva_total += round(iva_u_v * cant_v, 4)
 
                 total = round(subtotal + iva_total, 2)
-                tipo_compra = body.get("tipo_compra", "contado")
                 fecha_vencimiento = body.get("fecha_vencimiento")
                 if tipo_compra == "credito" and not fecha_vencimiento:
                     fecha_vencimiento = (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")
 
-                numero_factura = body.get("numero_factura", numero_control)
                 pagos = body.get("pagos", [])
-
-                # Procesar pagos iniciales (para contado o anticipo en crédito)
                 total_pagado_usd = 0.0
                 pagos_procesados = []
                 for p in pagos:
@@ -2517,55 +2863,133 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         })
 
                 total_pagado_usd = round(total_pagado_usd, 2)
-
                 if tipo_compra == "credito":
                     saldo_pendiente = max(0.0, round(total - total_pagado_usd, 2))
                 else:
                     saldo_pendiente = 0.0
 
+                # Inserción atómica de la cabecera de compra
                 cursor.execute("""
                     INSERT INTO compras (numero_control, proveedor_id, foto_factura, subtotal, iva_total, total, tipo_compra, fecha_vencimiento, saldo_pendiente, numero_factura, notas)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (numero_control, proveedor_id, foto_factura, subtotal, iva_total, total, tipo_compra, fecha_vencimiento if tipo_compra == 'credito' else None, saldo_pendiente, numero_factura, notas))
                 compra_id = cursor.lastrowid
 
-                # Guardar detalles de la compra y registrar movimientos en Libro Mayor (FASE 2B)
-                fecha_compra = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                for d in detalles_procesados:
+                # Procesamiento secuencial renglón por renglón con integración transaccional CPP
+                for itm in items:
+                    prod_id = itm.get("producto_id")
+                    cant = float(itm.get("cantidad", 1))
+                    costo_unitario = float(itm.get("costo_unitario", 0))
+                    impuesto_tipo = itm.get("impuesto_tipo", "gravado")
+
+                    # Si el producto debe crearse al vuelo (crear_nuevo = true)
+                    if not prod_id or itm.get("crear_nuevo") is True:
+                        nombre_nuevo = itm.get("nombre", "").strip()
+                        cat_id = itm.get("categoria_id")
+                        precio_venta = float(itm.get("precio_venta", costo_unitario * 1.3))
+                        tipo = itm.get("tipo", "producto")
+
+                        if not cat_id:
+                            cursor.execute("SELECT id FROM categorias WHERE tipo = 'producto' LIMIT 1")
+                            cat_row = cursor.fetchone()
+                            cat_id = cat_row[0] if cat_row else 1
+
+                        codigo_nuevo = f"PRD-{int(time.time() * 100) % 1000000:06d}"
+                        iva_v = round(precio_venta * iva_pct, 4) if impuesto_tipo == "gravado" else 0.0
+
+                        cursor.execute("""
+                            INSERT INTO productos (codigo, nombre, categoria_id, tipo, impuesto_tipo, precio_base, iva_monto, precio_total, costo, costo_cpp, stock, stock_minimo)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 5)
+                        """, (codigo_nuevo, nombre_nuevo, cat_id, tipo, impuesto_tipo, precio_venta, iva_v, round(precio_venta + iva_v, 4), costo_unitario, costo_unitario))
+                        prod_id = cursor.lastrowid
+
+                    # Lectura atómica del estado del producto bajo el candado BEGIN IMMEDIATE
+                    cursor.execute("SELECT id, codigo, nombre, tipo, stock, costo, costo_cpp FROM productos WHERE id = ?", (prod_id,))
+                    prod = dict(cursor.fetchone())
+
+                    # IVA de la línea
+                    iva_u = round(costo_unitario * iva_pct, 4) if impuesto_tipo == "gravado" else 0.0
+                    item_total = round((costo_unitario + iva_u) * cant, 4)
+
+                    # Inserción en compra_detalles (permite obtener compra_detalle_id único para trazabilidad)
                     cursor.execute("""
                         INSERT INTO compra_detalles (compra_id, producto_id, nombre_producto, cantidad, costo_unitario, impuesto_tipo, iva_unitario, total)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (compra_id, d["producto_id"], d["nombre_producto"], d["cantidad"], d["costo_unitario"], d["impuesto_tipo"], d["iva_unitario"], d["total"]))
+                    """, (compra_id, prod_id, prod["nombre"], cant, costo_unitario, impuesto_tipo, iva_u, item_total))
+                    compra_detalle_id = cursor.lastrowid
 
-                    # REGISTRO EN LIBRO MAYOR DE INVENTARIO (FASE 2B)
-                    if d.get("tipo") == "producto":
+                    # Si es producto físico, calcular CPP y asentar en libro mayor
+                    if prod["tipo"] == "producto":
+                        # Validar fecha retroactiva para este SKU
+                        validar_movimiento_no_retroactivo(cursor, prod_id, fecha_compra)
+
+                        stock_ant_dec = Decimal(str(prod.get("stock") or 0.0))
+                        cpp_ant_val = prod.get("costo_cpp")
+                        cant_dec = Decimal(str(cant))
+                        costo_u_dec = Decimal(str(costo_unitario))
+
+                        # 1. Bloqueo estricto ante stock físico negativo preexistente
+                        if stock_ant_dec < Decimal("0"):
+                            raise ErrorStockNegativo(
+                                f"STOCK_NEGATIVO: Imposible operar con stock físico negativo ({stock_ant_dec}) en SKU {prod['codigo']}. Operación bloqueada."
+                            )
+
+                        # 2. Máquina de estados para cálculo de CPP
+                        if stock_ant_dec == Decimal("0"):
+                            # Stock cero: costo de entrada se establece como CPP inicial
+                            nuevo_cpp_dec = costo_u_dec.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                            nuevo_stk_dec = cant_dec.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                        else:
+                            # Stock positivo: validar que tenga costo_cpp válido
+                            if cpp_ant_val is None or Decimal(str(cpp_ant_val)) <= Decimal("0"):
+                                raise ErrorInconsistenciaCPP(
+                                    f"INCONSISTENCIA_CPP: Producto {prod['codigo']} tiene stock positivo ({stock_ant_dec}) "
+                                    f"pero costo_cpp inválido ({cpp_ant_val}). Operación bloqueada. Prohibido usar productos.costo como sustituto."
+                                )
+                            cpp_calc_res = calcular_cpp_entrada(
+                                stock_anterior=stock_ant_dec,
+                                cpp_anterior=Decimal(str(cpp_ant_val)),
+                                cantidad_entrada=cant_dec,
+                                costo_entrada=costo_u_dec
+                            )
+                            nuevo_cpp_dec = Decimal(str(cpp_calc_res["cpp_nuevo"]))
+                            nuevo_stk_dec = Decimal(str(cpp_calc_res["stock_nuevo"]))
+
+                        # Registrar movimiento inmutable en Libro Mayor con costo real de entrada y documento_linea_id
                         registrar_movimiento_inventario(
                             cursor=cursor,
-                            producto_id=d["producto_id"],
+                            producto_id=prod_id,
                             fecha=fecha_compra,
                             tipo_movimiento="compra",
                             sentido="ENTRADA",
-                            cantidad=d["cantidad"],
-                            costo_unitario=d["costo_unitario"],
-                            costo_total=round(d["cantidad"] * d["costo_unitario"], 2),
-                            stock_anterior=d["stock_anterior"],
-                            stock_nuevo=d["stock_nuevo"],
+                            cantidad=float(cant_dec),
+                            costo_unitario=float(costo_u_dec), # COSTO REAL DE ENTRADA (NO CPP)
+                            costo_total=float((cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
+                            stock_anterior=float(stock_ant_dec),
+                            stock_nuevo=float(nuevo_stk_dec),
                             documento_tipo="COMPRA",
                             documento_id=compra_id,
                             documento_numero=numero_factura or numero_control,
-                            motivo=f"Entrada por compra #{numero_factura or numero_control}",
-                            usuario_id=1
+                            motivo=f"Entrada por compra #{numero_factura or numero_control} (Línea {compra_detalle_id})",
+                            usuario_id=1,
+                            documento_linea_id=compra_detalle_id
                         )
 
-                # Guardar pagos iniciales en compra_pagos (tanto para contado como anticipos de crédito)
+                        # Actualización atómica de productos: stock, costo (último costo adquisición), costo_cpp (promedio ponderado)
+                        cursor.execute("""
+                            UPDATE productos 
+                            SET stock = ?, costo = ?, costo_cpp = ?
+                            WHERE id = ?
+                        """, (float(nuevo_stk_dec), float(costo_u_dec), float(nuevo_cpp_dec), prod_id))
+
+                # Registrar pagos iniciales si aplican
                 for pp in pagos_procesados:
                     cursor.execute("""
                         INSERT INTO compra_pagos (compra_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, (compra_id, pp["moneda"], pp["metodo"], pp["monto_moneda"], pp["tasa_cambio"], pp["equivalente_usd"], pp["referencia"]))
 
-                # Si es crédito y tiene saldo pendiente, registrar en Cuentas por Pagar (CXP)
-                # Regla: Compra a crédito totalmente pagada inicialmente (saldo_pendiente == 0) no genera CXP pendiente
+                # Registrar en Cuentas por Pagar (CXP) si aplica crédito con saldo pendiente
                 if tipo_compra == "credito" and saldo_pendiente > 0.001:
                     cxp_estado = "parcial" if total_pagado_usd > 0 else "pendiente"
                     fecha_emision = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2588,8 +3012,32 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             elif path == "/api/cxp/directo":
                 proveedor_id = body.get("proveedor_id")
                 descripcion_concepto = (body.get("descripcion_concepto") or "").strip()
-                numero_factura = (body.get("numero_factura") or "").strip() or f"DIR-{int(time.time()) % 100000:05d}"
+                numero_factura = (body.get("numero_factura") or "").strip()
+                numero_control = (body.get("numero_control") or "").strip()
+                impuesto_tipo = (body.get("impuesto_tipo") or "exento").strip().lower()
+                if impuesto_tipo not in ("gravado", "exento"):
+                    impuesto_tipo = "exento"
+
+                afecta_libro = 1 if body.get("afecta_libro_compras") in (1, "1", True, "true") else 0
+                if afecta_libro and not numero_factura:
+                    self.send_error_json("El N° de Factura / Control es obligatorio para gastos que afectan el Libro de Compras", 400)
+                    return
+
+                if not numero_factura:
+                    numero_factura = f"DIR-{int(time.time()) % 100000:05d}"
+
                 monto_total = float(body.get("monto_total", 0.0))
+                base_imponible_usd = float(body.get("base_imponible_usd", monto_total if impuesto_tipo == "exento" else (monto_total / 1.16)))
+                iva_usd = float(body.get("iva_usd", 0.0 if impuesto_tipo == "exento" else (monto_total - base_imponible_usd)))
+
+                # Tasas oficiales BCV para libros fiscales
+                cursor.execute("SELECT tasa_ves, tasa_cop FROM configuracion WHERE id = 1")
+                cfg = cursor.fetchone()
+                tasa_bcv = float(cfg["tasa_ves"]) if cfg else 45.0
+                base_imponible_ves = round(base_imponible_usd * tasa_bcv, 2)
+                iva_ves = round(iva_usd * tasa_bcv, 2)
+                total_ves = round(monto_total * tasa_bcv, 2)
+
                 fecha_emision = body.get("fecha_emision") or datetime.now().strftime("%Y-%m-%d")
                 fecha_vencimiento = body.get("fecha_vencimiento") or (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")
                 notas = body.get("notas", "")
@@ -2599,15 +3047,32 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 cursor.execute("""
-                    INSERT INTO cuentas_por_pagar (compra_id, proveedor_id, descripcion_concepto, numero_factura, monto_total, monto_pagado, saldo_pendiente, fecha_emision, fecha_vencimiento, estado, tipo_registro, notas)
-                    VALUES (NULL, ?, ?, ?, ?, 0.0, ?, ?, ?, 'pendiente', 'directo', ?)
-                """, (proveedor_id, descripcion_concepto, numero_factura, monto_total, monto_total, fecha_emision, fecha_vencimiento, notas))
+                    INSERT INTO cuentas_por_pagar (
+                        compra_id, proveedor_id, descripcion_concepto, numero_factura, numero_control,
+                        impuesto_tipo, base_imponible_usd, iva_usd, tasa_bcv,
+                        base_imponible_ves, iva_ves, total_ves, afecta_libro_compras,
+                        monto_total, monto_pagado, saldo_pendiente, fecha_emision, fecha_vencimiento, estado, tipo_registro, notas
+                    ) VALUES (
+                        NULL, ?, ?, ?, ?,
+                        ?, ?, ?, ?,
+                        ?, ?, ?, ?,
+                        ?, 0.0, ?, ?, ?, 'pendiente', 'directo', ?
+                    )
+                """, (
+                    proveedor_id, descripcion_concepto, numero_factura, numero_control,
+                    impuesto_tipo, base_imponible_usd, iva_usd, tasa_bcv,
+                    base_imponible_ves, iva_ves, total_ves, afecta_libro,
+                    monto_total, monto_total, fecha_emision, fecha_vencimiento, notas
+                ))
                 cxp_id = cursor.lastrowid
                 conn.commit()
 
                 self.send_json({
                     "id": cxp_id,
                     "success": True,
+                    "monto_total_usd": monto_total,
+                    "total_ves": total_ves,
+                    "afecta_libro_compras": afecta_libro,
                     "message": "Gasto / Saldo directo a pagar registrado exitosamente"
                 }, 201)
 
@@ -2794,36 +3259,84 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "message": "Personalización restablecida a valores originales"
                 })
 
-            # 11. Registrar Devolución (Retorno de ítems al inventario, reversión de ventas y ajuste de CXC)
+            # 11. Registrar Devolución (Retorno de ítems al inventario, reversión de ventas y ajuste de CXC) - FASE 2F-4B CPP
             elif path == "/api/devoluciones":
                 factura_id = body.get("factura_id")
                 cliente_id = body.get("cliente_id")
-                motivo = body.get("motivo", "").strip() or "Devolución de mercancía / solicitud de cliente"
-                tipo_devolucion = body.get("tipo_devolucion", "total")
-                metodo_reembolso = body.get("metodo_reembolso", "efectivo")
+                motivo = (body.get("motivo") or "").strip() or "Devolución de mercancía / solicitud de cliente"
+                tipo_devolucion_input = (body.get("tipo_devolucion") or "").strip().lower()
+                metodo_reembolso = (body.get("metodo_reembolso") or "efectivo").strip().lower()
                 items = body.get("items", [])
                 pagos_reembolso = body.get("pagos_reembolso") or body.get("pagos") or []
-                notas = body.get("notas", "")
+                notas = (body.get("notas") or "").strip()
+                fecha_devolucion_input = body.get("fecha") or body.get("fecha_emision")
+                numero_devolucion_input = (body.get("numero_devolucion") or "").strip()
+                idempotency_key = (body.get("idempotency_key") or body.get("client_tx_id") or "").strip()
 
                 if not items or len(items) == 0:
                     self.send_error_json("La devolución debe contener al menos un ítem", 400)
                     return
+
+                # Normalización de fecha de devolución
+                if fecha_devolucion_input and str(fecha_devolucion_input).strip():
+                    f_str = str(fecha_devolucion_input).strip()
+                    if len(f_str) == 10:
+                        ahora_h = datetime.now().strftime("%H:%M:%S")
+                        fecha_devolucion = f"{f_str} {ahora_h}"
+                    else:
+                        fecha_devolucion = f_str
+                else:
+                    fecha_devolucion = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # Idempotencia: Verificar si ya existe devolución con ese número o clave de idempotencia
+                if numero_devolucion_input:
+                    cursor.execute("""
+                        SELECT id, numero_devolucion, total_usd 
+                        FROM devoluciones 
+                        WHERE numero_devolucion = ?
+                    """, (numero_devolucion_input,))
+                    dev_existente = cursor.fetchone()
+                    if dev_existente:
+                        self.send_error_json(
+                            f"IDEMPOTENCIA: Ya existe una devolución registrada con el número '{numero_devolucion_input}' (Devolución ID {dev_existente['id']}). Operación rechazada.",
+                            409
+                        )
+                        return
+
+                if idempotency_key:
+                    cursor.execute("""
+                        SELECT id, numero_devolucion, total_usd 
+                        FROM devoluciones 
+                        WHERE notas LIKE ?
+                    """, (f"%[IDEMPOTENCY:{idempotency_key}]%",))
+                    dev_idem = cursor.fetchone()
+                    if dev_idem:
+                        self.send_error_json(
+                            f"IDEMPOTENCIA: La transacción con clave '{idempotency_key}' ya fue procesada (Devolución {dev_idem['numero_devolucion']} ID {dev_idem['id']}). Operación rechazada.",
+                            409
+                        )
+                        return
+
+                # BEGIN IMMEDIATE: Candado exclusivo para aislar lecturas y escrituras de stock, costos y CPP
+                cursor.execute("BEGIN IMMEDIATE")
 
                 # Si viene factura_id, obtener datos de la factura
                 factura_dict = None
                 if factura_id:
                     cursor.execute("SELECT * FROM facturas WHERE id = ?", (factura_id,))
                     fact_row = cursor.fetchone()
-                    if fact_row:
-                        factura_dict = dict(fact_row)
-                        if not cliente_id:
-                            cliente_id = factura_dict["cliente_id"]
+                    if not fact_row:
+                        self.send_error_json(f"Factura ID {factura_id} no encontrada", 404)
+                        return
+                    factura_dict = dict(fact_row)
+                    if not cliente_id:
+                        cliente_id = factura_dict["cliente_id"]
 
+                # Obtener datos del cliente
                 if not cliente_id:
                     self.send_error_json("Se requiere un cliente para procesar la devolución", 400)
                     return
 
-                # Obtener datos del cliente
                 cursor.execute("SELECT * FROM clientes WHERE id = ?", (cliente_id,))
                 cli_row = cursor.fetchone()
                 if not cli_row:
@@ -2831,57 +3344,172 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     return
                 cli_dict = dict(cli_row)
 
-                # Obtener tasas actuales
-                cursor.execute("SELECT tasa_ves, tasa_cop FROM configuracion WHERE id = 1")
+                # Obtener configuración de tasas e IVA
+                cursor.execute("SELECT * FROM configuracion WHERE id = 1")
                 cfg_row = cursor.fetchone()
-                tasa_ves = cfg_row[0] if cfg_row else 45.0
-                tasa_cop = cfg_row[1] if cfg_row else 4100.0
+                tasa_ves = cfg_row["tasa_ves"] if cfg_row else 45.0
+                tasa_cop = cfg_row["tasa_cop"] if cfg_row else 4100.0
+                iva_pct = (cfg_row["iva_porcentaje"] / 100.0) if cfg_row else 0.16
 
-                # Generar número correlativo DEV-000001
-                cursor.execute("SELECT COUNT(*) FROM devoluciones")
-                count_dev = cursor.fetchone()[0] + 1
-                numero_devolucion = f"DEV-{count_dev:06d}"
+                # Generar número correlativo DEV-000001 bajo BEGIN IMMEDIATE
+                if numero_devolucion_input:
+                    numero_devolucion = numero_devolucion_input
+                else:
+                    cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM devoluciones")
+                    correlativo = cursor.fetchone()[0]
+                    numero_devolucion = f"DEV-{correlativo:06d}"
 
-                # Calcular montos de los ítems devueltos
+                notas_final = notas
+                if idempotency_key and f"[IDEMPOTENCY:{idempotency_key}]" not in notas_final:
+                    notas_final = f"{notas_final} [IDEMPOTENCY:{idempotency_key}]".strip()
+
+                # Pre-validación y resolución de cada ítem de devolución
                 subtotal_dev = 0.0
                 iva_dev = 0.0
                 detalles_proc = []
+                cantidades_acumuladas_por_factura_detalle = {}
 
                 for itm in items:
+                    cant_dec = Decimal(str(itm.get("cantidad", 0)))
+                    if cant_dec <= Decimal("0"):
+                        raise ValueError(f"La cantidad a devolver debe ser mayor a 0, recibido: {cant_dec}")
+
                     prod_id = itm.get("producto_id")
-                    cant = float(itm.get("cantidad", 0))
-                    p_unit = float(itm.get("precio_unitario", 0))
-                    imp_tipo = itm.get("impuesto_tipo", "gravado")
-                    tipo_itm = itm.get("tipo", "producto")
-                    nombre_itm = itm.get("nombre") or itm.get("nombre_producto") or "Ítem"
-                    codigo_itm = itm.get("codigo", "")
+                    factura_det_id = itm.get("factura_detalle_id")
 
-                    if cant <= 0:
-                        continue
+                    if factura_id:
+                        if factura_det_id:
+                            cursor.execute("SELECT * FROM factura_detalles WHERE id = ? AND factura_id = ?", (factura_det_id, factura_id))
+                            fd_row = cursor.fetchone()
+                            if not fd_row:
+                                raise ValueError(f"La línea de factura {factura_det_id} no pertenece a la factura {factura_id}")
+                            fd = dict(fd_row)
+                            if prod_id and fd["producto_id"] and fd["producto_id"] != prod_id:
+                                raise ValueError(f"El producto_id {prod_id} no coincide con el ítem de la factura {fd['producto_id']}")
+                            prod_id = fd["producto_id"]
+                        else:
+                            # Buscar en factura_detalles
+                            if prod_id:
+                                cursor.execute("SELECT * FROM factura_detalles WHERE factura_id = ? AND producto_id = ?", (factura_id, prod_id))
+                            else:
+                                nom_busca = itm.get("nombre") or itm.get("nombre_producto") or ""
+                                cursor.execute("SELECT * FROM factura_detalles WHERE factura_id = ? AND nombre_producto = ?", (factura_id, nom_busca))
+                            matching_lines = [dict(r) for r in cursor.fetchall()]
+                            if not matching_lines:
+                                raise ValueError(f"No se encontró el ítem en los detalles de la factura {factura_id}")
+                            if len(matching_lines) == 1:
+                                fd = matching_lines[0]
+                                factura_det_id = fd["id"]
+                                prod_id = fd["producto_id"]
+                            else:
+                                # SKU repetido en factura: elegir la línea con cantidad disponible suficiente
+                                chosen = None
+                                for candidate in matching_lines:
+                                    c_id = candidate["id"]
+                                    cursor.execute("SELECT COALESCE(SUM(cantidad), 0) FROM devolucion_detalles WHERE factura_detalle_id = ?", (c_id,))
+                                    devuelto_prev = Decimal(str(cursor.fetchone()[0]))
+                                    devuelto_batch = cantidades_acumuladas_por_factura_detalle.get(c_id, Decimal("0"))
+                                    disp = Decimal(str(candidate["cantidad"])) - devuelto_prev - devuelto_batch
+                                    if disp >= cant_dec:
+                                        chosen = candidate
+                                        break
+                                if chosen is None:
+                                    raise ErrorCantidadDevolucionExcedeDisponible(
+                                        f"CANTIDAD_EXCEDIDA: No hay suficiente cantidad disponible para devolver en las líneas del SKU en factura {factura_id}. "
+                                        "Especifique factura_detalle_id si desea devolver sobre un renglón particular."
+                                    )
+                                fd = chosen
+                                factura_det_id = fd["id"]
+                                prod_id = fd["producto_id"]
 
-                    sub_itm = round(cant * p_unit, 4)
-                    iva_itm = round(sub_itm * 0.16, 4) if imp_tipo == "gravado" else 0.0
+                        # Validar límite de cantidad a devolver en la línea
+                        cursor.execute("SELECT COALESCE(SUM(cantidad), 0) FROM devolucion_detalles WHERE factura_detalle_id = ?", (factura_det_id,))
+                        devuelto_prev = Decimal(str(cursor.fetchone()[0]))
+                        devuelto_batch = cantidades_acumuladas_por_factura_detalle.get(factura_det_id, Decimal("0"))
+                        cant_orig = Decimal(str(fd["cantidad"]))
+                        disponible = cant_orig - devuelto_prev - devuelto_batch
+
+                        if cant_dec > disponible:
+                            raise ErrorCantidadDevolucionExcedeDisponible(
+                                f"CANTIDAD_EXCEDIDA: La cantidad a devolver ({cant_dec}) supera la cantidad disponible ({disponible}) "
+                                f"para el renglón {factura_det_id} de la factura {factura_id}."
+                            )
+
+                        cantidades_acumuladas_por_factura_detalle[factura_det_id] = devuelto_batch + cant_dec
+
+                        tipo_itm = fd["tipo"]
+                        nombre_itm = fd["nombre_producto"]
+                        imp_tipo = fd["impuesto_tipo"]
+                        p_unit = float(itm.get("precio_unitario", fd["precio_unitario"]))
+                        codigo_itm = itm.get("codigo", "")
+                    else:
+                        tipo_itm = itm.get("tipo", "producto")
+                        if tipo_itm != "servicio":
+                            raise ErrorCostoHistoricoNoRecuperable("Se requiere una factura válida para procesar la devolución de productos físicos")
+                        factura_det_id = None
+                        p_unit = float(itm.get("precio_unitario", 0.0))
+                        imp_tipo = itm.get("impuesto_tipo", "exento")
+                        nombre_itm = itm.get("nombre") or itm.get("nombre_producto") or "Servicio"
+                        codigo_itm = itm.get("codigo", "")
+
+                    sub_itm = round(float(cant_dec) * p_unit, 4)
+                    iva_itm = round(sub_itm * iva_pct, 4) if imp_tipo == "gravado" else 0.0
                     tot_itm = round(sub_itm + iva_itm, 4)
 
                     subtotal_dev += sub_itm
                     iva_dev += iva_itm
 
+                    # Recuperación de costo histórico original para productos físicos
+                    costo_u_dev = None
+                    costo_tot_dev = None
+                    costo_hist_dec = None
+
+                    if tipo_itm == "producto" and prod_id:
+                        # 1. Fuente primaria: factura_detalles.costo_unitario
+                        if fd and fd.get("costo_unitario") is not None and float(fd["costo_unitario"]) > 0:
+                            costo_hist_dec = Decimal(str(fd["costo_unitario"]))
+
+                        # 2. Fuente secundaria: inventario_movimientos
+                        if costo_hist_dec is None and factura_id:
+                            cursor.execute("""
+                                SELECT costo_unitario FROM inventario_movimientos
+                                WHERE documento_tipo = 'FACTURA' AND documento_id = ? AND producto_id = ?
+                                  AND (documento_linea_id = ? OR documento_linea_id IS NULL)
+                                  AND costo_unitario > 0
+                                ORDER BY id DESC LIMIT 1
+                            """, (factura_id, prod_id, factura_det_id))
+                            mov_c = cursor.fetchone()
+                            if mov_c and mov_c[0] is not None and float(mov_c[0]) > 0:
+                                costo_hist_dec = Decimal(str(mov_c[0]))
+
+                        # Bloqueo estricto: Prohibición absoluta de fallback
+                        if costo_hist_dec is None or costo_hist_dec <= Decimal("0"):
+                            raise ErrorCostoHistoricoNoRecuperable(
+                                f"COSTO_HISTORICO_NO_RECUPERABLE: Imposible recuperar el costo histórico original de la venta "
+                                f"para el producto ID {prod_id} en la factura ID {factura_id}. "
+                                "Operación bloqueada. Prohibido usar costo de catálogo o CPP actual como fallback."
+                            )
+
+                        costo_u_dev = float(costo_hist_dec.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
+                        costo_tot_dev = float((cant_dec * costo_hist_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
+
                     detalles_proc.append({
                         "producto_id": prod_id,
+                        "factura_detalle_id": factura_det_id,
                         "codigo": codigo_itm,
                         "nombre": nombre_itm,
                         "tipo": tipo_itm,
                         "impuesto_tipo": imp_tipo,
-                        "cantidad": cant,
+                        "cantidad": float(cant_dec),
+                        "cant_dec": cant_dec,
                         "precio_unitario": p_unit,
-                        "iva_unitario": round(iva_itm / cant, 4) if cant > 0 else 0.0,
+                        "iva_unitario": round(iva_itm / float(cant_dec), 4) if float(cant_dec) > 0 else 0.0,
                         "subtotal": sub_itm,
-                        "total": tot_itm
+                        "total": tot_itm,
+                        "costo_unitario": costo_u_dev,
+                        "costo_total": costo_tot_dev,
+                        "costo_hist_dec": costo_hist_dec
                     })
-
-                if not detalles_proc:
-                    self.send_error_json("No hay ítems válidos para devolver", 400)
-                    return
 
                 total_usd = round(subtotal_dev + iva_dev, 2)
                 subtotal_usd = round(subtotal_dev, 2)
@@ -2889,12 +3517,34 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 total_ves = round(total_usd * tasa_ves, 2)
                 total_cop = round(total_usd * tasa_cop, 2)
 
-                ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 num_fact = factura_dict["numero_factura"] if factura_dict else None
                 fecha_fact_orig = factura_dict["fecha"] if factura_dict else None
                 tipo_venta_orig = factura_dict.get("tipo_venta", "contado") if factura_dict else "contado"
 
-                # 1. Insertar devolución
+                # Evaluar si la devolución resulta en devolución total o parcial
+                totalmente_devuelta = False
+                if factura_id and factura_dict:
+                    cursor.execute("""
+                        SELECT fd.id, fd.cantidad, COALESCE(SUM(dd.cantidad), 0) as devuelta
+                        FROM factura_detalles fd
+                        LEFT JOIN devolucion_detalles dd ON dd.factura_detalle_id = fd.id
+                        WHERE fd.factura_id = ?
+                        GROUP BY fd.id
+                    """, (factura_id,))
+                    line_status = cursor.fetchall()
+                    totalmente_devuelta = len(line_status) > 0 and all(
+                        (Decimal(str(ls["cantidad"])) - Decimal(str(ls["devuelta"])) - cantidades_acumuladas_por_factura_detalle.get(ls["id"], Decimal("0"))) <= Decimal("0.0001")
+                        for ls in line_status
+                    )
+
+                if totalmente_devuelta:
+                    tipo_devolucion = "total"
+                elif tipo_devolucion_input in ("total", "parcial"):
+                    tipo_devolucion = tipo_devolucion_input
+                else:
+                    tipo_devolucion = "parcial"
+
+                # 1. Insertar cabecera de devolución
                 cursor.execute("""
                     INSERT INTO devoluciones (
                         numero_devolucion, factura_id, numero_factura, cliente_id,
@@ -2907,61 +3557,97 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 """, (
                     numero_devolucion, factura_id, num_fact, cliente_id,
                     cli_dict["nombre"], cli_dict.get("cedula", ""), cli_dict.get("telefono", ""), cli_dict.get("direccion", ""),
-                    ahora, fecha_fact_orig, tipo_devolucion, tipo_venta_orig,
+                    fecha_devolucion, fecha_fact_orig, tipo_devolucion, tipo_venta_orig,
                     motivo, subtotal_usd, iva_usd, total_usd,
                     tasa_ves, tasa_cop, total_ves, total_cop,
-                    metodo_reembolso, notas
+                    metodo_reembolso, notas_final
                 ))
                 dev_id = cursor.lastrowid
 
-                # 2. Insertar detalles y REINTEGRAR CANTIDADES AL INVENTARIO
+                # 2. Insertar detalles y procesar inventario bajo motor CPP
                 for d in detalles_proc:
                     cursor.execute("""
                         INSERT INTO devolucion_detalles (
-                            devolucion_id, producto_id, codigo, nombre_producto, tipo,
-                            impuesto_tipo, cantidad, precio_unitario, iva_unitario, subtotal, total
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            devolucion_id, factura_detalle_id, producto_id, codigo, nombre_producto, tipo,
+                            impuesto_tipo, cantidad, precio_unitario, iva_unitario, subtotal, total,
+                            costo_unitario, costo_total
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        dev_id, d["producto_id"], d["codigo"], d["nombre"], d["tipo"],
-                        d["impuesto_tipo"], d["cantidad"], d["precio_unitario"], d["iva_unitario"], d["subtotal"], d["total"]
+                        dev_id, d["factura_detalle_id"], d["producto_id"], d["codigo"], d["nombre"], d["tipo"],
+                        d["impuesto_tipo"], d["cantidad"], d["precio_unitario"], d["iva_unitario"], d["subtotal"], d["total"],
+                        d["costo_unitario"], d["costo_total"]
                     ))
+                    dev_detalle_id = cursor.lastrowid
+                    d["id"] = dev_detalle_id
 
-                    # Si es producto físico, REINTEGRAR EXISTENCIA AL INVENTARIO
+                    # Si es producto físico, aplicar máquina de 4 estados CPP, validar retroactividad y reintegrar stock
                     if d["tipo"] == "producto" and d["producto_id"]:
-                        cursor.execute("SELECT stock, costo FROM productos WHERE id = ?", (d["producto_id"],))
-                        p_row = cursor.fetchone()
-                        stock_ant = float(p_row[0] or 0.0) if p_row else 0.0
-                        costo_prod = float(p_row[1] or 0.0) if p_row else 0.0
-                        stock_nue = round(stock_ant + d["cantidad"], 4)
+                        prod_id = d["producto_id"]
+                        cant_dec = d["cant_dec"]
+                        costo_hist = d["costo_hist_dec"]
 
+                        # Validar fecha retroactiva para este SKU
+                        validar_movimiento_no_retroactivo(cursor, prod_id, fecha_devolucion)
+
+                        # Lectura atómica del estado del producto
+                        cursor.execute("SELECT id, codigo, nombre, stock, costo_cpp FROM productos WHERE id = ?", (prod_id,))
+                        p_row = dict(cursor.fetchone())
+                        stk_ant = Decimal(str(p_row.get("stock") or 0.0))
+                        cpp_ant_val = p_row.get("costo_cpp")
+
+                        # Estado 1: Stock anterior negativo -> Bloqueo estricto
+                        if stk_ant < Decimal("0"):
+                            raise ErrorStockNegativo(
+                                f"STOCK_NEGATIVO: Imposible operar con stock físico negativo ({stk_ant}) en SKU {p_row['codigo']}. Operación bloqueada."
+                            )
+
+                        # Estado 2: Stock anterior == 0 -> Inicio limpio: nuevo CPP = costo histórico de la devolución
+                        if stk_ant == Decimal("0"):
+                            nuevo_cpp = costo_hist.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                            nuevo_stk = cant_dec.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                        else:
+                            # Estado 4: Stock > 0 pero CPP inválido -> Bloqueo estricto
+                            if cpp_ant_val is None or Decimal(str(cpp_ant_val)) <= Decimal("0"):
+                                raise ErrorInconsistenciaCPP(
+                                    f"INCONSISTENCIA_CPP: Producto {p_row['codigo']} tiene stock positivo ({stk_ant}) "
+                                    f"pero costo_cpp inválido ({cpp_ant_val}). Operación bloqueada. Prohibido usar productos.costo como sustituto."
+                                )
+                            # Estado 3: Stock > 0 y CPP válido -> Recálculo puro de CPP entrada ponderada
+                            cpp_ant = Decimal(str(cpp_ant_val))
+                            res_cpp = calcular_cpp_entrada(stk_ant, cpp_ant, cant_dec, costo_hist)
+                            nuevo_stk = Decimal(str(res_cpp["stock_nuevo"]))
+                            nuevo_cpp = Decimal(str(res_cpp["cpp_nuevo"]))
+
+                        # Actualización atómica de productos: stock y costo_cpp actualizados
                         cursor.execute("""
                             UPDATE productos
-                            SET stock = stock + ?
+                            SET stock = ?, costo_cpp = ?
                             WHERE id = ?
-                        """, (d["cantidad"], d["producto_id"]))
+                        """, (float(nuevo_stk), float(nuevo_cpp), prod_id))
 
-                        # REGISTRO EN LIBRO MAYOR DE INVENTARIO (FASE 2B)
+                        # Registro oficial en Libro Mayor de Inventario con documento_linea_id = devolucion_detalle_id
                         registrar_movimiento_inventario(
                             cursor=cursor,
-                            producto_id=d["producto_id"],
-                            fecha=ahora,
+                            producto_id=prod_id,
+                            fecha=fecha_devolucion,
                             tipo_movimiento="devolucion_cliente",
                             sentido="ENTRADA",
-                            cantidad=d["cantidad"],
-                            costo_unitario=costo_prod,
-                            costo_total=round(d["cantidad"] * costo_prod, 2),
-                            stock_anterior=stock_ant,
-                            stock_nuevo=stock_nue,
+                            cantidad=float(cant_dec),
+                            costo_unitario=d["costo_unitario"],
+                            costo_total=d["costo_total"],
+                            stock_anterior=float(stk_ant),
+                            stock_nuevo=float(nuevo_stk),
                             documento_tipo="DEVOLUCION",
                             documento_id=dev_id,
                             documento_numero=numero_devolucion,
-                            motivo=f"Entrada por reintegro de devolución de cliente {numero_devolucion}",
-                            usuario_id=1
+                            motivo=f"Entrada por devolución de cliente {numero_devolucion} (Factura {num_fact}, Línea {d['factura_detalle_id']})",
+                            usuario_id=1,
+                            documento_linea_id=dev_detalle_id
                         )
 
                 # 3. Registrar pagos de reembolso si se especificaron
                 for p in pagos_reembolso:
-                    mon = p.get("moneda", "USD")
+                    mon = (p.get("moneda") or "USD").upper()
                     met = p.get("metodo", metodo_reembolso)
                     m_m = float(p.get("monto_moneda", 0))
                     t_c = float(p.get("tasa_cambio") or (tasa_ves if mon == "VES" else (tasa_cop if mon == "COP" else 1.0)))
@@ -2971,8 +3657,23 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, (dev_id, mon, met, m_m, t_c, round(eq, 2), p.get("referencia", "")))
 
-                # 4. Ajustar saldo de factura y Cuentas por Cobrar (CXC) si fue a crédito
+                # 4. Ajustar saldo de factura y Cuentas por Cobrar (CXC)
+                totalmente_devuelta = False
                 if factura_id and factura_dict:
+                    # Verificar si todos los renglones de la factura han sido completamente devueltos
+                    cursor.execute("""
+                        SELECT fd.id, fd.cantidad, COALESCE(SUM(dd.cantidad), 0) as devuelta
+                        FROM factura_detalles fd
+                        LEFT JOIN devolucion_detalles dd ON dd.factura_detalle_id = fd.id
+                        WHERE fd.factura_id = ?
+                        GROUP BY fd.id
+                    """, (factura_id,))
+                    line_status = cursor.fetchall()
+                    totalmente_devuelta = len(line_status) > 0 and all(
+                        (Decimal(str(ls["cantidad"])) - Decimal(str(ls["devuelta"]))) <= Decimal("0.0001")
+                        for ls in line_status
+                    )
+
                     if factura_dict.get("tipo_venta") == "credito":
                         cursor.execute("SELECT * FROM cuentas_por_cobrar WHERE factura_id = ?", (factura_id,))
                         cxc_row = cursor.fetchone()
@@ -2993,8 +3694,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                                 WHERE id = ?
                             """, (nuevo_saldo_cxc, nuevo_estado_fact, factura_id))
 
-                    # Si fue devolución total, marcar factura con estado o nota especial
-                    if tipo_devolucion == "total":
+                    if totalmente_devuelta or tipo_devolucion == "total":
                         cursor.execute("""
                             UPDATE facturas
                             SET estado = 'anulada', notas = coalesce(notas, '') || ' [ANULADA por Devolución Total ' || ? || ']'
@@ -3017,11 +3717,160 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "total_usd": total_usd,
                     "total_ves": total_ves,
                     "total_cop": total_cop,
-                    "tipo_devolucion": tipo_devolucion,
+                    "tipo_devolucion": "total" if totalmente_devuelta or tipo_devolucion == "total" else "parcial",
+                    "detalles": [
+                        {
+                            "id": d["id"],
+                            "factura_detalle_id": d["factura_detalle_id"],
+                            "producto_id": d["producto_id"],
+                            "cantidad": d["cantidad"],
+                            "costo_unitario": d["costo_unitario"],
+                            "costo_total": d["costo_total"]
+                        } for d in detalles_proc
+                    ],
                     "message": f"Devolución {numero_devolucion} procesada exitosamente. Las cantidades fueron reintegradas al inventario."
                 }, 201)
+                        # 9. Registrar Nota de Ajuste Comercial (Crédito o Débito en CXC y CXP)
+            elif path == "/api/notas-ajuste":
+                modulo = (body.get("modulo") or "").strip().lower()
+                if modulo not in ("cxc", "cxp"):
+                    self.send_error_json("El campo 'modulo' debe ser 'cxc' o 'cxp'", 400)
+                    return
 
-            # 11. Ajustes de Inventario (FASE 2C: Cargos y Descargos)
+                tercero_id = int(body.get("tercero_id") or 0)
+                if tercero_id <= 0:
+                    self.send_error_json("Se requiere un cliente_id o proveedor_id válido ('tercero_id')", 400)
+                    return
+
+                cuenta_id = body.get("cuenta_id")
+                cuenta_id = int(cuenta_id) if cuenta_id else None
+
+                tipo_nota = (body.get("tipo_nota") or "").strip().lower()
+                if tipo_nota not in ("credito", "debito"):
+                    self.send_error_json("tipo_nota debe ser 'credito' o 'debito'", 400)
+                    return
+
+                efecto = (body.get("efecto") or "").strip().lower()
+                if efecto not in ("disminuye", "incrementa"):
+                    # Por defecto natural: credito disminuye saldo, debito incrementa saldo
+                    efecto = "disminuye" if tipo_nota == "credito" else "incrementa"
+
+                monto_usd = float(body.get("monto_usd", 0.0))
+                if monto_usd <= 0:
+                    self.send_error_json("El monto de la nota debe ser mayor a 0", 400)
+                    return
+
+                motivo = (body.get("motivo") or "").strip()
+                if not motivo:
+                    self.send_error_json("El motivo o justificación de la nota es obligatorio", 400)
+                    return
+
+                fecha_nota = body.get("fecha") or datetime.now().strftime("%Y-%m-%d")
+                numero_control = (body.get("numero_control") or "").strip()
+                afecta_libro = 1 if body.get("afecta_libro_fiscal") in (1, "1", True, "true") else 0
+                usuario_id = int(body.get("usuario_id") or 1)
+
+                cursor.execute("SELECT tasa_ves FROM configuracion WHERE id = 1")
+                cfg = cursor.fetchone()
+                tasa_bcv = float(cfg["tasa_ves"]) if cfg else 45.0
+                monto_ves = round(monto_usd * tasa_bcv, 2)
+
+                cursor.execute("BEGIN IMMEDIATE")
+
+                # Generar consecutivo si no fue provisto
+                prefijo = "NC" if tipo_nota == "credito" else "ND"
+                cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM notas_ajuste_comercial")
+                next_nid = cursor.fetchone()[0]
+                numero_nota = (body.get("numero_nota") or "").strip() or f"{prefijo}-{next_nid:06d}"
+
+                # Aplicar efecto sobre la cuenta específica
+                if cuenta_id:
+                    if modulo == "cxc":
+                        cursor.execute("SELECT * FROM cuentas_por_cobrar WHERE id = ?", (cuenta_id,))
+                        cxc_row = cursor.fetchone()
+                        if not cxc_row:
+                            self.send_error_json(f"Cuenta por cobrar ID {cuenta_id} no encontrada", 404)
+                            return
+                        cxc = dict(cxc_row)
+                        if efecto == "disminuye":
+                            nuevo_pagado = round(float(cxc["monto_pagado"]) + monto_usd, 2)
+                            nuevo_saldo = max(0.0, round(float(cxc["monto_total"]) - nuevo_pagado, 2))
+                            nuevo_estado = "pagada" if nuevo_saldo <= 0.001 else "parcial"
+                            cursor.execute("""
+                                UPDATE cuentas_por_cobrar
+                                SET monto_pagado = ?, saldo_pendiente = ?, estado = ?
+                                WHERE id = ?
+                            """, (nuevo_pagado, nuevo_saldo, nuevo_estado, cuenta_id))
+                            if cxc.get("factura_id"):
+                                cursor.execute("UPDATE facturas SET saldo_pendiente = ? WHERE id = ?", (nuevo_saldo, cxc["factura_id"]))
+                        else:
+                            # incrementa saldo
+                            nuevo_total = round(float(cxc["monto_total"]) + monto_usd, 2)
+                            nuevo_saldo = round(float(cxc["saldo_pendiente"]) + monto_usd, 2)
+                            nuevo_estado = "pendiente" if cxc["estado"] == "pagada" else cxc["estado"]
+                            cursor.execute("""
+                                UPDATE cuentas_por_cobrar
+                                SET monto_total = ?, saldo_pendiente = ?, estado = ?
+                                WHERE id = ?
+                            """, (nuevo_total, nuevo_saldo, nuevo_estado, cuenta_id))
+                            if cxc.get("factura_id"):
+                                cursor.execute("UPDATE facturas SET total_usd = ?, saldo_pendiente = ? WHERE id = ?", (nuevo_total, nuevo_saldo, cxc["factura_id"]))
+
+                    elif modulo == "cxp":
+                        cursor.execute("SELECT * FROM cuentas_por_pagar WHERE id = ?", (cuenta_id,))
+                        cxp_row = cursor.fetchone()
+                        if not cxp_row:
+                            self.send_error_json(f"Cuenta por pagar ID {cuenta_id} no encontrada", 404)
+                            return
+                        cxp = dict(cxp_row)
+                        if efecto == "disminuye":
+                            nuevo_pagado = round(float(cxp["monto_pagado"]) + monto_usd, 2)
+                            nuevo_saldo = max(0.0, round(float(cxp["monto_total"]) - nuevo_pagado, 2))
+                            nuevo_estado = "pagada" if nuevo_saldo <= 0.001 else "parcial"
+                            cursor.execute("""
+                                UPDATE cuentas_por_pagar
+                                SET monto_pagado = ?, saldo_pendiente = ?, estado = ?
+                                WHERE id = ?
+                            """, (nuevo_pagado, nuevo_saldo, nuevo_estado, cuenta_id))
+                            if cxp.get("compra_id"):
+                                cursor.execute("UPDATE compras SET saldo_pendiente = ? WHERE id = ?", (nuevo_saldo, cxp["compra_id"]))
+                        else:
+                            # incrementa saldo
+                            nuevo_total = round(float(cxp["monto_total"]) + monto_usd, 2)
+                            nuevo_saldo = round(float(cxp["saldo_pendiente"]) + monto_usd, 2)
+                            nuevo_estado = "pendiente" if cxp["estado"] == "pagada" else cxp["estado"]
+                            cursor.execute("""
+                                UPDATE cuentas_por_pagar
+                                SET monto_total = ?, saldo_pendiente = ?, estado = ?
+                                WHERE id = ?
+                            """, (nuevo_total, nuevo_saldo, nuevo_estado, cuenta_id))
+                            if cxp.get("compra_id"):
+                                cursor.execute("UPDATE compras SET total = ?, saldo_pendiente = ? WHERE id = ?", (nuevo_total, nuevo_saldo, cxp["compra_id"]))
+
+                cursor.execute("""
+                    INSERT INTO notas_ajuste_comercial (
+                        modulo, tercero_id, cuenta_id, tipo_nota, numero_nota, fecha,
+                        monto_usd, tasa_bcv, monto_ves, efecto, motivo, numero_control, afecta_libro_fiscal, usuario_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    modulo, tercero_id, cuenta_id, tipo_nota, numero_nota, fecha_nota,
+                    monto_usd, tasa_bcv, monto_ves, efecto, motivo, numero_control, afecta_libro, usuario_id
+                ))
+                nota_id = cursor.lastrowid
+                conn.commit()
+
+                self.send_json({
+                    "id": nota_id,
+                    "success": True,
+                    "numero_nota": numero_nota,
+                    "tipo_nota": tipo_nota,
+                    "efecto": efecto,
+                    "monto_usd": monto_usd,
+                    "monto_ves": monto_ves,
+                    "message": f"Nota de {tipo_nota.capitalize()} {numero_nota} aplicada exitosamente ({efecto} saldo)"
+                }, 201)
+
+            # 11. Ajustes de Inventario (FASE 2C / FASE 2F-5B CPP: Cargos y Descargos Transaccionales)
             elif path in ("/api/inventario/ajustes", "/api/inventario/cargos", "/api/inventario/descargos"):
                 tipo_ajuste = (body.get("tipo_ajuste") or "").strip().upper()
                 if path == "/api/inventario/cargos":
@@ -3043,12 +3892,22 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json("Debe incluir al menos un producto en el ajuste (lista 'detalles')", 400)
                     return
 
-                fecha_ajuste = body.get("fecha") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                fecha_input = body.get("fecha")
+                if fecha_input and str(fecha_input).strip():
+                    f_str = str(fecha_input).strip()
+                    if len(f_str) == 10:
+                        fecha_ajuste = f"{f_str} {datetime.now().strftime('%H:%M:%S')}"
+                    else:
+                        fecha_ajuste = f_str
+                else:
+                    fecha_ajuste = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
                 observaciones = (body.get("observaciones") or "").strip()
                 usuario_id = int(body.get("usuario_id") or 1)
                 numero_ajuste = (body.get("numero_ajuste") or "").strip()
+                idempotency_key = (body.get("idempotency_key") or body.get("client_tx_id") or "").strip()
 
-                # PASO 10: Detección y protección contra duplicados (Idempotencia)
+                # PASO 10: Deteccion y proteccion contra duplicados (Idempotencia)
                 if numero_ajuste:
                     cursor.execute("SELECT id, numero_ajuste, tipo_ajuste, motivo FROM inventario_ajustes WHERE numero_ajuste = ?", (numero_ajuste,))
                     existente = cursor.fetchone()
@@ -3063,7 +3922,25 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         }, 200)
                         return
 
-                # Detección de duplicado por reenvío idéntico en ventana de tiempo reciente
+                if idempotency_key:
+                    cursor.execute("""
+                        SELECT id, numero_ajuste, tipo_ajuste, motivo 
+                        FROM inventario_ajustes 
+                        WHERE observaciones LIKE ?
+                    """, (f"%[IDEMPOTENCY:{idempotency_key}]%",))
+                    existente_key = cursor.fetchone()
+                    if existente_key:
+                        self.send_json({
+                            "id": existente_key[0],
+                            "numero_ajuste": existente_key[1],
+                            "tipo_ajuste": existente_key[2],
+                            "success": True,
+                            "duplicado_ignorado": True,
+                            "message": f"Ajuste {existente_key[1]} ya procesado previamente con idempotency_key"
+                        }, 200)
+                        return
+
+                # Deteccion de duplicado por reenvio identico en ventana de tiempo reciente
                 cursor.execute("""
                     SELECT id, numero_ajuste, tipo_ajuste, motivo, created_at 
                     FROM inventario_ajustes 
@@ -3082,7 +3959,6 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     nuevos_detalles = sorted([(int(d.get("producto_id", 0)), float(d.get("cantidad", 0))) for d in detalles])
                     if ult_detalles == nuevos_detalles:
                         try:
-                            # Si es idéntico y muy reciente (< 15 segundos) o mismo lote
                             created_time = datetime.strptime(str(ultimo_ajuste[4])[:19], "%Y-%m-%d %H:%M:%S")
                             if abs((datetime.now() - created_time).total_seconds()) < 15:
                                 self.send_json({
@@ -3091,13 +3967,16 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                                     "tipo_ajuste": ultimo_ajuste[2],
                                     "success": True,
                                     "duplicado_ignorado": True,
-                                    "message": f"Ajuste {ultimo_ajuste[1]} ya registrado previamente (protección contra doble envío)"
+                                    "message": f"Ajuste {ultimo_ajuste[1]} ya registrado previamente (proteccion contra doble envio)"
                                 }, 200)
                                 return
                         except Exception:
                             pass
 
-                # Prevalidación exhaustiva de productos y existencias
+                # BEGIN IMMEDIATE: Candado exclusivo transaccional para aislar lecturas y escrituras de stock y CPP
+                cursor.execute("BEGIN IMMEDIATE")
+
+                # Prevalidacion exhaustiva de productos y existencias
                 productos_info = {}
                 cantidades_acumuladas = {}
                 for idx, det in enumerate(detalles):
@@ -3107,44 +3986,40 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         return
                     try:
                         p_id = int(p_id)
-                        cant = float(det.get("cantidad", 0.0))
+                        cant_val = float(det.get("cantidad", 0.0))
                     except (ValueError, TypeError):
-                        self.send_error_json(f"Detalle #{idx+1}: 'cantidad' y 'producto_id' deben ser numéricos", 400)
+                        self.send_error_json(f"Detalle #{idx+1}: 'cantidad' y 'producto_id' deben ser numericos", 400)
                         return
 
-                    if cant <= 0:
-                        self.send_error_json(f"Detalle #{idx+1}: la cantidad debe ser mayor a 0 (recibido: {cant})", 400)
+                    if cant_val <= 0:
+                        self.send_error_json(f"Detalle #{idx+1}: la cantidad debe ser mayor a 0 (recibido: {cant_val})", 400)
                         return
 
                     if p_id not in productos_info:
-                        cursor.execute("SELECT id, codigo, nombre, tipo, stock, costo, activo FROM productos WHERE id = ?", (p_id,))
+                        cursor.execute("SELECT id, codigo, nombre, tipo, stock, costo_cpp, costo, activo FROM productos WHERE id = ?", (p_id,))
                         prod = cursor.fetchone()
                         if not prod:
                             self.send_error_json(f"Producto ID {p_id} no existe", 404)
                             return
                         productos_info[p_id] = dict(prod)
-                        cantidades_acumuladas[p_id] = 0.0
+                        cantidades_acumuladas[p_id] = Decimal("0")
 
                     prod_data = productos_info[p_id]
-                    # TEST 6: Rechazo estricto de productos tipo 'servicio'
                     if prod_data.get("tipo") == "servicio":
                         self.send_error_json(f"No se pueden realizar ajustes de inventario sobre servicios ('{prod_data['nombre']}')", 400)
                         return
 
-                    cantidades_acumuladas[p_id] += cant
+                    # Control temporal estricto anti-retroactividad
+                    validar_movimiento_no_retroactivo(cursor, p_id, fecha_ajuste)
+
+                    cantidades_acumuladas[p_id] += Decimal(str(cant_val))
 
                 # Para DESCARGO: validar que la cantidad acumulada no supere el stock disponible
                 if tipo_ajuste == "DESCARGO":
-                    for p_id, cant_total in cantidades_acumuladas.items():
+                    for p_id, cant_total_dec in cantidades_acumuladas.items():
                         prod_data = productos_info[p_id]
-                        stock_actual = float(prod_data.get("stock", 0.0))
-                        if cant_total > stock_actual:
-                            self.send_error_json(
-                                f"Stock insuficiente para descargo del producto '{prod_data['nombre']}' "
-                                f"(Stock disponible: {stock_actual}, solicitado: {cant_total})",
-                                400
-                            )
-                            return
+                        stk_act_dec = Decimal(str(prod_data.get("stock") or 0.0))
+                        validar_stock_no_negativo(stk_act_dec, cant_total_dec)
 
                 # Generar consecutivo oficial de ajuste si no fue provisto
                 if not numero_ajuste:
@@ -3153,11 +4028,15 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     next_id = cursor.fetchone()[0]
                     numero_ajuste = f"{prefix}-{next_id:06d}"
 
+                observaciones_final = observaciones
+                if idempotency_key and f"[IDEMPOTENCY:{idempotency_key}]" not in observaciones_final:
+                    observaciones_final = f"{observaciones_final} [IDEMPOTENCY:{idempotency_key}]".strip()
+
                 # INSERTAR CABECERA (inventario_ajustes)
                 cursor.execute("""
                     INSERT INTO inventario_ajustes (numero_ajuste, fecha, tipo_ajuste, motivo, observaciones, usuario_id)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (numero_ajuste, fecha_ajuste, tipo_ajuste, motivo, observaciones, usuario_id))
+                """, (numero_ajuste, fecha_ajuste, tipo_ajuste, motivo, observaciones_final, usuario_id))
                 ajuste_id = cursor.lastrowid
 
                 # Mapear tipo_movimiento exacto para inventario_movimientos
@@ -3176,70 +4055,136 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     else:
                         tipo_movimiento = "descargo_merma"
 
-                # PROCESAR CADA DETALLE DENTRO DE LA MISMA TRANSACCIÓN ATÓMICA
+                # PROCESAR CADA DETALLE BAJO MOTOR CPP DENTRO DE LA MISMA TRANSACCION ATOMICA
                 detalles_procesados = []
                 for det in detalles:
                     p_id = int(det["producto_id"])
-                    cant = float(det["cantidad"])
+                    cant_dec = Decimal(str(det["cantidad"]))
                     motivo_detalle = (det.get("motivo_detalle") or "").strip()
 
-                    cursor.execute("SELECT stock, costo FROM productos WHERE id = ?", (p_id,))
-                    stk_row = cursor.fetchone()
-                    stock_anterior = float(stk_row[0] or 0.0)
-                    costo_producto = float(stk_row[1] or 0.0)
+                    cursor.execute("SELECT id, codigo, nombre, stock, costo_cpp, costo FROM productos WHERE id = ?", (p_id,))
+                    prod_row = dict(cursor.fetchone())
+                    stk_ant_dec = Decimal(str(prod_row.get("stock") or 0.0))
+                    cpp_ant_val = prod_row.get("costo_cpp")
+                    costo_cat_val = prod_row.get("costo")
+                    sku_cod = prod_row.get("codigo")
 
-                    costo_unitario = float(det.get("costo_unitario", 0.0))
-                    if costo_unitario <= 0:
-                        costo_unitario = costo_producto
-                    costo_total = round(cant * costo_unitario, 4)
+                    if tipo_ajuste == "DESCARGO":
+                        validar_stock_no_negativo(stk_ant_dec, cant_dec)
+                        if cpp_ant_val is None or Decimal(str(cpp_ant_val)) <= Decimal("0"):
+                            raise ErrorInconsistenciaCPP(
+                                f"INCONSISTENCIA_CPP: Producto {sku_cod} tiene stock {stk_ant_dec} pero costo_cpp invalido ({cpp_ant_val}). "
+                                "Operacion bloqueada. Prohibido usar productos.costo como sustituto."
+                            )
+                        costo_u_dec = Decimal(str(cpp_ant_val)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                        costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                        costo_cpp_nuevo_dec = costo_u_dec
+                        stock_nuevo_dec = (stk_ant_dec - cant_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
-                    if tipo_ajuste == "CARGO":
-                        stock_nuevo = round(stock_anterior + cant, 4)
                     else:
-                        stock_nuevo = round(stock_anterior - cant, 4)
+                        # CARGO
+                        m_eval = (motivo_detalle.lower() if motivo_detalle else motivo_lower)
+                        es_sobrante = any(k in m_eval for k in ['sobrante', 'conteo', 'regularizacion'])
 
-                    # Actualizar saldo materializado en productos
-                    cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (stock_nuevo, p_id))
+                        if es_sobrante:
+                            if stk_ant_dec < Decimal("0"):
+                                raise ErrorStockNegativo(f"STOCK_NEGATIVO: Stock {stk_ant_dec} no permite operar.")
+                            if stk_ant_dec == Decimal("0"):
+                                if cpp_ant_val is not None and Decimal(str(cpp_ant_val)) > Decimal("0"):
+                                    costo_u_dec = Decimal(str(cpp_ant_val)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                                elif det.get("costo_unitario") and float(det.get("costo_unitario")) > 0:
+                                    costo_u_dec = Decimal(str(det.get("costo_unitario"))).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                                else:
+                                    costo_u_dec = Decimal(str(costo_cat_val or 0.0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                                costo_cpp_nuevo_dec = costo_u_dec
+                                stock_nuevo_dec = cant_dec.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                                costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                            else:
+                                if cpp_ant_val is None or Decimal(str(cpp_ant_val)) <= Decimal("0"):
+                                    raise ErrorInconsistenciaCPP(
+                                        f"INCONSISTENCIA_CPP: Producto {sku_cod} tiene stock {stk_ant_dec} pero costo_cpp invalido ({cpp_ant_val}). "
+                                        "Operacion bloqueada. Prohibido usar productos.costo como sustituto."
+                                    )
+                                costo_u_dec = Decimal(str(cpp_ant_val)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                                costo_cpp_nuevo_dec = costo_u_dec
+                                stock_nuevo_dec = (stk_ant_dec + cant_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                                costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                        else:
+                            # Hallazgo de mercancia o tasacion manual con recalculo ponderado
+                            costo_in = det.get("costo_unitario")
+                            if costo_in is not None and float(costo_in) > 0:
+                                costo_u_dec = Decimal(str(costo_in)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                            else:
+                                if stk_ant_dec > Decimal("0") and cpp_ant_val and Decimal(str(cpp_ant_val)) > Decimal("0"):
+                                    costo_u_dec = Decimal(str(cpp_ant_val)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                                else:
+                                    costo_u_dec = Decimal(str(costo_cat_val or 0.0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+                            if stk_ant_dec == Decimal("0"):
+                                costo_cpp_nuevo_dec = costo_u_dec
+                                stock_nuevo_dec = cant_dec.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                                costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                            else:
+                                if cpp_ant_val is None or Decimal(str(cpp_ant_val)) <= Decimal("0"):
+                                    raise ErrorInconsistenciaCPP(
+                                        f"INCONSISTENCIA_CPP: Producto {sku_cod} tiene stock {stk_ant_dec} pero costo_cpp invalido ({cpp_ant_val})."
+                                    )
+                                cpp_ant_dec = Decimal(str(cpp_ant_val))
+                                res_calc = calcular_cpp_entrada(stk_ant_dec, cpp_ant_dec, cant_dec, costo_u_dec)
+                                stock_nuevo_dec = Decimal(str(res_calc["stock_nuevo"]))
+                                costo_cpp_nuevo_dec = Decimal(str(res_calc["cpp_nuevo"]))
+                                costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+                    # Actualizar saldo materializado y costo_cpp en productos
+                    cursor.execute("""
+                        UPDATE productos 
+                        SET stock = ?, costo_cpp = ? 
+                        WHERE id = ?
+                    """, (float(stock_nuevo_dec), float(costo_cpp_nuevo_dec), p_id))
 
                     # Insertar detalle de ajuste
                     cursor.execute("""
                         INSERT INTO inventario_ajuste_detalles 
                         (ajuste_id, producto_id, cantidad, costo_unitario, costo_total, stock_anterior, stock_nuevo, motivo_detalle)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (ajuste_id, p_id, cant, costo_unitario, costo_total, stock_anterior, stock_nuevo, motivo_detalle))
+                    """, (ajuste_id, p_id, float(cant_dec), float(costo_u_dec), float(costo_tot_dec), float(stk_ant_dec), float(stock_nuevo_dec), motivo_detalle))
+                    ajuste_det_id = cursor.lastrowid
 
-                    # Registrar movimiento oficial en el libro mayor persistente (FASE 2C)
+                    # Registrar movimiento oficial en el libro mayor persistente con trazabilidad total
                     mov_id = registrar_movimiento_inventario(
                         cursor=cursor,
                         producto_id=p_id,
                         fecha=fecha_ajuste,
                         tipo_movimiento=tipo_movimiento,
                         sentido=sentido,
-                        cantidad=cant,
-                        costo_unitario=costo_unitario,
-                        costo_total=costo_total,
-                        stock_anterior=stock_anterior,
-                        stock_nuevo=stock_nuevo,
+                        cantidad=float(cant_dec),
+                        costo_unitario=float(costo_u_dec),
+                        costo_total=float(costo_tot_dec),
+                        stock_anterior=float(stk_ant_dec),
+                        stock_nuevo=float(stock_nuevo_dec),
                         documento_tipo="INVENTARIO_AJUSTE",
                         documento_id=ajuste_id,
+                        documento_linea_id=ajuste_det_id,
                         documento_numero=numero_ajuste,
                         motivo=motivo_detalle or motivo,
                         usuario_id=usuario_id
                     )
 
                     detalles_procesados.append({
+                        "id": ajuste_det_id,
                         "producto_id": p_id,
-                        "cantidad": cant,
-                        "costo_unitario": costo_unitario,
-                        "costo_total": costo_total,
-                        "stock_anterior": stock_anterior,
-                        "stock_nuevo": stock_nuevo,
+                        "cantidad": float(cant_dec),
+                        "costo_unitario": float(costo_u_dec),
+                        "costo_total": float(costo_tot_dec),
+                        "stock_anterior": float(stk_ant_dec),
+                        "stock_nuevo": float(stock_nuevo_dec),
+                        "costo_cpp_nuevo": float(costo_cpp_nuevo_dec),
                         "movimiento_id": mov_id
                     })
 
                 conn.commit()
 
-                # Sincronización asíncrona segura
+                # Sincronizacion asincrona segura
                 schedule_cloud_sync()
 
                 self.send_json({
@@ -3258,6 +4203,10 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             else:
                 self.send_error_json("Endpoint no reconocido", 404)
 
+        except (ErrorStockNegativo, ErrorMovimientoRetroactivoNoPermitido, ErrorInconsistenciaCPP,
+                ErrorCostoHistoricoNoRecuperable, ErrorCantidadDevolucionExcedeDisponible, ValueError) as ve:
+            conn.rollback()
+            self.send_error_json(str(ve), 400)
         except sqlite3.IntegrityError as ie:
             conn.rollback()
             self.send_error_json(f"Error de integridad: {str(ie)}", 400)

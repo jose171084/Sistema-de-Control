@@ -504,6 +504,14 @@ input[type="color"]::-webkit-color-swatch {
 }
 
 /* ========================================================
+   FASE 2E-1: CONTENEDOR DOCUMENTAL EN PANTALLA NORMAL
+   ======================================================== */
+#areaImpresionOficial,
+.hidden-on-screen {
+  display: none !important;
+}
+
+/* ========================================================
    REGLAS DE IMPRESIÓN PROFESIONAL (@media print)
    ======================================================== */
 @media print {
@@ -597,5 +605,522 @@ input[type="color"]::-webkit-color-swatch {
   #hojaReporteImprimible th,
   #hojaReporteImprimible td {
     padding: 6px 8px !important;
+  }
+}
+
+/* ========================================================
+   FASE 2E-1: FORMATOS DE PÁGINA (@page)
+   ======================================================== */
+@page ticket80 {
+  size: 80mm auto;
+  margin: 2mm 1mm;
+}
+
+@page letterPortrait {
+  size: letter portrait;
+  margin: 12mm;
+}
+
+@page letterLandscape {
+  size: letter landscape;
+  margin: 10mm;
+}
+
+@page a4Portrait {
+  size: a4 portrait;
+  margin: 12mm;
+}
+
+@page a4Landscape {
+  size: a4 landscape;
+  margin: 10mm;
+}
+
+/* ========================================================
+   FASE 2E-1: NÚCLEO DE IMPRESIÓN DOCUMENTAL AISLADO
+   (Reglas estrictas cuando body tiene la clase .document-printing)
+   ======================================================== */
+@media print {
+  /* Reseteo completo de body bajo el nuevo DocumentPrinter */
+  body.document-printing {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+  }
+
+  /* AISLAMIENTO ABSOLUTO: Ocultar TODOS los hijos directos de body excepto #areaImpresionOficial */
+  body.document-printing > *:not(#areaImpresionOficial) {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* ÚNICA RAÍZ IMPRIMIBLE: Forzar visualización exclusiva de #areaImpresionOficial */
+  body.document-printing #areaImpresionOficial {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Reglas documentales internas */
+  body.document-printing #areaImpresionOficial * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-sizing: border-box !important;
+  }
+
+  body.document-printing #areaImpresionOficial thead {
+    display: table-header-group !important;
+  }
+
+  body.document-printing #areaImpresionOficial tfoot {
+    display: table-footer-group !important;
+  }
+
+  body.document-printing #areaImpresionOficial tr,
+  body.document-printing #areaImpresionOficial .avoid-page-break,
+  body.document-printing #areaImpresionOficial .no-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  body.document-printing #areaImpresionOficial .page-break {
+    break-before: page !important;
+    page-break-before: always !important;
+  }
+
+  body.document-printing #areaImpresionOficial table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  /* Tipos de Documento Específicos */
+  body.document-printing #areaImpresionOficial.doc-ticket80 {
+    page: ticket80;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 3mm 4mm !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    color: #000000 !important;
+  }
+
+  body.document-printing #areaImpresionOficial.doc-letterPortrait {
+    page: letterPortrait;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  body.document-printing #areaImpresionOficial.doc-letterLandscape {
+    page: letterLandscape;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  body.document-printing #areaImpresionOficial.doc-a4Portrait {
+    page: a4Portrait;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  body.document-printing #areaImpresionOficial.doc-a4Landscape {
+    page: a4Landscape;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  /* ========================================================
+     FASE 2E-2: ESTILOS DOCUMENTALES DE FACTURA DE VENTA
+     ======================================================== */
+  body.document-printing #areaImpresionOficial .doc-factura {
+    box-sizing: border-box !important;
+    width: 100% !important;
+  }
+
+  /* Banner de Factura Anulada */
+  body.document-printing #areaImpresionOficial .doc-anulada-banner {
+    border: 2px dashed #dc2626 !important;
+    background-color: #fef2f2 !important;
+    color: #dc2626 !important;
+    padding: 8px 12px !important;
+    text-align: center !important;
+    font-weight: 900 !important;
+    font-size: 13px !important;
+    letter-spacing: 1px !important;
+    text-transform: uppercase !important;
+    margin-bottom: 12px !important;
+    border-radius: 6px !important;
+  }
+
+  /* Factura en Hoja (Carta / A4 Vertical) */
+  body.document-printing #areaImpresionOficial .doc-factura-sheet {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+    color: #1e293b !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+    border-bottom: 2px solid #0f172a !important;
+    padding-bottom: 12px !important;
+    margin-bottom: 14px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-company-title {
+    font-size: 20px !important;
+    font-weight: 900 !important;
+    color: #0f172a !important;
+    text-transform: uppercase !important;
+    margin: 0 0 4px 0 !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-invoice-badge {
+    background: #0f172a !important;
+    color: #ffffff !important;
+    padding: 6px 14px !important;
+    border-radius: 4px !important;
+    text-align: right !important;
+    display: inline-block !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-client-card {
+    background: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    margin-bottom: 14px !important;
+    display: grid !important;
+    grid-template-columns: 2fr 1.5fr !important;
+    gap: 10px !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet table.doc-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin-bottom: 14px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet table.doc-table th {
+    background: #0f172a !important;
+    color: #ffffff !important;
+    font-size: 10px !important;
+    text-transform: uppercase !important;
+    font-weight: 700 !important;
+    padding: 6px 8px !important;
+    border: 1px solid #0f172a !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet table.doc-table td {
+    padding: 6px 8px !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-bottom-grid {
+    display: grid !important;
+    grid-template-columns: 1.2fr 1fr !important;
+    gap: 16px !important;
+    margin-top: 10px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-totals-box {
+    border: 1px solid #cbd5e1 !important;
+    background: #f8fafc !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-signatures {
+    margin-top: 36px !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 40px !important;
+    text-align: center !important;
+    font-size: 10px !important;
+    color: #475569 !important;
+  }
+
+  /* Factura en Ticket Térmico 80mm */
+  body.document-printing #areaImpresionOficial .doc-factura-ticket {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    color: #000000 !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+  }
+
+  /* ========================================================
+     FASE 2E-3: ESTILOS DOCUMENTALES DE NOTA DE DEVOLUCIÓN
+     ======================================================== */
+  body.document-printing #areaImpresionOficial .doc-devolucion {
+    box-sizing: border-box !important;
+    width: 100% !important;
+  }
+
+  /* Nota de Devolución en Hoja (Carta / A4 Vertical) */
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+    color: #1e293b !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+    border-bottom: 2px solid #0891b2 !important;
+    padding-bottom: 12px !important;
+    margin-bottom: 14px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-company-title {
+    font-size: 20px !important;
+    font-weight: 900 !important;
+    color: #0f172a !important;
+    text-transform: uppercase !important;
+    margin: 0 0 4px 0 !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-devolucion-badge {
+    background: #0891b2 !important;
+    color: #ffffff !important;
+    padding: 6px 14px !important;
+    border-radius: 4px !important;
+    text-align: right !important;
+    display: inline-block !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-client-card {
+    background: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    margin-bottom: 14px !important;
+    display: grid !important;
+    grid-template-columns: 2fr 1.5fr !important;
+    gap: 10px !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet table.doc-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin-bottom: 14px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet table.doc-table thead {
+    display: table-header-group !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet table.doc-table tr {
+    page-break-inside: avoid !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet table.doc-table th {
+    background: #0e7490 !important;
+    color: #ffffff !important;
+    font-size: 10px !important;
+    text-transform: uppercase !important;
+    font-weight: 700 !important;
+    padding: 6px 8px !important;
+    border: 1px solid #0e7490 !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet table.doc-table td {
+    padding: 6px 8px !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-bottom-grid {
+    display: grid !important;
+    grid-template-columns: 1.2fr 1fr !important;
+    gap: 16px !important;
+    margin-top: 10px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-totals-box {
+    border: 1px solid #cbd5e1 !important;
+    background: #f8fafc !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-signatures {
+    margin-top: 36px !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 40px !important;
+    text-align: center !important;
+    font-size: 10px !important;
+    color: #475569 !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Nota de Devolución en Ticket Térmico 80mm */
+  body.document-printing #areaImpresionOficial .doc-devolucion-ticket {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    color: #000000 !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+  }
+
+  /* ========================================================
+     FASE 2E-3 (BLOQUE 2): ESTILOS DOCUMENTALES DE MOVIMIENTOS
+     ======================================================== */
+  body.document-printing #areaImpresionOficial .doc-movimiento {
+    box-sizing: border-box !important;
+    width: 100% !important;
+  }
+
+  /* Comprobante de Movimiento en Hoja (Carta / A4 Vertical) */
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+    color: #1e293b !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+    border-bottom: 2px solid #0d9488 !important;
+    padding-bottom: 12px !important;
+    margin-bottom: 14px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-company-title {
+    font-size: 20px !important;
+    font-weight: 900 !important;
+    color: #0f172a !important;
+    text-transform: uppercase !important;
+    margin: 0 0 4px 0 !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-movimiento-badge {
+    background: #0d9488 !important;
+    color: #ffffff !important;
+    padding: 6px 14px !important;
+    border-radius: 4px !important;
+    text-align: right !important;
+    display: inline-block !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-info-card {
+    background: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    margin-bottom: 14px !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10px !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin-bottom: 14px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table thead {
+    display: table-header-group !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table tr {
+    page-break-inside: avoid !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table th {
+    background: #0f766e !important;
+    color: #ffffff !important;
+    font-size: 10px !important;
+    text-transform: uppercase !important;
+    font-weight: 700 !important;
+    padding: 6px 8px !important;
+    border: 1px solid #0f766e !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table td {
+    padding: 6px 8px !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-bottom-grid {
+    display: grid !important;
+    grid-template-columns: 1.2fr 1fr !important;
+    gap: 16px !important;
+    margin-top: 10px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-totals-box {
+    border: 1px solid #cbd5e1 !important;
+    background: #f8fafc !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-signatures {
+    margin-top: 36px !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 40px !important;
+    text-align: center !important;
+    font-size: 10px !important;
+    color: #475569 !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Comprobante de Movimiento en Ticket Térmico 80mm */
+  body.document-printing #areaImpresionOficial .doc-movimiento-ticket {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    color: #000000 !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
   }
 }

@@ -775,7 +775,13 @@ function navigate(viewName) {
   // Acciones específicas al entrar a una vista
   if (viewName === 'dashboard') loadDashboard();
   if (viewName === 'categorias') loadCategorias();
-  if (viewName === 'productos') loadProductos();
+  if (viewName === 'productos') {
+    if (typeof cambiarSubtabProductos === 'function') {
+      cambiarSubtabProductos('catalogo');
+    } else {
+      loadProductos();
+    }
+  }
   if (viewName === 'clientes') loadClientes();
   if (viewName === 'proveedores') loadProveedores();
   if (viewName === 'facturacion') {
@@ -4318,7 +4324,9 @@ function closeModalTicketDevolucion() {
 }
 
 function imprimirTicketDevolucion() {
-  window.print();
+  const select = document.getElementById('selectFormatoImpresionDevolucion');
+  const formato = select ? select.value : 'ticket80';
+  imprimirDevolucionActual(formato);
 }
 
 function compartirDevolucionWhatsApp() {
@@ -4944,6 +4952,11 @@ function renderProveedoresTable() {
   }).join('');
 }
 
+function abrirModalProveedorDesdeGasto() {
+  AppState.origenCrearProveedor = 'gastoDirectoCXP';
+  openProveedorModal(false);
+}
+
 function openProveedorModal(isEdit = false) {
   document.getElementById('proveedorModalTitle').textContent = isEdit ? 'Editar Proveedor' : 'Registrar Proveedor';
   if (!isEdit) {
@@ -4993,8 +5006,21 @@ async function saveProveedor(e) {
       body: JSON.stringify(payload)
     });
     if (res.ok) {
+      const respData = await res.json().catch(() => null);
       closeProveedorModal();
       await loadProveedores();
+      if (AppState.origenCrearProveedor === 'gastoDirectoCXP') {
+        AppState.origenCrearProveedor = null;
+        const pSelect = document.getElementById('cxpDirectoProveedor');
+        if (pSelect) {
+          pSelect.innerHTML = `<option value="">-- Seleccionar Proveedor --</option>` +
+            AppState.proveedores.map(p => `
+              <option value="${p.id}">${escapeHtml(p.nombre)} (${escapeHtml(p.cedula)})</option>
+            `).join('');
+          const nuevoId = respData?.id || (AppState.proveedores.find(p => p.cedula === payload.cedula)?.id);
+          if (nuevoId) pSelect.value = String(nuevoId);
+        }
+      }
     } else {
       const err = await res.json();
       alert('Error: ' + (err.error || 'No se pudo guardar el proveedor'));
@@ -5020,11 +5046,24 @@ async function deleteProveedor(id) {
 }
 
 // ========================================================
-// MÓDULO 7: CUENTAS POR COBRAR (CXC)
+// MÓDULO 7: CUENTAS POR COBRAR (CXC) — REDISEÑO CONSOLIDADO & ESTADO DE CUENTA
 // ========================================================
+AppState.cxcConsolidado = [];
+AppState.cxcClienteSeleccionado = null;
+AppState.cxcConsFilter = 'todos';
+AppState.cxcClienteFacturas = [];
+AppState.cxcClienteFilter = 'todos';
+
 async function loadCxc() {
+  if (AppState.cxcClienteSeleccionado) {
+    await verEstadoCuentaCliente(AppState.cxcClienteSeleccionado);
+  }
+  await loadCxcConsolidado();
+}
+
+async function loadCxcConsolidado() {
   try {
-    // 1. Cargar resumen
+    // 1. Resumen superior
     const resResumen = await fetch('/api/cxc/resumen');
     if (resResumen.ok) {
       const resumen = await resResumen.json();
@@ -5041,51 +5080,201 @@ async function loadCxc() {
       if (elPagadas) elPagadas.textContent = resumen.pagadas_count || 0;
     }
 
-    // 2. Cargar listado
+    // 2. Consolidado por cliente
     const search = document.getElementById('cxcSearchInput')?.value.trim() || '';
-    const estado = AppState.cxcFilterEstado || 'todos';
-
     const params = new URLSearchParams();
-    if (estado !== 'todos') params.append('estado', estado);
     if (search) params.append('q', search);
 
-    const resList = await fetch(`/api/cxc?${params.toString()}`);
-    if (resList.ok) {
-      AppState.cxc = await resList.json();
-      renderCxcTable();
+    const resCons = await fetch(`/api/cxc/consolidado?${params.toString()}`);
+    if (resCons.ok) {
+      AppState.cxcConsolidado = await resCons.json();
+      renderCxcConsolidadoTable();
     }
   } catch (err) {
-    console.error("Error al cargar cuentas por cobrar:", err);
+    console.error("Error al cargar CXC consolidado:", err);
   }
 }
 
-function filterCxcEstado(estado) {
-  AppState.cxcFilterEstado = estado;
-  ['todos', 'pendiente', 'vencida', 'pagada'].forEach(e => {
-    const btn = document.getElementById(`cxcFilter-${e}`);
+function filterCxcConsolidado(filtro) {
+  AppState.cxcConsFilter = filtro;
+  ['todos', 'pendientes', 'vencidas', 'saldados'].forEach(f => {
+    const btn = document.getElementById(`cxcConsFilter-${f}`);
     if (btn) {
-      if (e === estado) {
-        btn.className = 'px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white';
+      if (f === filtro) {
+        btn.className = 'px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-600 text-white';
       } else {
         btn.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200';
       }
     }
   });
-  loadCxc();
+  renderCxcConsolidadoTable();
 }
 
-function renderCxcTable() {
-  const tbody = document.getElementById('cxcTableBody');
+function renderCxcConsolidadoTable() {
+  const tbody = document.getElementById('cxcConsolidadoTableBody');
   if (!tbody) return;
 
-  if (AppState.cxc.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-400">No hay cuentas por cobrar en este criterio.</td></tr>`;
+  let lista = AppState.cxcConsolidado || [];
+  const filtro = AppState.cxcConsFilter || 'todos';
+
+  if (filtro === 'pendientes') {
+    lista = lista.filter(c => parseFloat(c.saldo_pendiente_usd) > 0.001);
+  } else if (filtro === 'vencidas') {
+    lista = lista.filter(c => parseInt(c.facturas_vencidas_count) > 0);
+  } else if (filtro === 'saldados') {
+    lista = lista.filter(c => parseFloat(c.saldo_pendiente_usd) <= 0.001);
+  }
+
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-10 text-slate-400">No se encontraron clientes con cuentas en este criterio.</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = AppState.cxc.map(c => {
+  const tasaVes = AppState.config.tasa_ves || 45.0;
+
+  tbody.innerHTML = lista.map(c => {
+    const saldoUsd = parseFloat(c.saldo_pendiente_usd || 0);
+    const saldoBs = parseFloat(c.saldo_pendiente_ves || (saldoUsd * tasaVes)).toLocaleString('es-VE');
+    const waPhone = (c.cliente_telefono || '').replace(/[^0-9]/g, '');
+
+    const badgeFacturas = c.facturas_pendientes_count > 0 
+      ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">${c.facturas_pendientes_count} pendiente(s)</span>`
+      : `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">0 pendientes</span>`;
+
+    const badgeVencidas = c.facturas_vencidas_count > 0
+      ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800"><i class="fa-solid fa-triangle-exclamation mr-1"></i>${c.facturas_vencidas_count}</span>`
+      : `<span class="text-xs text-slate-400">0</span>`;
+
+    return `
+      <tr class="hover:bg-slate-50 transition">
+        <td class="py-3 px-4">
+          <p class="font-bold text-slate-900">${escapeHtml(c.cliente_nombre)}</p>
+          <span class="text-xs text-slate-400 font-mono font-semibold">${escapeHtml(c.cliente_cedula || '-')}</span>
+        </td>
+        <td class="py-3 px-4 text-xs text-slate-600">
+          <div class="flex items-center gap-1.5">
+            <i class="fa-solid fa-phone text-slate-400 text-[11px]"></i>
+            <span>${escapeHtml(c.cliente_telefono || 'Sin teléfono')}</span>
+            ${waPhone ? `<a href="https://wa.me/${waPhone}" target="_blank" class="text-emerald-600 hover:text-emerald-700 ml-1"><i class="fa-brands fa-whatsapp text-sm"></i></a>` : ''}
+          </div>
+        </td>
+        <td class="py-3 px-4 text-center">${badgeFacturas}</td>
+        <td class="py-3 px-4 text-center">${badgeVencidas}</td>
+        <td class="py-3 px-4 font-bold text-slate-700 text-sm">$${parseFloat(c.total_facturado_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4 font-semibold text-emerald-700 text-sm">$${parseFloat(c.total_pagado_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4">
+          <span class="font-black text-sm ${saldoUsd > 0.001 ? 'text-rose-600' : 'text-emerald-700'} block">$${saldoUsd.toFixed(2)}</span>
+          <span class="text-[11px] text-slate-500">≈ ${saldoBs} Bs.</span>
+        </td>
+        <td class="py-3 px-4 text-right">
+          <button onclick="verEstadoCuentaCliente(${c.cliente_id})" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 ml-auto">
+            <i class="fa-solid fa-folder-open"></i> Ver Estado de Cuenta
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function verEstadoCuentaCliente(clienteId) {
+  try {
+    AppState.cxcClienteSeleccionado = clienteId;
+
+    const res = await fetch(`/api/cxc?cliente_id=${clienteId}`);
+    if (!res.ok) throw new Error("No se pudo obtener las facturas del cliente");
+    const facturas = await res.json();
+    AppState.cxcClienteFacturas = facturas;
+
+    // Obtener datos del cliente
+    let cliente = AppState.clientes ? AppState.clientes.find(cl => cl.id === clienteId) : null;
+    if (!cliente && facturas.length > 0) {
+      cliente = {
+        id: clienteId,
+        nombre: facturas[0].cliente_nombre,
+        cedula: facturas[0].cliente_cedula,
+        telefono: facturas[0].cliente_telefono
+      };
+    }
+
+    const nombre = cliente ? cliente.nombre : `Cliente #${clienteId}`;
+    const cedula = cliente ? cliente.cedula : '-';
+    const telefono = cliente ? (cliente.telefono || 'Sin teléfono') : '-';
+    const waPhone = (telefono || '').replace(/[^0-9]/g, '');
+
+    document.getElementById('cxcDetalleClienteNombre').textContent = nombre;
+    document.getElementById('cxcDetalleClienteCedula').textContent = cedula;
+    document.getElementById('cxcDetalleClienteTelefono').innerHTML = `<i class="fa-solid fa-phone mr-1"></i>${escapeHtml(telefono)}`;
+    const waSpan = document.getElementById('cxcDetalleClienteWhatsapp');
+    if (waSpan) {
+      waSpan.innerHTML = waPhone 
+        ? `<a href="https://wa.me/${waPhone}" target="_blank" class="text-emerald-600 hover:underline font-semibold flex items-center gap-1"><i class="fa-brands fa-whatsapp"></i> Chat WhatsApp</a>`
+        : '';
+    }
+
+    // Calcular saldos del cliente
+    const totalSaldoUsd = facturas.reduce((acc, f) => acc + parseFloat(f.saldo_pendiente || 0), 0);
+    const tasaVes = AppState.config.tasa_ves || 45.0;
+    const totalSaldoBs = (totalSaldoUsd * tasaVes).toFixed(2);
+
+    document.getElementById('cxcDetalleSaldoUsd').textContent = `$${totalSaldoUsd.toFixed(2)}`;
+    document.getElementById('cxcDetalleSaldoBs').textContent = `≈ ${parseFloat(totalSaldoBs).toLocaleString('es-VE')} Bs.`;
+
+    // Cambiar vistas
+    document.getElementById('cxcVistaConsolidada').classList.add('hidden');
+    document.getElementById('cxcVistaEstadoCuenta').classList.remove('hidden');
+
+    renderCxcClienteFacturasTable();
+  } catch (err) {
+    alert("Error al cargar estado de cuenta del cliente: " + err.message);
+  }
+}
+
+function volverACxcConsolidado() {
+  AppState.cxcClienteSeleccionado = null;
+  document.getElementById('cxcVistaEstadoCuenta').classList.add('hidden');
+  document.getElementById('cxcVistaConsolidada').classList.remove('hidden');
+  loadCxcConsolidado();
+}
+
+function filterCxcClienteEstado(estado) {
+  AppState.cxcClienteFilter = estado;
+  ['todos', 'pendiente', 'vencida', 'pagada'].forEach(e => {
+    const btn = document.getElementById(`cxcDetFilter-${e}`);
+    if (btn) {
+      if (e === estado) {
+        btn.className = 'px-3 py-1 rounded-lg text-xs font-bold bg-amber-600 text-white';
+      } else {
+        btn.className = 'px-3 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200';
+      }
+    }
+  });
+  renderCxcClienteFacturasTable();
+}
+
+function renderCxcClienteFacturasTable() {
+  const tbody = document.getElementById('cxcDetalleTableBody');
+  if (!tbody) return;
+
+  let facturas = AppState.cxcClienteFacturas || [];
+  const filtro = AppState.cxcClienteFilter || 'todos';
+
+  if (filtro === 'pendiente') {
+    facturas = facturas.filter(f => f.estado !== 'pagada');
+  } else if (filtro === 'vencida') {
+    facturas = facturas.filter(f => f.estado !== 'pagada' && new Date(f.fecha_vencimiento) < new Date(new Date().toDateString()));
+  } else if (filtro === 'pagada') {
+    facturas = facturas.filter(f => f.estado === 'pagada');
+  }
+
+  if (facturas.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-400">No hay facturas con este criterio para este cliente.</td></tr>`;
+    return;
+  }
+
+  const tasaVes = AppState.config.tasa_ves || 45.0;
+
+  tbody.innerHTML = facturas.map(c => {
     const esVencida = c.estado !== 'pagada' && new Date(c.fecha_vencimiento) < new Date(new Date().toDateString());
-    
     let badgeEstado = '';
     if (c.estado === 'pagada') {
       badgeEstado = `<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800"><i class="fa-solid fa-check mr-1"></i>Pagada</span>`;
@@ -5097,15 +5286,11 @@ function renderCxcTable() {
       badgeEstado = `<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800"><i class="fa-solid fa-clock mr-1"></i>Pendiente</span>`;
     }
 
-    const saldoBs = (c.saldo_pendiente * AppState.config.tasa_ves).toFixed(2);
+    const saldoBs = (c.saldo_pendiente * tasaVes).toFixed(2);
 
     return `
       <tr class="hover:bg-slate-50 transition">
         <td class="py-3 px-4 font-mono font-bold text-slate-900">${escapeHtml(c.numero_factura)}</td>
-        <td class="py-3 px-4">
-          <p class="font-bold text-slate-800">${escapeHtml(c.cliente_nombre)}</p>
-          <p class="text-xs text-slate-400 font-mono">${escapeHtml(c.cliente_cedula)}</p>
-        </td>
         <td class="py-3 px-4 text-xs text-slate-500">${formatFecha(c.fecha_emision)}</td>
         <td class="py-3 px-4 text-xs">
           <span class="font-semibold ${esVencida ? 'text-rose-600 font-bold' : 'text-slate-700'}">${c.fecha_vencimiento}</span>
@@ -5118,7 +5303,7 @@ function renderCxcTable() {
           <span class="text-[11px] text-slate-500">≈ ${saldoBs} Bs.</span>
         </td>
         <td class="py-3 px-4">${badgeEstado}</td>
-        <td class="py-3 px-4 text-right space-x-1">
+        <td class="py-3 px-4 text-right space-x-1 whitespace-nowrap">
           ${c.saldo_pendiente > 0.001 ? `
             <button onclick="abrirModalAbonoCXC(${c.id})" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-xs">
               <i class="fa-solid fa-hand-holding-dollar mr-1"></i>Abonar
@@ -5126,10 +5311,13 @@ function renderCxcTable() {
           ` : `
             <span class="px-2 py-1 text-slate-400 text-xs font-semibold">Saldada</span>
           `}
-          <button onclick="verHistorialAbonosCXC(${c.id})" class="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Ver Historial de Abonos">
+          <button onclick="abrirModalNotaAjuste('cxc', ${c.cliente_id}, ${c.id})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold transition" title="Aplicar Nota Débito / Crédito">
+            <i class="fa-solid fa-file-invoice-dollar mr-0.5"></i>+ Nota
+          </button>
+          <button onclick="verHistorialAbonosCXC(${c.id})" class="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Ver Historial">
             <i class="fa-solid fa-list-ul"></i>
           </button>
-          <button onclick="enviarRecordatorioWhatsAppCXC(${c.id})" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Enviar Recordatorio por WhatsApp">
+          <button onclick="enviarRecordatorioWhatsAppCXC(${c.id})" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Recordatorio WhatsApp">
             <i class="fa-brands fa-whatsapp text-sm"></i>
           </button>
         </td>
@@ -5427,11 +5615,24 @@ function enviarRecordatorioWhatsAppCXC(cxcId) {
 }
 
 // ========================================================
-// MÓDULO 8: CUENTAS POR PAGAR (CXP)
+// MÓDULO 8: CUENTAS POR PAGAR (CXP) — REDISEÑO CONSOLIDADO & ESTADO DE CUENTA
 // ========================================================
+AppState.cxpConsolidado = [];
+AppState.cxpProveedorSeleccionado = null;
+AppState.cxpConsFilter = 'todos';
+AppState.cxpProveedorCuentas = [];
+AppState.cxpProveedorFilter = 'todos';
+
 async function loadCxp() {
+  if (AppState.cxpProveedorSeleccionado) {
+    await verEstadoCuentaProveedor(AppState.cxpProveedorSeleccionado);
+  }
+  await loadCxpConsolidado();
+}
+
+async function loadCxpConsolidado() {
   try {
-    // 1. Cargar resumen estadístico
+    // 1. Resumen superior
     const resResumen = await fetch('/api/cxp/resumen');
     if (resResumen.ok) {
       const resumen = await resResumen.json();
@@ -5452,49 +5653,202 @@ async function loadCxp() {
       if (elPagado) elPagado.textContent = `$${parseFloat(resumen.total_pagado_usd || 0).toFixed(2)}`;
     }
 
-    // 2. Cargar listado filtrado
+    // 2. Consolidado por proveedor
     const search = document.getElementById('cxpSearchInput')?.value.trim() || '';
-    const estado = AppState.cxpFilterEstado || 'todos';
-
     const params = new URLSearchParams();
-    if (estado !== 'todos') params.append('estado', estado);
     if (search) params.append('q', search);
 
-    const resList = await fetch(`/api/cxp?${params.toString()}`);
-    if (resList.ok) {
-      AppState.cxp = await resList.json();
-      renderCxpTable();
+    const resCons = await fetch(`/api/cxp/consolidado?${params.toString()}`);
+    if (resCons.ok) {
+      AppState.cxpConsolidado = await resCons.json();
+      renderCxpConsolidadoTable();
     }
   } catch (err) {
-    console.error("Error al cargar cuentas por pagar:", err);
+    console.error("Error al cargar CXP consolidado:", err);
   }
 }
 
-function filterCxpEstado(estado) {
-  AppState.cxpFilterEstado = estado;
-  ['todos', 'pendiente', 'parcial', 'vencida', 'pagada'].forEach(e => {
-    const btn = document.getElementById(`cxpFilter-${e}`);
+function filterCxpConsolidado(filtro) {
+  AppState.cxpConsFilter = filtro;
+  ['todos', 'pendientes', 'vencidas', 'saldados'].forEach(f => {
+    const btn = document.getElementById(`cxpConsFilter-${f}`);
     if (btn) {
-      if (e === estado) {
+      if (f === filtro) {
         btn.className = 'px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-600 text-white';
       } else {
         btn.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200';
       }
     }
   });
-  loadCxp();
+  renderCxpConsolidadoTable();
 }
 
-function renderCxpTable() {
-  const tbody = document.getElementById('cxpTableBody');
+function renderCxpConsolidadoTable() {
+  const tbody = document.getElementById('cxpConsolidadoTableBody');
   if (!tbody) return;
 
-  if (AppState.cxp.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="text-center py-8 text-slate-400">No hay cuentas por pagar en este criterio.</td></tr>`;
+  let lista = AppState.cxpConsolidado || [];
+  const filtro = AppState.cxpConsFilter || 'todos';
+
+  if (filtro === 'pendientes') {
+    lista = lista.filter(c => parseFloat(c.saldo_pendiente_usd) > 0.001);
+  } else if (filtro === 'vencidas') {
+    lista = lista.filter(c => parseInt(c.cuentas_vencidas_count) > 0);
+  } else if (filtro === 'saldados') {
+    lista = lista.filter(c => parseFloat(c.saldo_pendiente_usd) <= 0.001);
+  }
+
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-10 text-slate-400">No se encontraron proveedores con cuentas en este criterio.</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = AppState.cxp.map(c => {
+  const tasaVes = AppState.config.tasa_ves || 45.0;
+
+  tbody.innerHTML = lista.map(c => {
+    const saldoUsd = parseFloat(c.saldo_pendiente_usd || 0);
+    const saldoBs = parseFloat(c.saldo_pendiente_ves || (saldoUsd * tasaVes)).toLocaleString('es-VE');
+    const waPhone = (c.proveedor_telefono || '').replace(/[^0-9]/g, '');
+
+    const badgeCuentas = c.cuentas_pendientes_count > 0 
+      ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">${c.cuentas_pendientes_count} pendiente(s)</span>`
+      : `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">0 pendientes</span>`;
+
+    const badgeVencidas = c.cuentas_vencidas_count > 0
+      ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800"><i class="fa-solid fa-triangle-exclamation mr-1"></i>${c.cuentas_vencidas_count}</span>`
+      : `<span class="text-xs text-slate-400">0</span>`;
+
+    return `
+      <tr class="hover:bg-slate-50 transition">
+        <td class="py-3 px-4">
+          <p class="font-bold text-slate-900">${escapeHtml(c.proveedor_nombre)}</p>
+          <span class="text-xs text-slate-400 font-mono font-semibold">${escapeHtml(c.proveedor_cedula || '-')}</span>
+        </td>
+        <td class="py-3 px-4 text-xs text-slate-600">
+          <div class="flex items-center gap-1.5">
+            <i class="fa-solid fa-phone text-slate-400 text-[11px]"></i>
+            <span>${escapeHtml(c.proveedor_telefono || 'Sin teléfono')}</span>
+            ${waPhone ? `<a href="https://wa.me/${waPhone}" target="_blank" class="text-emerald-600 hover:text-emerald-700 ml-1"><i class="fa-brands fa-whatsapp text-sm"></i></a>` : ''}
+          </div>
+        </td>
+        <td class="py-3 px-4 text-center">${badgeCuentas}</td>
+        <td class="py-3 px-4 text-center">${badgeVencidas}</td>
+        <td class="py-3 px-4 font-bold text-slate-700 text-sm">$${parseFloat(c.total_facturado_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4 font-semibold text-emerald-700 text-sm">$${parseFloat(c.total_pagado_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4">
+          <span class="font-black text-sm ${saldoUsd > 0.001 ? 'text-rose-600' : 'text-emerald-700'} block">$${saldoUsd.toFixed(2)}</span>
+          <span class="text-[11px] text-slate-500">≈ ${saldoBs} Bs.</span>
+        </td>
+        <td class="py-3 px-4 text-right">
+          <button onclick="verEstadoCuentaProveedor(${c.proveedor_id})" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 ml-auto">
+            <i class="fa-solid fa-folder-open"></i> Ver Estado de Cuenta
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function verEstadoCuentaProveedor(proveedorId) {
+  try {
+    AppState.cxpProveedorSeleccionado = proveedorId;
+
+    const res = await fetch(`/api/cxp?proveedor_id=${proveedorId}`);
+    if (!res.ok) throw new Error("No se pudo obtener las cuentas del proveedor");
+    const cuentas = await res.json();
+    AppState.cxpProveedorCuentas = cuentas;
+
+    // Obtener datos del proveedor
+    let proveedor = AppState.proveedores ? AppState.proveedores.find(pr => pr.id === proveedorId) : null;
+    if (!proveedor && cuentas.length > 0) {
+      proveedor = {
+        id: proveedorId,
+        nombre: cuentas[0].proveedor_nombre,
+        cedula: cuentas[0].proveedor_cedula,
+        telefono: cuentas[0].proveedor_telefono
+      };
+    }
+
+    const nombre = proveedor ? proveedor.nombre : `Proveedor #${proveedorId}`;
+    const cedula = proveedor ? proveedor.cedula : '-';
+    const telefono = proveedor ? (proveedor.telefono || 'Sin teléfono') : '-';
+    const waPhone = (telefono || '').replace(/[^0-9]/g, '');
+
+    document.getElementById('cxpDetalleProveedorNombre').textContent = nombre;
+    document.getElementById('cxpDetalleProveedorCedula').textContent = cedula;
+    document.getElementById('cxpDetalleProveedorTelefono').innerHTML = `<i class="fa-solid fa-phone mr-1"></i>${escapeHtml(telefono)}`;
+    const waSpan = document.getElementById('cxpDetalleProveedorWhatsapp');
+    if (waSpan) {
+      waSpan.innerHTML = waPhone 
+        ? `<a href="https://wa.me/${waPhone}" target="_blank" class="text-emerald-600 hover:underline font-semibold flex items-center gap-1"><i class="fa-brands fa-whatsapp"></i> Chat WhatsApp</a>`
+        : '';
+    }
+
+    // Calcular saldos del proveedor
+    const totalSaldoUsd = cuentas.reduce((acc, c) => acc + parseFloat(c.saldo_pendiente || 0), 0);
+    const tasaVes = AppState.config.tasa_ves || 45.0;
+    const totalSaldoBs = (totalSaldoUsd * tasaVes).toFixed(2);
+
+    document.getElementById('cxpDetalleSaldoUsd').textContent = `$${totalSaldoUsd.toFixed(2)}`;
+    document.getElementById('cxpDetalleSaldoBs').textContent = `≈ ${parseFloat(totalSaldoBs).toLocaleString('es-VE')} Bs.`;
+
+    // Cambiar vistas
+    document.getElementById('cxpVistaConsolidada').classList.add('hidden');
+    document.getElementById('cxpVistaEstadoCuenta').classList.remove('hidden');
+
+    renderCxpProveedorCuentasTable();
+  } catch (err) {
+    alert("Error al cargar estado de cuenta del proveedor: " + err.message);
+  }
+}
+
+function volverACxpConsolidado() {
+  AppState.cxpProveedorSeleccionado = null;
+  document.getElementById('cxpVistaEstadoCuenta').classList.add('hidden');
+  document.getElementById('cxpVistaConsolidada').classList.remove('hidden');
+  loadCxpConsolidado();
+}
+
+function filterCxpProveedorEstado(estado) {
+  AppState.cxpProveedorFilter = estado;
+  ['todos', 'pendiente', 'parcial', 'vencida', 'pagada'].forEach(e => {
+    const btn = document.getElementById(`cxpDetFilter-${e}`);
+    if (btn) {
+      if (e === estado) {
+        btn.className = 'px-3 py-1 rounded-lg text-xs font-bold bg-rose-600 text-white';
+      } else {
+        btn.className = 'px-3 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200';
+      }
+    }
+  });
+  renderCxpProveedorCuentasTable();
+}
+
+function renderCxpProveedorCuentasTable() {
+  const tbody = document.getElementById('cxpDetalleTableBody');
+  if (!tbody) return;
+
+  let cuentas = AppState.cxpProveedorCuentas || [];
+  const filtro = AppState.cxpProveedorFilter || 'todos';
+
+  if (filtro === 'pendiente') {
+    cuentas = cuentas.filter(c => c.estado === 'pendiente');
+  } else if (filtro === 'parcial') {
+    cuentas = cuentas.filter(c => c.estado === 'parcial');
+  } else if (filtro === 'vencida') {
+    cuentas = cuentas.filter(c => c.estado !== 'pagada' && (parseInt(c.dias_vencido) || 0) > 0);
+  } else if (filtro === 'pagada') {
+    cuentas = cuentas.filter(c => c.estado === 'pagada');
+  }
+
+  if (cuentas.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-400">No hay cuentas con este criterio para este proveedor.</td></tr>`;
+    return;
+  }
+
+  const tasaVes = AppState.config.tasa_ves || 45.0;
+
+  tbody.innerHTML = cuentas.map(c => {
     const diasVenc = parseInt(c.dias_vencido) || 0;
     const esVencida = c.estado !== 'pagada' && diasVenc > 0;
 
@@ -5509,28 +5863,21 @@ function renderCxpTable() {
       badgeEstado = `<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800"><i class="fa-solid fa-clock mr-1"></i>Pendiente</span>`;
     }
 
-    const saldoBs = parseFloat(c.saldo_ves || 0).toLocaleString('es-VE');
-    const saldoCop = Math.round(c.saldo_cop || 0).toLocaleString('es-CO');
-
-    const plazoHtml = esVencida 
-      ? `<span class="text-rose-600 font-bold text-xs"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Vencida (${diasVenc} d)</span>`
-      : `<span class="text-slate-600 text-xs">${c.fecha_vencimiento}</span>`;
+    const saldoBs = parseFloat(c.saldo_ves || (c.saldo_pendiente * tasaVes)).toLocaleString('es-VE');
 
     const badgeTipo = c.tipo_registro === 'directo'
       ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800">Gasto Directo</span>`
       : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">Compra Stock</span>`;
 
-    const waPhone = (c.proveedor_telefono || '').replace(/[^0-9]/g, '');
+    const plazoHtml = esVencida 
+      ? `<span class="text-rose-600 font-bold text-xs"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Vencida (${diasVenc} d)</span>`
+      : `<span class="text-slate-600 text-xs">${c.fecha_vencimiento}</span>`;
 
     return `
       <tr class="hover:bg-slate-50 transition">
         <td class="py-3 px-4 font-mono font-bold text-slate-900 text-xs">
           <p>${escapeHtml(c.numero_factura || '-')}</p>
           <span class="text-[10px] text-slate-400 font-sans font-normal">${escapeHtml(c.descripcion_concepto || 'Compra de mercancía')}</span>
-        </td>
-        <td class="py-3 px-4">
-          <p class="font-bold text-slate-800 text-xs">${escapeHtml(c.proveedor_nombre)}</p>
-          <p class="text-[11px] text-slate-400 font-mono">${escapeHtml(c.proveedor_cedula || '')}</p>
         </td>
         <td class="py-3 px-4">${badgeTipo}</td>
         <td class="py-3 px-4 text-xs text-slate-500">${formatFecha(c.fecha_emision)}</td>
@@ -5539,7 +5886,7 @@ function renderCxpTable() {
         <td class="py-3 px-4 font-medium text-emerald-700 text-xs">$${parseFloat(c.monto_pagado).toFixed(2)}</td>
         <td class="py-3 px-4">
           <span class="font-black text-xs text-rose-600 block">$${parseFloat(c.saldo_pendiente).toFixed(2)}</span>
-          <span class="text-[10px] text-slate-400">≈ ${saldoBs} Bs. | ${saldoCop} COP</span>
+          <span class="text-[10px] text-slate-400">≈ ${saldoBs} Bs.</span>
         </td>
         <td class="py-3 px-4 text-center">${badgeEstado}</td>
         <td class="py-3 px-4 text-right space-x-1 whitespace-nowrap">
@@ -5550,32 +5897,57 @@ function renderCxpTable() {
           ` : `
             <span class="px-2 py-1 text-slate-400 text-xs font-semibold">Saldada</span>
           `}
+          <button onclick="abrirModalNotaAjuste('cxp', ${c.proveedor_id}, ${c.id})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold transition" title="Aplicar Nota Débito / Crédito">
+            <i class="fa-solid fa-file-invoice-dollar mr-0.5"></i>+ Nota
+          </button>
           <button onclick="verHistorialAbonosCXP(${c.id})" class="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg text-xs" title="Historial de Pagos">
             <i class="fa-solid fa-clock-rotate-left"></i>
           </button>
-          ${waPhone ? `
-            <button onclick="enviarRecordatorioWhatsAppCXP(${c.id})" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg text-xs" title="Contactar Proveedor por WhatsApp">
-              <i class="fa-brands fa-whatsapp"></i>
-            </button>
-          ` : ''}
         </td>
       </tr>
     `;
   }).join('');
 }
 
-// Modal de Gasto Directo a Proveedor
-function abrirModalDirectoCXP() {
+// Helpers para abrir modales desde vista detallada
+function abrirModalDirectoCXPParaProveedorActual() {
+  abrirModalDirectoCXP(AppState.cxpProveedorSeleccionado);
+}
+
+function abrirModalNotaAjusteParaClienteActual() {
+  if (AppState.cxcClienteSeleccionado) {
+    abrirModalNotaAjuste('cxc', AppState.cxcClienteSeleccionado);
+  }
+}
+
+function abrirModalNotaAjusteParaProveedorActual() {
+  if (AppState.cxpProveedorSeleccionado) {
+    abrirModalNotaAjuste('cxp', AppState.cxpProveedorSeleccionado);
+  }
+}
+
+// ========================================================
+// MODAL DE GASTO DIRECTO / SALDO A PROVEEDOR (CXP)
+// ========================================================
+function abrirModalDirectoCXP(defaultProvId = null) {
   const pSelect = document.getElementById('cxpDirectoProveedor');
   if (pSelect) {
     pSelect.innerHTML = `<option value="">-- Seleccionar Proveedor --</option>` +
       AppState.proveedores.map(p => `
         <option value="${p.id}">${escapeHtml(p.nombre)} (${escapeHtml(p.cedula)})</option>
       `).join('');
+    if (defaultProvId) {
+      pSelect.value = String(defaultProvId);
+    }
   }
 
   document.getElementById('cxpDirectoConcepto').value = '';
   document.getElementById('cxpDirectoNumFactura').value = '';
+  document.getElementById('cxpDirectoNumControl').value = '';
+  document.getElementById('cxpDirectoImpuestoTipo').value = 'exento';
+  document.getElementById('cxpDirectoAfectaLibro').value = '0';
+  document.getElementById('cxpDirectoBaseUsd').value = '';
+  document.getElementById('cxpDirectoIvaUsd').value = '0.00';
   document.getElementById('cxpDirectoMonto').value = '';
   document.getElementById('cxpDirectoNotas').value = '';
 
@@ -5585,7 +5957,7 @@ function abrirModalDirectoCXP() {
   dVenc.setDate(dVenc.getDate() + 15);
   document.getElementById('cxpDirectoFechaVencimiento').value = dVenc.toISOString().split('T')[0];
 
-  actualizarEquivalenciasCxpDirecto();
+  actualizarCalculosCxpDirecto();
   document.getElementById('modalDirectoCXP').classList.remove('hidden');
 }
 
@@ -5593,13 +5965,67 @@ function closeModalDirectoCXP() {
   document.getElementById('modalDirectoCXP').classList.add('hidden');
 }
 
-function actualizarEquivalenciasCxpDirecto() {
-  const monto = parseFloat(document.getElementById('cxpDirectoMonto')?.value) || 0;
-  const bs = (monto * AppState.config.tasa_ves).toFixed(2);
-  const cop = Math.round(monto * AppState.config.tasa_cop).toLocaleString('es-CO');
+function actualizarCalculosCxpDirecto() {
+  const impTipo = document.getElementById('cxpDirectoImpuestoTipo')?.value || 'exento';
+  const total = parseFloat(document.getElementById('cxpDirectoMonto')?.value) || 0;
+  let base = 0;
+  let iva = 0;
+  if (impTipo === 'gravado') {
+    base = Math.round((total / 1.16) * 100) / 100;
+    iva = Math.round((total - base) * 100) / 100;
+  } else {
+    base = total;
+    iva = 0;
+  }
+  const elBase = document.getElementById('cxpDirectoBaseUsd');
+  const elIva = document.getElementById('cxpDirectoIvaUsd');
+  if (elBase) elBase.value = base > 0 ? base.toFixed(2) : '';
+  if (elIva) elIva.value = iva.toFixed(2);
 
-  const elBs = document.getElementById('cxpDirectoMontoBs');
-  if (elBs) elBs.textContent = `${parseFloat(bs).toLocaleString('es-VE')} Bs.`;
+  actualizarDesgloseFiscalCxpDirecto(base, iva, total);
+}
+
+function actualizarDesdeTotalCxpDirecto() {
+  actualizarCalculosCxpDirecto();
+}
+
+function actualizarDesdeBaseCxpDirecto() {
+  const impTipo = document.getElementById('cxpDirectoImpuestoTipo')?.value || 'exento';
+  const base = parseFloat(document.getElementById('cxpDirectoBaseUsd')?.value) || 0;
+  let iva = 0;
+  let total = 0;
+  if (impTipo === 'gravado') {
+    iva = Math.round((base * 0.16) * 100) / 100;
+    total = Math.round((base + iva) * 100) / 100;
+  } else {
+    iva = 0;
+    total = base;
+  }
+  const elTotal = document.getElementById('cxpDirectoMonto');
+  const elIva = document.getElementById('cxpDirectoIvaUsd');
+  if (elTotal) elTotal.value = total > 0 ? total.toFixed(2) : '';
+  if (elIva) elIva.value = iva.toFixed(2);
+
+  actualizarDesgloseFiscalCxpDirecto(base, iva, total);
+}
+
+function actualizarDesgloseFiscalCxpDirecto(baseUsd, ivaUsd, totalUsd) {
+  const tasaVes = AppState.config.tasa_ves || 45.0;
+  const tasaCop = AppState.config.tasa_cop || 4000;
+
+  const baseBs = (baseUsd * tasaVes).toFixed(2);
+  const ivaBs = (ivaUsd * tasaVes).toFixed(2);
+  const totalBs = (totalUsd * tasaVes).toFixed(2);
+  const cop = Math.round(totalUsd * tasaCop).toLocaleString('es-CO');
+
+  const elTasa = document.getElementById('cxpDirectoTasaBcvBadge');
+  if (elTasa) elTasa.textContent = `Tasa BCV: ${tasaVes.toFixed(2)} Bs/$`;
+  const elBaseBs = document.getElementById('cxpDirectoBaseBs');
+  if (elBaseBs) elBaseBs.textContent = `${parseFloat(baseBs).toLocaleString('es-VE')} Bs.`;
+  const elIvaBs = document.getElementById('cxpDirectoIvaBs');
+  if (elIvaBs) elIvaBs.textContent = `${parseFloat(ivaBs).toLocaleString('es-VE')} Bs.`;
+  const elTotalBs = document.getElementById('cxpDirectoTotalBs');
+  if (elTotalBs) elTotalBs.textContent = `${parseFloat(totalBs).toLocaleString('es-VE')} Bs.`;
   const elCop = document.getElementById('cxpDirectoMontoCop');
   if (elCop) elCop.textContent = `${cop} COP`;
 }
@@ -5609,7 +6035,12 @@ async function guardarDirectoCXP(e) {
   const provId = document.getElementById('cxpDirectoProveedor').value;
   const concepto = document.getElementById('cxpDirectoConcepto').value.trim();
   const numFactura = document.getElementById('cxpDirectoNumFactura').value.trim();
+  const numControl = document.getElementById('cxpDirectoNumControl').value.trim();
+  const impTipo = document.getElementById('cxpDirectoImpuestoTipo').value;
+  const afectaLibro = parseInt(document.getElementById('cxpDirectoAfectaLibro').value) || 0;
   const monto = parseFloat(document.getElementById('cxpDirectoMonto').value) || 0;
+  const baseUsd = parseFloat(document.getElementById('cxpDirectoBaseUsd').value) || (impTipo === 'exento' ? monto : monto / 1.16);
+  const ivaUsd = parseFloat(document.getElementById('cxpDirectoIvaUsd').value) || (impTipo === 'exento' ? 0 : monto - baseUsd);
   const fechaEmision = document.getElementById('cxpDirectoFechaEmision').value;
   const fechaVencimiento = document.getElementById('cxpDirectoFechaVencimiento').value;
   const notas = document.getElementById('cxpDirectoNotas').value.trim();
@@ -5626,6 +6057,10 @@ async function guardarDirectoCXP(e) {
     alert('El monto debe ser mayor a cero.');
     return;
   }
+  if (afectaLibro === 1 && !numFactura) {
+    alert('Para gastos que afectan el Libro de Compras Fiscal (SENIAT), el N° de Factura es obligatorio.');
+    return;
+  }
   if (!fechaVencimiento) {
     alert('Ingrese la fecha de vencimiento.');
     return;
@@ -5635,6 +6070,11 @@ async function guardarDirectoCXP(e) {
     proveedor_id: parseInt(provId),
     descripcion_concepto: concepto,
     numero_factura: numFactura,
+    numero_control: numControl,
+    impuesto_tipo: impTipo,
+    afecta_libro_compras: afectaLibro,
+    base_imponible_usd: baseUsd,
+    iva_usd: ivaUsd,
     monto_total: monto,
     fecha_emision: fechaEmision,
     fecha_vencimiento: fechaVencimiento,
@@ -5651,14 +6091,197 @@ async function guardarDirectoCXP(e) {
     if (res.ok) {
       alert('¡Cuenta por pagar / Gasto directo registrado con éxito!');
       closeModalDirectoCXP();
-      loadCxp();
-      loadDashboard();
+      await loadCxp();
+      await loadDashboard();
     } else {
       const err = await res.json();
       alert('Error: ' + (err.error || 'No se pudo guardar la cuenta'));
     }
   } catch (err) {
     alert('Error de conexión: ' + err.message);
+  }
+}
+
+// ========================================================
+// MODAL DE NOTAS DE AJUSTE COMERCIAL (DÉBITO / CRÉDITO)
+// ========================================================
+async function abrirModalNotaAjuste(modulo, terceroId, cuentaIdDefault = null, tipoNotaDefault = 'credito') {
+  document.getElementById('notaAjusteModulo').value = modulo;
+  document.getElementById('notaAjusteTerceroId').value = terceroId;
+
+  const badge = document.getElementById('notaAjusteModuloBadge');
+  const etiqueta = document.getElementById('notaAjusteTerceroEtiqueta');
+  const nombreEl = document.getElementById('notaAjusteTerceroNombre');
+  const modalTitle = document.getElementById('notaAjusteModalTitle');
+
+  if (modulo === 'cxc') {
+    badge.textContent = 'CXC (Cliente)';
+    badge.className = 'text-xs px-2.5 py-1 rounded-full font-bold bg-amber-100 text-amber-800 uppercase';
+    etiqueta.textContent = 'Cliente';
+    const cl = (AppState.clientes && AppState.clientes.find(c => c.id === terceroId)) || (AppState.cxcConsolidado && AppState.cxcConsolidado.find(c => c.cliente_id === terceroId));
+    nombreEl.textContent = cl ? `${cl.nombre || cl.cliente_nombre} (${cl.cedula || cl.cliente_cedula})` : `Cliente #${terceroId}`;
+    modalTitle.innerHTML = `<i class="fa-solid fa-file-invoice-dollar text-indigo-600 mr-2"></i>Nota de Ajuste — Cuenta por Cobrar`;
+  } else {
+    badge.textContent = 'CXP (Proveedor)';
+    badge.className = 'text-xs px-2.5 py-1 rounded-full font-bold bg-rose-100 text-rose-800 uppercase';
+    etiqueta.textContent = 'Proveedor';
+    const pr = (AppState.proveedores && AppState.proveedores.find(p => p.id === terceroId)) || (AppState.cxpConsolidado && AppState.cxpConsolidado.find(p => p.proveedor_id === terceroId));
+    nombreEl.textContent = pr ? `${pr.nombre || pr.proveedor_nombre} (${pr.cedula || pr.proveedor_cedula})` : `Proveedor #${terceroId}`;
+    modalTitle.innerHTML = `<i class="fa-solid fa-file-invoice-dollar text-indigo-600 mr-2"></i>Nota de Ajuste — Cuenta por Pagar`;
+  }
+
+  // Cargar cuentas / facturas del tercero
+  const selectCuenta = document.getElementById('notaAjusteCuentaId');
+  selectCuenta.innerHTML = '<option value="">Cargando documentos...</option>';
+
+  try {
+    const url = modulo === 'cxc' ? `/api/cxc?cliente_id=${terceroId}` : `/api/cxp?proveedor_id=${terceroId}`;
+    const res = await fetch(url);
+    const docs = await res.json();
+    
+    if (docs.length === 0) {
+      selectCuenta.innerHTML = '<option value="">No hay documentos registrados</option>';
+    } else {
+      selectCuenta.innerHTML = docs.map(d => {
+        const num = d.numero_factura || `ID #${d.id}`;
+        const saldo = parseFloat(d.saldo_pendiente || 0).toFixed(2);
+        const desc = d.descripcion_concepto ? ` - ${d.descripcion_concepto}` : '';
+        return `<option value="${d.id}">${escapeHtml(num)}${escapeHtml(desc)} | Saldo: $${saldo}</option>`;
+      }).join('');
+      if (cuentaIdDefault) {
+        selectCuenta.value = String(cuentaIdDefault);
+      }
+    }
+  } catch (err) {
+    selectCuenta.innerHTML = '<option value="">Error cargando facturas</option>';
+  }
+
+  document.getElementById('notaAjusteTipoNota').value = tipoNotaDefault;
+  document.getElementById('notaAjusteMontoUsd').value = '';
+  document.getElementById('notaAjusteFecha').value = new Date().toISOString().split('T')[0];
+  document.getElementById('notaAjusteMotivo').value = '';
+  document.getElementById('notaAjusteNumControl').value = '';
+  document.getElementById('notaAjusteAfectaLibro').value = '0';
+
+  onCambioTipoNotaAjuste();
+  actualizarEquivalenciasNotaAjuste();
+
+  document.getElementById('modalNotaAjusteComercial').classList.remove('hidden');
+}
+
+function closeModalNotaAjuste() {
+  document.getElementById('modalNotaAjusteComercial').classList.add('hidden');
+}
+
+function onCambioTipoNotaAjuste() {
+  const modulo = document.getElementById('notaAjusteModulo').value;
+  const tipo = document.getElementById('notaAjusteTipoNota').value;
+  const selectEfecto = document.getElementById('notaAjusteEfecto');
+  const alertEl = document.getElementById('notaAjusteAlertaEfecto');
+  const explicacion = document.getElementById('notaAjusteExplicacionEfecto');
+
+  if (tipo === 'credito') {
+    selectEfecto.value = 'disminuye';
+    if (modulo === 'cxc') {
+      explicacion.innerHTML = `<strong>Nota de Crédito en CXC:</strong> Disminuye el saldo adeudado por el cliente (-) por devolución, descuento o ajuste a favor.`;
+      alertEl.className = 'text-xs rounded-xl p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-start gap-2';
+    } else {
+      explicacion.innerHTML = `<strong>Nota de Crédito en CXP:</strong> Disminuye la deuda con el proveedor (-) por bonificación, descuento o devolución de compra.`;
+      alertEl.className = 'text-xs rounded-xl p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-start gap-2';
+    }
+  } else {
+    // debito
+    if (modulo === 'cxc') {
+      selectEfecto.value = 'incrementa';
+      explicacion.innerHTML = `<strong>Nota de Débito en CXC:</strong> Incrementa el saldo a cobrar al cliente (+) por intereses de mora, gastos o diferencia de precio.`;
+      alertEl.className = 'text-xs rounded-xl p-2.5 bg-amber-50 border border-amber-200 text-amber-900 flex items-start gap-2';
+    } else {
+      selectEfecto.value = 'incrementa';
+      explicacion.innerHTML = `<strong>Nota de Débito en CXP:</strong> Incrementa el saldo por pagar al proveedor (+) por recargo, gastos de flete o diferencia en factura.`;
+      alertEl.className = 'text-xs rounded-xl p-2.5 bg-rose-50 border border-rose-200 text-rose-900 flex items-start gap-2';
+    }
+  }
+}
+
+function actualizarEquivalenciasNotaAjuste() {
+  const montoUsd = parseFloat(document.getElementById('notaAjusteMontoUsd')?.value) || 0;
+  const tasaVes = AppState.config.tasa_ves || 45.0;
+  const montoBs = (montoUsd * tasaVes).toFixed(2);
+  const elBs = document.getElementById('notaAjusteMontoBs');
+  if (elBs) elBs.textContent = `${parseFloat(montoBs).toLocaleString('es-VE')} Bs.`;
+}
+
+async function guardarNotaAjuste(e) {
+  e.preventDefault();
+  const modulo = document.getElementById('notaAjusteModulo').value;
+  const terceroId = parseInt(document.getElementById('notaAjusteTerceroId').value);
+  const cuentaId = document.getElementById('notaAjusteCuentaId').value;
+  const tipoNota = document.getElementById('notaAjusteTipoNota').value;
+  const efecto = document.getElementById('notaAjusteEfecto').value;
+  const montoUsd = parseFloat(document.getElementById('notaAjusteMontoUsd').value) || 0;
+  const fecha = document.getElementById('notaAjusteFecha').value;
+  const motivo = document.getElementById('notaAjusteMotivo').value.trim();
+  const numControl = document.getElementById('notaAjusteNumControl').value.trim();
+  const afectaLibro = parseInt(document.getElementById('notaAjusteAfectaLibro').value) || 0;
+
+  if (!cuentaId) {
+    alert('Debe seleccionar la factura o cuenta sobre la cual se aplicará la nota.');
+    return;
+  }
+  if (montoUsd <= 0) {
+    alert('El monto de la nota debe ser mayor a cero.');
+    return;
+  }
+  if (!motivo) {
+    alert('El concepto o motivo de la nota es obligatorio.');
+    return;
+  }
+
+  const payload = {
+    modulo: modulo,
+    tercero_id: terceroId,
+    cuenta_id: parseInt(cuentaId),
+    tipo_nota: tipoNota,
+    efecto: efecto,
+    monto_usd: montoUsd,
+    fecha: fecha,
+    motivo: motivo,
+    numero_control: numControl,
+    afecta_libro_fiscal: afectaLibro
+  };
+
+  try {
+    const res = await fetch('/api/notas-ajuste', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      alert(`¡${data.tipo_nota === 'credito' ? 'Nota de Crédito' : 'Nota de Débito'} ${data.numero_nota} registrada con éxito!
+Efecto: ${efecto.toUpperCase()} saldo por $${montoUsd.toFixed(2)} USD (${data.monto_ves.toFixed(2)} Bs.)`);
+      closeModalNotaAjuste();
+      
+      // Actualizar vista inmediatamente
+      if (modulo === 'cxc') {
+        if (AppState.cxcClienteSeleccionado) {
+          await verEstadoCuentaCliente(AppState.cxcClienteSeleccionado);
+        }
+        await loadCxcConsolidado();
+      } else {
+        if (AppState.cxpProveedorSeleccionado) {
+          await verEstadoCuentaProveedor(AppState.cxpProveedorSeleccionado);
+        }
+        await loadCxpConsolidado();
+      }
+      await loadDashboard();
+    } else {
+      const err = await res.json();
+      alert('Error: ' + (err.error || 'No se pudo guardar la nota de ajuste'));
+    }
+  } catch (err) {
+    alert('Error al guardar nota de ajuste: ' + err.message);
   }
 }
 
@@ -5997,7 +6620,7 @@ function setReportTab(tabName) {
   if (tabName === 'inventario') loadReporteInventario();
   if (tabName === 'diarias') loadReporteVentasDiarias();
   if (tabName === 'mensuales') loadReporteVentasMensuales();
-  if (tabName === 'kardex') loadReporteKardex();
+  if (tabName === 'kardex') { if (AppState.kardexVersion === 'v2') loadReporteKardexV2(); else loadReporteKardex(); }
   if (tabName === 'inv_simple') loadReporteInventarioSimple();
   if (tabName === 'libro_ventas') loadLibroVentasSeniat();
   if (tabName === 'libro_compras') loadLibroComprasSeniat();
@@ -8278,7 +8901,8 @@ function addAjusteRow(selectedProdId = null) {
   let optionsHtml = '<option value="">Seleccionar producto...</option>';
   prods.forEach(p => {
     const isSel = selectedProdId && p.id === parseInt(selectedProdId) ? 'selected' : '';
-    optionsHtml += `<option value="${p.id}" data-stock="${p.stock}" data-costo="${p.costo}" ${isSel}>${p.codigo || 'SIN-COD'} - ${p.nombre} (Stock: ${p.stock})</option>`;
+    const cppVal = (p.costo_cpp !== undefined && p.costo_cpp !== null && p.costo_cpp > 0) ? p.costo_cpp : p.costo;
+    optionsHtml += `<option value="${p.id}" data-stock="${p.stock}" data-costo="${cppVal}" data-costo-cpp="${p.costo_cpp || ''}" ${isSel}>${p.codigo || 'SIN-COD'} - ${p.nombre} (Stock: ${p.stock})</option>`;
   });
 
   row.innerHTML = `
@@ -8341,12 +8965,30 @@ function recalcularAjusteTotales() {
       return;
     }
 
-    const currentStock = parseFloat(opt.getAttribute('data-stock') || 0);
+        const currentStock = parseFloat(opt.getAttribute('data-stock') || 0);
     const prodCosto = parseFloat(opt.getAttribute('data-costo') || 0);
 
-    // Auto-completar costo si está en 0
-    if (costoInput && (parseFloat(costoInput.value) <= 0 || costoInput.value === '')) {
-      costoInput.value = prodCosto.toFixed(2);
+    // Ajuste CPP (FASE 2F-5B): Proteger integridad contable de costos
+    const motivoSelect = document.getElementById('ajusteMotivo');
+    const motivoVal = motivoSelect ? motivoSelect.value : '';
+    const esSobrante = motivoVal === 'sobrante' || motivoVal === 'regularizacion';
+
+    if (tipo === 'DESCARGO' || esSobrante) {
+      if (costoInput) {
+        costoInput.value = prodCosto.toFixed(4);
+        costoInput.readOnly = true;
+        costoInput.classList.add('bg-slate-100', 'text-slate-500', 'cursor-not-allowed');
+        costoInput.title = (tipo === 'DESCARGO') ? 'El costo de descargo se fija rigurosamente al CPP vigente' : 'Sobrante fisico: costo fijado al CPP vigente (invariante)';
+      }
+    } else {
+      if (costoInput) {
+        costoInput.readOnly = false;
+        costoInput.classList.remove('bg-slate-100', 'text-slate-500', 'cursor-not-allowed');
+        costoInput.title = 'Ingrese costo unitario de tasacion/hallazgo si aplica';
+        if (parseFloat(costoInput.value) <= 0 || costoInput.value === '') {
+          costoInput.value = prodCosto.toFixed(2);
+        }
+      }
     }
 
     const cant = parseFloat(cantInput.value) || 0;
@@ -8383,6 +9025,37 @@ function recalcularAjusteTotales() {
   if (sumCantEl) sumCantEl.textContent = totalCantidad.toFixed(2);
   if (sumCostoEl) sumCostoEl.textContent = totalCosto.toFixed(2);
 }
+
+// Helper seguro de notificaciones Toast (no bloqueante)
+function showToast(message, type = 'info') {
+  try {
+    let container = document.getElementById('appToastContainer');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'appToastContainer';
+      container.className = 'fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none';
+      document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    const bg = type === 'success' ? 'bg-emerald-600' : (type === 'error' ? 'bg-rose-600' : 'bg-slate-800');
+    toast.className = `${bg} text-white px-4 py-2.5 rounded-xl shadow-lg text-xs font-semibold flex items-center gap-2 pointer-events-auto transition-all duration-300 transform translate-y-2 opacity-0`;
+    const icon = type === 'success' ? '<i class="fa-solid fa-circle-check"></i>' : (type === 'error' ? '<i class="fa-solid fa-circle-exclamation"></i>' : '<i class="fa-solid fa-circle-info"></i>');
+    toast.innerHTML = `${icon} <span>${escapeHtml(String(message || ''))}</span>`;
+    container.appendChild(toast);
+    requestAnimationFrame(() => {
+      toast.classList.remove('translate-y-2', 'opacity-0');
+      toast.classList.add('translate-y-0', 'opacity-100');
+    });
+    setTimeout(() => {
+      toast.classList.remove('translate-y-0', 'opacity-100');
+      toast.classList.add('translate-y-2', 'opacity-0');
+      setTimeout(() => toast.remove(), 300);
+    }, 3500);
+  } catch (e) {
+    console.log(`[Toast ${type}]:`, message);
+  }
+}
+window.showToast = showToast;
 
 async function saveAjuste(e) {
   e.preventDefault();
@@ -8454,15 +9127,46 @@ async function saveAjuste(e) {
       throw new Error(data.error || 'Error al procesar el ajuste de inventario');
     }
 
+    // 1. Extraer ID del ajuste devuelto por el backend
+    const ajusteId = data.id || data.ajuste_id;
+
+    // 2. Notificación visual al usuario
     showToast(`Ajuste ${data.numero_ajuste || ''} aplicado con éxito`, 'success');
+
+    // 3. Cerrar el modal del formulario
     closeAjusteModal();
-    await loadProductos();
-    await loadDashboard();
-    if (typeof loadReporteKardex === 'function' && AppState.currentView === 'reportes') {
-      loadReporteKardex();
+
+    // 4. PRIORIDAD ABSOLUTA: Abrir inmediatamente el comprobante oficial
+    if (ajusteId) {
+      try {
+        await abrirComprobanteAjuste(ajusteId);
+      } catch (printErr) {
+        console.error('Error al abrir comprobante oficial tras guardado:', printErr);
+      }
     }
+
+    // 5. Refrescar historial de ajustes de forma segura (sin bloquear el comprobante)
+    try {
+      if (typeof cargarHistorialAjustes === 'function') {
+        await cargarHistorialAjustes();
+      }
+    } catch (histErr) {
+      console.warn('No se pudo refrescar el historial de ajustes:', histErr);
+    }
+
+    // 6. Actualizar inventario/catálogo y dashboard según el flujo existente
+    try {
+      await loadProductos();
+      await loadDashboard();
+      if (typeof loadReporteKardex === 'function' && AppState.currentView === 'reportes') {
+        loadReporteKardex();
+      }
+    } catch (auxErr) {
+      console.warn('No se pudo refrescar catálogo o dashboard:', auxErr);
+    }
+
   } catch (err) {
-    showToast(err.message, 'error');
+    showToast(err.message || 'Error al procesar el ajuste', 'error');
   } finally {
     if (btnGuardar) {
       btnGuardar.disabled = false;
@@ -8470,3 +9174,2243 @@ async function saveAjuste(e) {
     }
   }
 }
+
+// ========================================================
+// FASE 2E-3: GESTIÓN E HISTORIAL DE AJUSTES DE INVENTARIO
+// ========================================================
+
+AppState.productoSubtab = 'catalogo';
+AppState.historialAjustes = [];
+
+function cambiarSubtabProductos(subtab) {
+  AppState.productoSubtab = subtab;
+  const containerCatalogo = document.getElementById('subtabProdCatalogoContainer');
+  const containerAjustes = document.getElementById('subtabProdAjustesContainer');
+  const btnCatalogo = document.getElementById('btnSubtabProdCatalogo');
+  const btnAjustes = document.getElementById('btnSubtabProdAjustes');
+
+  if (subtab === 'ajustes') {
+    if (containerCatalogo) containerCatalogo.classList.add('hidden');
+    if (containerAjustes) containerAjustes.classList.remove('hidden');
+    if (btnCatalogo) {
+      btnCatalogo.className = 'px-4 py-2 rounded-xl text-sm font-semibold transition flex items-center bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 shadow-2xs';
+    }
+    if (btnAjustes) {
+      btnAjustes.className = 'px-4 py-2 rounded-xl text-sm font-bold shadow-xs transition flex items-center btn-theme-primary text-white';
+    }
+    cargarHistorialAjustes();
+  } else {
+    if (containerCatalogo) containerCatalogo.classList.remove('hidden');
+    if (containerAjustes) containerAjustes.classList.add('hidden');
+    if (btnCatalogo) {
+      btnCatalogo.className = 'px-4 py-2 rounded-xl text-sm font-bold shadow-xs transition flex items-center btn-theme-primary text-white';
+    }
+    if (btnAjustes) {
+      btnAjustes.className = 'px-4 py-2 rounded-xl text-sm font-semibold transition flex items-center bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 shadow-2xs';
+    }
+    loadProductos();
+  }
+}
+
+function formatMotivoAjuste(motivo) {
+  if (!motivo) return 'General';
+  const m = String(motivo).toLowerCase().trim();
+  if (m === 'sobrante') return 'Sobrante físico';
+  if (m === 'regularizacion') return 'Regularización';
+  if (m === 'merma') return 'Merma operativa';
+  if (m === 'vencimiento') return 'Vencimiento';
+  if (m === 'rotura') return 'Rotura o daño';
+  if (m === 'uso_interno') return 'Consumo / Uso interno';
+  if (m === 'perdida_no_explicada') return 'Pérdida / Faltante';
+  if (m === 'ajuste_manual') return 'Ajuste manual';
+  if (m === 'inventario_inicial') return 'Inventario inicial';
+  return motivo.charAt(0).toUpperCase() + motivo.slice(1);
+}
+
+async function cargarHistorialAjustes() {
+  const loading = document.getElementById('ajustesLoadingState');
+  const errorBox = document.getElementById('ajustesErrorState');
+  const emptyBox = document.getElementById('ajustesEmptyState');
+  const tableContainer = document.getElementById('ajustesTableContainer');
+
+  if (loading) loading.classList.remove('hidden');
+  if (errorBox) errorBox.classList.add('hidden');
+  if (emptyBox) emptyBox.classList.add('hidden');
+  if (tableContainer) tableContainer.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/inventario/ajustes');
+    if (!res.ok) {
+      throw new Error(`Error en el servidor al consultar ajustes (HTTP ${res.status})`);
+    }
+    const data = await res.json();
+    AppState.historialAjustes = Array.isArray(data.ajustes) ? data.ajustes : [];
+
+    if (loading) loading.classList.add('hidden');
+
+    if (AppState.historialAjustes.length === 0) {
+      if (emptyBox) emptyBox.classList.remove('hidden');
+      if (tableContainer) tableContainer.classList.add('hidden');
+      return;
+    }
+
+    if (emptyBox) emptyBox.classList.add('hidden');
+    if (tableContainer) tableContainer.classList.remove('hidden');
+
+    filtrarHistorialAjustes();
+  } catch (err) {
+    console.error('Error cargando historial de ajustes:', err);
+    if (loading) loading.classList.add('hidden');
+    if (emptyBox) emptyBox.classList.add('hidden');
+    if (tableContainer) tableContainer.classList.add('hidden');
+    if (errorBox) {
+      errorBox.classList.remove('hidden');
+      const msg = document.getElementById('ajustesErrorMessage');
+      if (msg) msg.textContent = err.message || 'No fue posible cargar el historial de ajustes.';
+    }
+  }
+}
+
+function filtrarHistorialAjustes() {
+  const q = (document.getElementById('ajusteSearchInput')?.value || '').toLowerCase().trim();
+  const fTipo = (document.getElementById('ajusteFilterTipo')?.value || '').toUpperCase().trim();
+  const fMotivo = (document.getElementById('ajusteFilterMotivo')?.value || '').toLowerCase().trim();
+
+  const totalOriginal = AppState.historialAjustes || [];
+  if (totalOriginal.length === 0) {
+    const emptyBox = document.getElementById('ajustesEmptyState');
+    const tableContainer = document.getElementById('ajustesTableContainer');
+    if (emptyBox) emptyBox.classList.remove('hidden');
+    if (tableContainer) tableContainer.classList.add('hidden');
+    return;
+  }
+
+  const filtrados = totalOriginal.filter(a => {
+    if (fTipo && String(a.tipo_ajuste || '').toUpperCase() !== fTipo) return false;
+    if (fMotivo && String(a.motivo || '').toLowerCase() !== fMotivo) return false;
+    if (q) {
+      const num = String(a.numero_ajuste || '').toLowerCase();
+      const mot = String(a.motivo || '').toLowerCase();
+      const obs = String(a.observaciones || '').toLowerCase();
+      if (!num.includes(q) && !mot.includes(q) && !obs.includes(q)) return false;
+    }
+    return true;
+  });
+
+  renderHistorialAjustes(filtrados);
+}
+
+function limpiarFiltrosAjustes() {
+  const searchInput = document.getElementById('ajusteSearchInput');
+  const filterTipo = document.getElementById('ajusteFilterTipo');
+  const filterMotivo = document.getElementById('ajusteFilterMotivo');
+  if (searchInput) searchInput.value = '';
+  if (filterTipo) filterTipo.value = '';
+  if (filterMotivo) filterMotivo.value = '';
+  filtrarHistorialAjustes();
+}
+
+function renderHistorialAjustes(lista) {
+  const tbody = document.getElementById('ajustesTableBody');
+  const tableContainer = document.getElementById('ajustesTableContainer');
+  const emptyBox = document.getElementById('ajustesEmptyState');
+
+  if (!tbody) return;
+
+  if (tableContainer) tableContainer.classList.remove('hidden');
+  if (emptyBox) emptyBox.classList.add('hidden');
+
+  if (!lista || lista.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="9" class="text-center py-10 text-slate-400">
+          <i class="fa-solid fa-filter-circle-xmark text-2xl block mb-2 text-slate-300"></i>
+          No se encontraron ajustes de inventario que coincidan con los filtros aplicados.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = lista.map(a => {
+    const esCargo = String(a.tipo_ajuste || '').toUpperCase() === 'CARGO';
+    const tipoBadge = esCargo
+      ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-2xs"><i class="fa-solid fa-arrow-down text-[10px]"></i> CARGO</span>`
+      : `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200 shadow-2xs"><i class="fa-solid fa-arrow-up text-[10px]"></i> DESCARGO</span>`;
+
+    const motivoLabel = formatMotivoAjuste(a.motivo);
+    const fechaTexto = typeof formatFecha === 'function' ? formatFecha(a.fecha) : escapeHtml(a.fecha || '—');
+    const totalItems = parseInt(a.total_items || 0);
+    const totalCantidad = parseFloat(a.total_cantidad || 0).toFixed(2);
+    const totalCosto = parseFloat(a.total_costo || 0).toFixed(2);
+
+    return `
+      <tr class="hover:bg-slate-50/80 transition-colors">
+        <td class="py-3 px-4 font-mono font-bold text-teal-800 whitespace-nowrap">
+          ${escapeHtml(a.numero_ajuste || '—')}
+        </td>
+        <td class="py-3 px-4 text-xs text-slate-600 whitespace-nowrap">
+          ${fechaTexto}
+        </td>
+        <td class="py-3 px-4 text-center whitespace-nowrap">
+          ${tipoBadge}
+        </td>
+        <td class="py-3 px-4 text-xs text-slate-800 font-medium">
+          <div>${escapeHtml(motivoLabel)}</div>
+          ${a.observaciones ? `<div class="text-[11px] text-slate-400 truncate max-w-xs" title="${escapeHtml(a.observaciones)}">${escapeHtml(a.observaciones)}</div>` : ''}
+        </td>
+        <td class="py-3 px-4 text-center font-mono text-xs font-semibold text-slate-700 whitespace-nowrap">
+          ${totalItems} ítem${totalItems === 1 ? '' : 's'}
+        </td>
+        <td class="py-3 px-4 text-right font-mono text-xs font-bold text-slate-800 whitespace-nowrap">
+          ${totalCantidad}
+        </td>
+        <td class="py-3 px-4 text-right font-mono text-xs font-bold text-teal-700 whitespace-nowrap">
+          $${totalCosto}
+        </td>
+        <td class="py-3 px-4 text-center whitespace-nowrap">
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <i class="fa-solid fa-circle-check text-[9px]"></i> Aplicado
+          </span>
+        </td>
+        <td class="py-3 px-4 text-right whitespace-nowrap">
+          <button type="button" onclick="abrirComprobanteAjuste(${a.id})" class="bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 px-3 py-1.5 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 shadow-2xs hover:shadow-xs">
+            <i class="fa-solid fa-print"></i> Ver / Reimprimir
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+window.cambiarSubtabProductos = cambiarSubtabProductos;
+window.cargarHistorialAjustes = cargarHistorialAjustes;
+window.filtrarHistorialAjustes = filtrarHistorialAjustes;
+window.limpiarFiltrosAjustes = limpiarFiltrosAjustes;
+
+
+// ========================================================
+// MÓDULO KARDEX OFICIAL V2 BASADO EN INVENTARIO_MOVIMIENTOS (FASE 2D)
+// ========================================================
+
+AppState.kardexVersion = 'v2'; // 'v2' (Oficial) o 'v1' (Legado)
+AppState.kardexV2Data = null;
+
+function switchKardexVersion(version) {
+  AppState.kardexVersion = version;
+  const btnV2 = document.getElementById('btnToggleKardexV2');
+  const btnV1 = document.getElementById('btnToggleKardexV1');
+  const contV2 = document.getElementById('kardexV2Container');
+  const contV1 = document.getElementById('kardexV1Container');
+  const badge = document.getElementById('kardexVersionBadge');
+
+  if (version === 'v2') {
+    if (btnV2) { btnV2.className = 'px-4 py-2 rounded-xl text-xs font-bold bg-teal-600 text-white shadow transition flex items-center gap-1.5'; }
+    if (btnV1) { btnV1.className = 'px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition flex items-center gap-1.5'; }
+    if (contV2) contV2.classList.remove('hidden');
+    if (contV1) contV1.classList.add('hidden');
+    if (badge) badge.innerHTML = '<i class="fa-solid fa-circle-check text-teal-600 mr-1"></i>Consultando Libro Mayor Persistente (inventario_movimientos)';
+    loadReporteKardexV2();
+  } else {
+    if (btnV1) { btnV1.className = 'px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 text-white shadow transition flex items-center gap-1.5'; }
+    if (btnV2) { btnV2.className = 'px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition flex items-center gap-1.5'; }
+    if (contV1) contV1.classList.remove('hidden');
+    if (contV2) contV2.classList.add('hidden');
+    if (badge) badge.innerHTML = '<i class="fa-solid fa-clock-rotate-left text-amber-500 mr-1"></i>Modo Legado V1 (Reconstrucción dinámica para compatibilidad)';
+    loadReporteKardex();
+  }
+}
+
+async function loadReporteKardexV2() {
+  const prodSelect = document.getElementById('kardexV2ProductoSelect');
+  const desde = document.getElementById('kardexV2DesdeInput')?.value || '';
+  const hasta = document.getElementById('kardexV2HastaInput')?.value || '';
+  const tipo = document.getElementById('kardexV2TipoSelect')?.value || '';
+  const sentido = document.getElementById('kardexV2SentidoSelect')?.value || '';
+  const prodId = prodSelect?.value || '';
+
+  const params = new URLSearchParams();
+  if (prodId) params.append('producto_id', prodId);
+  if (desde) params.append('desde', desde);
+  if (hasta) params.append('hasta', hasta);
+  if (tipo) params.append('tipo_movimiento', tipo);
+  if (sentido) params.append('sentido', sentido);
+  params.append('limit', '200');
+
+  try {
+    const res = await fetch(`/api/reportes/kardex-v2?${params.toString()}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    AppState.kardexV2Data = data;
+
+    // Poblar selector de productos si tiene una sola opción
+    if (prodSelect && prodSelect.options.length <= 1 && data.productos) {
+      let opts = '<option value="">Todos los productos</option>';
+      data.productos.forEach(p => {
+        const isSel = data.producto && data.producto.id === p.id ? 'selected' : '';
+        opts += `<option value="${p.id}" ${isSel}>${escapeHtml(p.codigo)} - ${escapeHtml(p.nombre)} (Stock: ${p.stock})</option>`;
+      });
+      prodSelect.innerHTML = opts;
+    }
+
+    renderReporteKardexV2();
+  } catch (err) {
+    console.error("Error al cargar Kardex V2:", err);
+  }
+}
+
+function resetFiltrosKardexV2() {
+  const prodSelect = document.getElementById('kardexV2ProductoSelect');
+  const desde = document.getElementById('kardexV2DesdeInput');
+  const hasta = document.getElementById('kardexV2HastaInput');
+  const tipo = document.getElementById('kardexV2TipoSelect');
+  const sentido = document.getElementById('kardexV2SentidoSelect');
+
+  if (prodSelect) prodSelect.value = '';
+  if (desde) desde.value = '';
+  if (hasta) hasta.value = '';
+  if (tipo) tipo.value = '';
+  if (sentido) sentido.value = '';
+
+  loadReporteKardexV2();
+}
+
+function renderReporteKardexV2() {
+  const data = AppState.kardexV2Data;
+  if (!data) return;
+
+  const r = data.resumen || {};
+  const p = data.producto;
+  const movs = data.movimientos || [];
+
+  // Actualizar KPIs
+  const elTotalMovs = document.getElementById('kardexV2TotalMovs');
+  const elProdDesc = document.getElementById('kardexV2ProductoDesc');
+  const elTotalEnt = document.getElementById('kardexV2TotalEntradas');
+  const elValEnt = document.getElementById('kardexV2ValorEntradas');
+  const elTotalSal = document.getElementById('kardexV2TotalSalidas');
+  const elValSal = document.getElementById('kardexV2ValorSalidas');
+  const elSaldo = document.getElementById('kardexV2SaldoActual');
+  const elHeaderTitle = document.getElementById('kardexV2HeaderTitle');
+  const elBadgeCount = document.getElementById('kardexV2CountBadge');
+
+  if (elTotalMovs) elTotalMovs.textContent = r.total_movimientos || 0;
+  if (elProdDesc) elProdDesc.textContent = p ? `${p.codigo} - ${p.nombre}` : 'Todos los productos';
+  if (elTotalEnt) elTotalEnt.textContent = parseFloat(r.total_entradas || 0).toFixed(2);
+  if (elValEnt) elValEnt.textContent = `Costo Valuado: $${parseFloat(r.total_costo_entradas || 0).toFixed(2)}`;
+  if (elTotalSal) elTotalSal.textContent = parseFloat(r.total_salidas || 0).toFixed(2);
+  if (elValSal) elValSal.textContent = `Costo Valuado: $${parseFloat(r.total_costo_salidas || 0).toFixed(2)}`;
+  if (elSaldo) elSaldo.textContent = p ? parseFloat(r.stock_actual || 0).toFixed(2) : `${parseFloat(r.total_entradas - r.total_salidas || 0).toFixed(2)} (Neto)`;
+  if (elHeaderTitle) elHeaderTitle.textContent = p ? `${p.codigo} - ${p.nombre}` : 'Todos los Productos';
+  if (elBadgeCount) elBadgeCount.textContent = `${movs.length} movimiento(s)`;
+
+  const tbody = document.getElementById('kardexV2TableBody');
+  if (!tbody) return;
+
+  if (movs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="12" class="text-center py-8 text-slate-400 italic">No se encontraron movimientos en inventario_movimientos con los filtros seleccionados.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = movs.map(m => {
+    let badgeClass = 'bg-slate-100 text-slate-700';
+    if (m.tipo_movimiento === 'compra') badgeClass = 'bg-emerald-100 text-emerald-800 font-bold';
+    else if (m.tipo_movimiento === 'venta') badgeClass = 'bg-rose-100 text-rose-800 font-bold';
+    else if (m.tipo_movimiento === 'cargo_ajuste') badgeClass = 'bg-blue-100 text-blue-800 font-bold';
+    else if (m.tipo_movimiento.startsWith('descargo_')) badgeClass = 'bg-amber-100 text-amber-800 font-bold';
+    else if (m.tipo_movimiento === 'devolucion_cliente') badgeClass = 'bg-cyan-100 text-cyan-800 font-bold';
+    else if (m.tipo_movimiento === 'inventario_inicial') badgeClass = 'bg-indigo-100 text-indigo-800 font-bold';
+    else if (m.tipo_movimiento === 'APERTURA_MIGRACION') badgeClass = 'bg-purple-100 text-purple-800 font-bold';
+
+    const entStr = m.entrada > 0 ? parseFloat(m.entrada).toFixed(2) : '—';
+    const salStr = m.salida > 0 ? parseFloat(m.salida).toFixed(2) : '—';
+    const cUnitStr = `$${parseFloat(m.costo_unitario || 0).toFixed(2)}`;
+    const cTotStr = `$${parseFloat(m.costo_total || 0).toFixed(2)}`;
+
+    return `
+      <tr class="hover:bg-slate-50 transition border-b border-slate-100 text-slate-800 text-xs">
+        <td class="py-2 px-3 font-mono text-[11px]">${m.fecha}</td>
+        <td class="py-2 px-3 font-medium text-slate-900"><span class="text-[10px] text-slate-500 font-mono">${escapeHtml(m.producto_codigo)}</span><br>${escapeHtml(m.producto_nombre)}</td>
+        <td class="py-2 px-3"><span class="px-2 py-0.5 rounded text-[10px] ${badgeClass}">${escapeHtml(m.tipo_movimiento_label)}</span></td>
+        <td class="py-2 px-3 font-mono font-bold text-slate-800">${escapeHtml(m.documento_numero)}</td>
+        <td class="py-2 px-3 text-slate-600 max-w-xs truncate" title="${escapeHtml(m.motivo)}">${escapeHtml(m.motivo)}</td>
+        <td class="py-2 px-2 text-right bg-emerald-50/50 text-emerald-900 font-bold">${entStr}</td>
+        <td class="py-2 px-2 text-right bg-rose-50/50 text-rose-900 font-bold">${salStr}</td>
+        <td class="py-2 px-2 text-right text-slate-600 font-mono">${cUnitStr}</td>
+        <td class="py-2 px-2 text-right text-slate-900 font-mono font-semibold">${cTotStr}</td>
+        <td class="py-2 px-2 text-right text-slate-400 font-mono">${parseFloat(m.stock_anterior).toFixed(2)}</td>
+        <td class="py-2 px-2 text-right bg-teal-50/60 font-black text-teal-900 font-mono">${parseFloat(m.saldo).toFixed(2)}</td>
+        <td class="py-2 px-2 text-center">
+          <button type="button" onclick="verDetalleMovimientoKardex(${m.id})" class="text-teal-600 hover:text-teal-800 p-1 rounded transition" title="Ver detalle inmutable">
+            <i class="fa-solid fa-circle-info text-sm"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function verDetalleMovimientoKardex(movId) {
+  const mov = (AppState.kardexV2Data?.movimientos || []).find(m => m.id === movId);
+  if (!mov) return;
+
+  const container = document.getElementById('detalleMovimientoContenido');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 grid grid-cols-2 gap-2 text-xs">
+      <div><span class="text-slate-400 font-semibold block">ID Asiento:</span> <strong class="text-slate-900 font-mono">#${mov.id}</strong></div>
+      <div><span class="text-slate-400 font-semibold block">Fecha Operación:</span> <strong class="text-slate-900 font-mono">${mov.fecha}</strong></div>
+      <div class="col-span-2"><span class="text-slate-400 font-semibold block">Producto:</span> <strong class="text-slate-900">${escapeHtml(mov.producto_codigo)} - ${escapeHtml(mov.producto_nombre)}</strong></div>
+      <div><span class="text-slate-400 font-semibold block">Tipo Movimiento:</span> <strong class="text-teal-700">${escapeHtml(mov.tipo_movimiento_label)} (${mov.tipo_movimiento})</strong></div>
+      <div><span class="text-slate-400 font-semibold block">Sentido:</span> <strong class="${mov.sentido === 'ENTRADA' ? 'text-emerald-700' : 'text-rose-700'}">${mov.sentido}</strong></div>
+      <div><span class="text-slate-400 font-semibold block">Cantidad Afectada:</span> <strong class="text-slate-900">${parseFloat(mov.cantidad).toFixed(2)}</strong></div>
+      <div><span class="text-slate-400 font-semibold block">Costo Unitario Registrado:</span> <strong class="text-slate-900 font-mono">$${parseFloat(mov.costo_unitario).toFixed(2)}</strong></div>
+      <div><span class="text-slate-400 font-semibold block">Costo Total Valuado:</span> <strong class="text-slate-900 font-mono">$${parseFloat(mov.costo_total).toFixed(2)}</strong></div>
+      <div><span class="text-slate-400 font-semibold block">Documento Referencia:</span> <strong class="text-slate-900 font-mono">${escapeHtml(mov.documento_tipo)} ${escapeHtml(mov.documento_numero)}</strong></div>
+      <div class="col-span-2"><span class="text-slate-400 font-semibold block">Motivo / Observaciones:</span> <strong class="text-slate-700 font-normal">${escapeHtml(mov.motivo)}</strong></div>
+      <div class="col-span-2 bg-white p-2.5 rounded-lg border border-slate-200 grid grid-cols-2 gap-2 text-center">
+        <div><span class="text-[11px] text-slate-400 block">Stock Anterior</span><strong class="text-slate-700 text-sm font-mono">${parseFloat(mov.stock_anterior).toFixed(2)}</strong></div>
+        <div><span class="text-[11px] text-teal-600 block">Saldo Resultante (Stock Nuevo)</span><strong class="text-teal-800 text-sm font-mono font-black">${parseFloat(mov.stock_nuevo).toFixed(2)}</strong></div>
+      </div>
+      <div class="col-span-2 text-[10px] text-slate-400 pt-1">
+        Registrado por Usuario ID #${mov.usuario_id} | Timestamp Creación: ${mov.created_at || '—'}
+      </div>
+    </div>
+  `;
+
+  const modal = document.getElementById('modalDetalleMovimientoKardex');
+  if (modal) modal.classList.remove('hidden');
+
+  const accionesDiv = document.getElementById('kardexAjusteAcciones');
+  const esAjuste = String(mov.documento_tipo).toUpperCase() === 'INVENTARIO_AJUSTE' || String(mov.documento_tipo).toUpperCase() === 'AJUSTE' || String(mov.documento_numero || '').startsWith('AJU-');
+  if (accionesDiv) {
+    if (esAjuste && mov.documento_id) {
+      accionesDiv.classList.remove('hidden');
+      const btnPrint = document.getElementById('btnImprimirDesdeKardex');
+      if (btnPrint) {
+        btnPrint.onclick = () => abrirComprobanteAjuste(mov.documento_id);
+      }
+    } else {
+      accionesDiv.classList.add('hidden');
+    }
+  }
+}
+
+function cerrarModalDetalleMovimiento() {
+  const modal = document.getElementById('modalDetalleMovimientoKardex');
+  if (modal) modal.classList.add('hidden');
+}
+
+function imprimirKardexV2() {
+  window.print();
+}
+
+// ========================================================
+// FASE 2E-1: NÚCLEO TÉCNICO DE IMPRESIÓN DOCUMENTAL AISLADO
+// ========================================================
+const DocumentPrinter = {
+  status: 'idle', // 'idle' | 'printing' | 'cleanup'
+  _originalTitle: '',
+  _cleanupTimer: null,
+  _afterPrintHandler: null,
+
+  FORMATS: {
+    ticket80: {
+      key: 'ticket80',
+      name: 'Ticket Térmico 80mm',
+      cssPage: '@page { size: 80mm auto; margin: 2mm 1mm; }',
+      className: 'doc-ticket80'
+    },
+    letterPortrait: {
+      key: 'letterPortrait',
+      name: 'Carta Vertical (Portrait)',
+      cssPage: '@page { size: letter portrait; margin: 12mm; }',
+      className: 'doc-sheet doc-letterPortrait'
+    },
+    letterLandscape: {
+      key: 'letterLandscape',
+      name: 'Carta Horizontal (Landscape)',
+      cssPage: '@page { size: letter landscape; margin: 10mm; }',
+      className: 'doc-sheet doc-letterLandscape'
+    },
+    a4Portrait: {
+      key: 'a4Portrait',
+      name: 'A4 Vertical (Portrait)',
+      cssPage: '@page { size: A4 portrait; margin: 12mm; }',
+      className: 'doc-sheet doc-a4Portrait'
+    },
+    a4Landscape: {
+      key: 'a4Landscape',
+      name: 'A4 Horizontal (Landscape)',
+      cssPage: '@page { size: A4 landscape; margin: 10mm; }',
+      className: 'doc-sheet doc-a4Landscape'
+    }
+  },
+
+  normalizeFormat: function(fmt) {
+    if (!fmt) return 'letterPortrait';
+    const s = String(fmt).trim().toLowerCase().replace(/[-_\s]/g, '');
+    if (s === 'ticket80' || s === 'ticket' || s === 'pos' || s === '80mm') return 'ticket80';
+    if (s === 'letterlandscape' || s === 'cartahorizontal' || s === 'letterh') return 'letterLandscape';
+    if (s === 'letterportrait' || s === 'cartavertical' || s === 'carta' || s === 'letter') return 'letterPortrait';
+    if (s === 'a4landscape' || s === 'a4horizontal' || s === 'a4h') return 'a4Landscape';
+    if (s === 'a4portrait' || s === 'a4vertical' || s === 'a4') return 'a4Portrait';
+    return this.FORMATS[fmt] ? fmt : 'letterPortrait';
+  },
+
+  escape: function(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  },
+
+  getContainer: function() {
+    let container = document.getElementById('areaImpresionOficial');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'areaImpresionOficial';
+      container.className = 'hidden-on-screen';
+      container.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(container);
+    }
+    return container;
+  },
+
+  print: function(options) {
+    if (!options || typeof options !== 'object') {
+      console.error('[DocumentPrinter] Error: opciones no especificadas.');
+      return false;
+    }
+
+    if (this.status !== 'idle') {
+      console.warn('[DocumentPrinter] Impresión en curso o limpieza pendiente. Intento ignorado.');
+      return false;
+    }
+
+    this.status = 'printing';
+
+    const fmtKey = this.normalizeFormat(options.type || options.page || 'letterPortrait');
+    const formatConfig = this.FORMATS[fmtKey] || this.FORMATS.letterPortrait;
+
+    const container = this.getContainer();
+    const docTitle = options.title ? String(options.title).trim() : 'Documento';
+
+    // 1. Guardar título original y cambiarlo temporalmente para el PDF / Spooler
+    this._originalTitle = document.title;
+    try {
+      document.title = docTitle;
+    } catch (e) {}
+
+    // 2. Inyectar regla @page dinámica para garantizar el formato exacto en Chromium/Firefox
+    let pageStyleEl = document.getElementById('documentPrinterPageStyle');
+    if (!pageStyleEl) {
+      pageStyleEl = document.createElement('style');
+      pageStyleEl.id = 'documentPrinterPageStyle';
+      document.head.appendChild(pageStyleEl);
+    }
+    pageStyleEl.innerHTML = formatConfig.cssPage;
+
+    // 3. Preparar contenedor oficial de impresión
+    container.className = formatConfig.className;
+    container.innerHTML = options.html || '<p>Documento vacío</p>';
+
+    // 4. Activar aislamiento documental en el body
+    document.body.classList.add('document-printing');
+
+    // 5. Función de limpieza segura e idempotente
+    const self = this;
+    let cleaned = false;
+    const cleanup = function() {
+      if (cleaned) return;
+      cleaned = true;
+      self.status = 'cleanup';
+
+      if (self._cleanupTimer) {
+        clearTimeout(self._cleanupTimer);
+        self._cleanupTimer = null;
+      }
+
+      if (self._afterPrintHandler) {
+        window.removeEventListener('afterprint', self._afterPrintHandler);
+        self._afterPrintHandler = null;
+      }
+
+      // Desactivar clase de aislamiento
+      document.body.classList.remove('document-printing');
+
+      // Vaciar contenedor oficial
+      if (container) {
+        container.innerHTML = '';
+        container.className = 'hidden-on-screen';
+      }
+
+      // Remover estilo @page dinámico
+      if (pageStyleEl) {
+        if (typeof pageStyleEl.remove === 'function') {
+          pageStyleEl.remove();
+        } else if (pageStyleEl.parentNode) {
+          pageStyleEl.parentNode.removeChild(pageStyleEl);
+        }
+      }
+
+      // Restaurar título del documento
+      try {
+        document.title = self._originalTitle || 'Sistema de Control';
+      } catch (e) {}
+
+      self.status = 'idle';
+      console.log(`[DocumentPrinter] Ciclo de impresión finalizado (${fmtKey}). Estado restaurado.`);
+    };
+
+    this._afterPrintHandler = cleanup;
+    window.addEventListener('afterprint', cleanup, { once: true });
+
+    // Temporizador de respaldo por si afterprint no dispara (ej. navegadores antiguos o cierre forzado)
+    this._cleanupTimer = setTimeout(function() {
+      if (self.status !== 'idle') {
+        cleanup();
+      }
+    }, 15000);
+
+    // 6. Lanzar impresión tras permitir al DOM procesar los estilos
+    setTimeout(function() {
+      try {
+        window.print();
+      } catch (err) {
+        console.error('[DocumentPrinter] Error al invocar window.print():', err);
+        cleanup();
+      }
+    }, 50);
+
+    return true;
+  }
+};
+
+// Exponer globalmente para la aplicación
+window.DocumentPrinter = DocumentPrinter;
+
+// ========================================================
+// FASE 2E-1: FUNCIÓN DE PRUEBA SINTÉTICA (testPrintCore)
+// Invocable desde la consola del navegador para verificar
+// los 5 formatos de página sin alterar datos reales.
+// ========================================================
+window.testPrintCore = function(format) {
+  const fmtKey = DocumentPrinter.normalizeFormat(format || 'letterPortrait');
+  const fmtConfig = DocumentPrinter.FORMATS[fmtKey];
+
+  console.log(`[testPrintCore] Iniciando prueba sintética para formato: ${fmtKey} (${fmtConfig.name})...`);
+
+  let testHtml = '';
+
+  if (fmtKey === 'ticket80') {
+    testHtml = `
+      <div style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 8px; margin-bottom: 8px;">
+        <h2 style="margin: 0; font-size: 15px; font-weight: 900; text-transform: uppercase;">EMPRESA DE PRUEBA S.A.</h2>
+        <p style="margin: 2px 0; font-size: 10px;">RIF: J-99999999-9 &bull; Tel: +58 412 0000000</p>
+        <p style="margin: 2px 0; font-size: 10px;">Calle Ficticia Edif. Demo Piso 1</p>
+        <div style="margin-top: 6px; font-weight: bold; font-size: 12px; border: 1px solid #000; padding: 2px 4px; display: inline-block;">
+          TICKET PRUEBA #${Math.floor(1000 + Math.random() * 9000)}
+        </div>
+        <p style="margin: 4px 0 0 0; font-size: 9px; color: #333;">Fecha: ${new Date().toLocaleString('es-VE')}</p>
+      </div>
+
+      <div style="font-size: 10px; margin-bottom: 8px; border-bottom: 1px solid #000; padding-bottom: 6px;">
+        <div><strong>Cliente:</strong> CLIENTE SINTÉTICO DEMO</div>
+        <div><strong>Doc:</strong> V-99887766 &bull; <strong>Condición:</strong> CONTADO</div>
+      </div>
+
+      <table style="width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 8px;">
+        <thead>
+          <tr style="border-bottom: 1px solid #000;">
+            <th style="text-align: left; padding: 2px 0;">Cant</th>
+            <th style="text-align: left; padding: 2px 0;">Descripción</th>
+            <th style="text-align: right; padding: 2px 0;">P.U ($)</th>
+            <th style="text-align: right; padding: 2px 0;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding: 2px 0;">2.00</td>
+            <td style="padding: 2px 0;">Producto Sintético Alfa</td>
+            <td style="text-align: right; padding: 2px 0;">15.00</td>
+            <td style="text-align: right; padding: 2px 0;">30.00</td>
+          </tr>
+          <tr>
+            <td style="padding: 2px 0;">1.00</td>
+            <td style="padding: 2px 0;">Servicio de Prueba Beta</td>
+            <td style="text-align: right; padding: 2px 0;">45.00</td>
+            <td style="text-align: right; padding: 2px 0;">45.00</td>
+          </tr>
+          <tr>
+            <td style="padding: 2px 0;">3.00</td>
+            <td style="padding: 2px 0;">Insumo Sintético Gamma</td>
+            <td style="text-align: right; padding: 2px 0;">8.50</td>
+            <td style="text-align: right; padding: 2px 0;">25.50</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="border-top: 1px solid #000; padding-top: 6px; font-size: 10px; line-height: 1.4;">
+        <div style="display: flex; justify-content: space-between;">
+          <span>Subtotal:</span><strong>$100.50</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span>IVA (16%):</span><strong>$16.08</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: bold; border-top: 1px dashed #000; margin-top: 4px; padding-top: 4px;">
+          <span>TOTAL USD:</span><span>$116.58</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: #333;">
+          <span>Total en Bs (Tasa 45.00):</span><strong>5,246.10 Bs.</strong>
+        </div>
+      </div>
+
+      <div class="avoid-page-break" style="margin-top: 12px; text-align: center; font-size: 9px; color: #555; border-top: 1px dashed #999; padding-top: 6px;">
+        <p style="margin: 0;">*** PRUEBA DE NÚCLEO DE IMPRESIÓN (FASE 2E-1) ***</p>
+        <p style="margin: 2px 0;">Comprobante sintético sin validez comercial.</p>
+      </div>
+    `;
+  } else {
+    // Documento multipágina tipo Hoja (Carta o A4, Vertical u Horizontal)
+    const isLandscape = fmtKey.includes('Landscape');
+
+    let rowsHtml = '';
+    for (let i = 1; i <= 35; i++) {
+      rowsHtml += `
+        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 10px;">
+          <td style="padding: 5px 8px; font-family: monospace;">#00${i}</td>
+          <td style="padding: 5px 8px; font-weight: 600;">Ítem de Prueba Sintética N° ${i}</td>
+          <td style="padding: 5px 8px; color: #64748b;">Lote-DEMO-${100 + i}</td>
+          <td style="padding: 5px 8px; text-align: right; font-weight: bold;">${(i * 1.5).toFixed(2)}</td>
+          <td style="padding: 5px 8px; text-align: right;">$${(10.0 + i * 2.5).toFixed(2)}</td>
+          <td style="padding: 5px 8px; text-align: right; font-weight: bold;">$${((i * 1.5) * (10.0 + i * 2.5)).toFixed(2)}</td>
+          ${isLandscape ? `<td style="padding: 5px 8px; text-align: center; color: #0284c7;">Aprobado</td><td style="padding: 5px 8px; font-size: 9px; color: #94a3b8;">Verificado Ok</td>` : ''}
+        </tr>
+      `;
+    }
+
+    testHtml = `
+      <div style="border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+          <h1 style="margin: 0; font-size: 18px; font-weight: 900; color: #0f172a; text-transform: uppercase;">
+            CORPORACIÓN SINTÉTICA DEMO C.A.
+          </h1>
+          <p style="margin: 2px 0; font-size: 11px; color: #475569;">RIF: J-12345678-0 &bull; Dirección: Zona Industrial Norte Galpón 4</p>
+          <p style="margin: 2px 0; font-size: 11px; color: #475569;">Teléfono: +58 212 555-0000 &bull; Email: auditoria@empresa-demo.com</p>
+        </div>
+        <div style="text-align: right;">
+          <div style="display: inline-block; background: #0f172a; color: #ffffff; font-size: 10px; font-weight: bold; padding: 4px 10px; border-radius: 4px; text-transform: uppercase;">
+            REPORTE SINTÉTICO MULTIPÁGINA
+          </div>
+          <p style="margin: 4px 0 0 0; font-size: 10px; color: #64748b;"><strong>Formato:</strong> ${fmtConfig.name}</p>
+          <p style="margin: 2px 0 0 0; font-size: 10px; color: #64748b;"><strong>Emisión:</strong> ${new Date().toLocaleString('es-VE')}</p>
+        </div>
+      </div>
+
+      <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 12px; margin-bottom: 14px; font-size: 11px; display: grid; grid-template-columns: repeat(${isLandscape ? 4 : 3}, 1fr); gap: 8px;">
+        <div><strong style="color: #64748b;">Entorno de Prueba:</strong> FASE 2E-1 Núcleo</div>
+        <div><strong style="color: #64748b;">Total Registros:</strong> 35 filas de prueba</div>
+        <div><strong style="color: #64748b;">Objetivo:</strong> Repetición thead y salto limpio</div>
+        ${isLandscape ? '<div><strong style="color: #64748b;">Orientación:</strong> Horizontal (Landscape)</div>' : ''}
+      </div>
+
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 14px;">
+        <thead style="display: table-header-group; background: #0f172a; color: #ffffff;">
+          <tr style="font-size: 10px; text-transform: uppercase;">
+            <th style="padding: 6px 8px; text-align: left;">Cód</th>
+            <th style="padding: 6px 8px; text-align: left;">Descripción del Ítem</th>
+            <th style="padding: 6px 8px; text-align: left;">Lote</th>
+            <th style="padding: 6px 8px; text-align: right;">Cantidad</th>
+            <th style="padding: 6px 8px; text-align: right;">Costo ($)</th>
+            <th style="padding: 6px 8px; text-align: right;">Total ($)</th>
+            ${isLandscape ? '<th style="padding: 6px 8px; text-align: center;">Estado</th><th style="padding: 6px 8px; text-align: left;">Auditoría</th>' : ''}
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+
+      <div class="avoid-page-break" style="margin-top: 16px; border-top: 2px solid #0f172a; padding-top: 10px; display: flex; justify-content: space-between; align-items: flex-start; font-size: 11px;">
+        <div style="max-width: 50%;">
+          <p style="margin: 0; font-weight: bold; color: #0f172a;">NOTAS DE CERTIFICACIÓN DE PRUEBA:</p>
+          <p style="margin: 4px 0 0 0; font-size: 10px; color: #64748b; line-height: 1.3;">
+            Este documento sintético comprueba que las tablas multipágina repiten la cabecera &lt;thead&gt; al cambiar de hoja y que las firmas finales y totales no sufren cortes ni desbordes de scroll.
+          </p>
+        </div>
+        <div style="text-align: right; min-width: 220px;">
+          <div style="display: flex; justify-content: space-between; padding: 2px 0;">
+            <span style="color: #64748b;">Total Unidades:</span>
+            <strong>945.00</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding: 2px 0; border-top: 1px solid #cbd5e1; margin-top: 4px; font-size: 13px; font-weight: 900; color: #0f172a;">
+            <span>TOTAL SINTÉTICO:</span>
+            <span>$48,720.00</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="avoid-page-break" style="margin-top: 36px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; text-align: center; font-size: 10px; color: #475569;">
+        <div>
+          <div style="border-top: 1px solid #475569; width: 80%; margin: 0 auto; padding-top: 4px; font-weight: bold;">
+            RESPONSABLE DE EMISIÓN
+          </div>
+          <span>Operador Sistema</span>
+        </div>
+        <div>
+          <div style="border-top: 1px solid #475569; width: 80%; margin: 0 auto; padding-top: 4px; font-weight: bold;">
+            AUDITORÍA Y CONTROL
+          </div>
+          <span>Revisión Conforme</span>
+        </div>
+      </div>
+    `;
+  }
+
+  return DocumentPrinter.print({
+    type: fmtKey,
+    title: `Prueba Sintetica - ${fmtConfig.name}`,
+    html: testHtml
+  });
+};
+
+// ========================================================
+// FASE 2E-2: PLANTILLAS DOCUMENTALES (DocumentTemplates)
+// Separación entre lógica de presentación y motor de impresión
+// ========================================================
+const DocumentTemplates = {
+  // Factura en Formato Ticket Térmico 80mm
+  facturaTicket: function(f, config) {
+    if (!f) return '<p>Error: Datos de factura no disponibles.</p>';
+    const cfg = config || {};
+    const esc = DocumentPrinter.escape;
+    const isAnulada = String(f.estado).toLowerCase() === 'anulada';
+    const isCredito = String(f.tipo_venta).toLowerCase() === 'credito';
+
+    // 1. Marca de agua / Banner para Factura Anulada
+    let anuladaHtml = '';
+    if (isAnulada) {
+      anuladaHtml = `
+        <div style="border: 2px dashed #dc2626; background: #fef2f2; color: #dc2626; padding: 6px; text-align: center; font-weight: 900; font-size: 11px; margin-bottom: 6px;">
+          *** FACTURA ANULADA ***<br><span style="font-size: 9px; font-weight: normal;">SIN VALIDEZ FISCAL NI COMERCIAL</span>
+        </div>
+      `;
+    }
+
+    // 2. Encabezado de la Empresa
+    let headerHtml = `
+      <div class="doc-ticket-header" style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 6px;">
+        ${anuladaHtml}
+        <h2 style="margin: 0; font-size: 14px; font-weight: 900; text-transform: uppercase;">${esc(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h2>
+        ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 10px;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
+        ${cfg.telefono ? `<p style="margin: 2px 0; font-size: 10px;">Tel: ${esc(cfg.telefono)}</p>` : ''}
+        ${cfg.direccion ? `<p style="margin: 2px 0; font-size: 9px; color: #333;">${esc(cfg.direccion)}</p>` : ''}
+        <div style="margin: 4px 0; display: inline-block; border: 1px solid #000; padding: 2px 6px; font-weight: 900; font-size: 11px;">
+          FACTURA #${esc(f.numero_factura)}
+        </div>
+        <p style="margin: 2px 0 0 0; font-size: 9px; color: #444;">Fecha: ${typeof formatFecha === 'function' ? formatFecha(f.fecha) : esc(f.fecha)}</p>
+      </div>
+    `;
+
+    // 3. Datos del Cliente y Condición de Venta
+    let clientHtml = `
+      <div style="font-size: 10px; border-bottom: 1px dashed #000; padding-bottom: 5px; margin-bottom: 5px; line-height: 1.35;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Cliente:</span>
+          <strong>${esc(f.cliente_nombre || 'Consumidor Final')}</strong>
+        </div>
+        ${f.cliente_cedula ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #444;">Doc / RIF:</span>
+            <span>${esc(f.cliente_cedula)}</span>
+          </div>
+        ` : ''}
+        ${f.cliente_telefono ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #444;">Teléfono:</span>
+            <span>${esc(f.cliente_telefono)}</span>
+          </div>
+        ` : ''}
+        <div style="display: flex; justify-content: space-between; border-top: 1px dotted #ccc; margin-top: 3px; padding-top: 3px;">
+          <span style="color: #444;">Condición:</span>
+          <strong style="${isCredito ? 'color: #b45309;' : 'color: #047857;'}">${isCredito ? 'A CRÉDITO' : 'AL CONTADO'}</strong>
+        </div>
+        ${isCredito && f.fecha_vencimiento ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #444;">Vencimiento:</span>
+            <span>${typeof formatFecha === 'function' ? formatFecha(f.fecha_vencimiento) : esc(f.fecha_vencimiento)}</span>
+          </div>
+        ` : ''}
+        ${isCredito && f.saldo_pendiente !== undefined ? `
+          <div style="display: flex; justify-content: space-between; font-weight: bold; color: #b91c1c;">
+            <span>Saldo por Cobrar:</span>
+            <span>$${parseFloat(f.saldo_pendiente || 0).toFixed(2)}</span>
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    // 4. Detalle de Ítems
+    const detalles = f.detalles || f.items || [];
+    let itemsRows = '';
+    detalles.forEach(d => {
+      const nombre = esc(d.nombre || d.nombre_producto || 'Producto');
+      const codigo = d.codigo ? `[${esc(d.codigo)}] ` : '';
+      const imp = d.impuesto_tipo === 'gravado' ? '(G)' : '(E)';
+      const cant = parseFloat(d.cantidad || 0).toFixed(2);
+      const pu = parseFloat(d.precio_unitario || 0).toFixed(2);
+      const tot = parseFloat(d.total || 0).toFixed(2);
+
+      itemsRows += `
+        <tr style="border-bottom: 1px dotted #e5e7eb;">
+          <td style="padding: 3px 0; vertical-align: top;">${cant}</td>
+          <td style="padding: 3px 4px; vertical-align: top;">${codigo}${nombre} <small style="color: #666;">${imp}</small></td>
+          <td style="padding: 3px 0; text-align: right; vertical-align: top;">$${pu}</td>
+          <td style="padding: 3px 0; text-align: right; vertical-align: top; font-weight: bold;">$${tot}</td>
+        </tr>
+      `;
+    });
+
+    let itemsTableHtml = `
+      <table style="width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 6px;">
+        <thead>
+          <tr style="border-bottom: 1px solid #000; font-size: 9px; text-transform: uppercase;">
+            <th style="text-align: left; padding: 2px 0;">Cant</th>
+            <th style="text-align: left; padding: 2px 4px;">Descripción</th>
+            <th style="text-align: right; padding: 2px 0;">P.U</th>
+            <th style="text-align: right; padding: 2px 0;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsRows}
+        </tbody>
+      </table>
+    `;
+
+    // 5. Totales y Equivalencias
+    const subtotal = parseFloat(f.subtotal || 0).toFixed(2);
+    const iva = parseFloat(f.iva_total || 0).toFixed(2);
+    const totalUsd = parseFloat(f.total_usd || 0).toFixed(2);
+    const totalVes = parseFloat(f.total_ves || 0).toFixed(2);
+    const totalCop = Math.round(f.total_cop || 0).toLocaleString('es-CO');
+    const tasaVes = parseFloat(f.tasa_ves || 0).toFixed(2);
+    const tasaCop = Math.round(f.tasa_cop || 0).toLocaleString('es-CO');
+
+    let totalsHtml = `
+      <div style="border-top: 1px solid #000; padding-top: 5px; margin-bottom: 6px; font-size: 10px; line-height: 1.4;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Subtotal:</span>
+          <span>$${subtotal}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">IVA (16%):</span>
+          <span>$${iva}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 900; border-top: 1px dashed #000; margin-top: 3px; padding-top: 3px;">
+          <span>TOTAL USD:</span>
+          <span>$${totalUsd}</span>
+        </div>
+        ${parseFloat(totalVes) > 0 ? `
+          <div style="display: flex; justify-content: space-between; font-size: 9px; color: #333;">
+            <span>Total Bs (Tasa ${tasaVes}):</span>
+            <strong>${totalVes} Bs.</strong>
+          </div>
+        ` : ''}
+        ${parseFloat(f.total_cop || 0) > 0 ? `
+          <div style="display: flex; justify-content: space-between; font-size: 9px; color: #333;">
+            <span>Total COP (Tasa ${tasaCop}):</span>
+            <strong>${totalCop} COP</strong>
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    // 6. Desglose de Pagos
+    const pagos = f.pagos || [];
+    let paymentsRows = '';
+    if (pagos.length > 0) {
+      pagos.forEach(p => {
+        const metodo = esc(p.metodo || 'Pago');
+        const moneda = esc(p.moneda || 'USD');
+        const montoMoneda = parseFloat(p.monto_moneda || 0).toLocaleString('es-VE');
+        const eqUsd = parseFloat(p.equivalente_usd || 0).toFixed(2);
+        const ref = p.referencia ? ` (Ref: ${esc(p.referencia)})` : '';
+        paymentsRows += `
+          <div style="display: flex; justify-content: space-between; font-size: 9px; color: #333;">
+            <span>&bull; ${metodo} (${moneda}):</span>
+            <span><strong>${montoMoneda} ${moneda}</strong> (≈ $${eqUsd})${ref}</span>
+          </div>
+        `;
+      });
+    } else {
+      paymentsRows = `<div style="font-size: 9px; color: #666; font-style: italic;">Sin abono inicial / Total a crédito</div>`;
+    }
+
+    let paymentsHtml = `
+      <div style="border-top: 1px dotted #999; padding-top: 4px; margin-bottom: 6px;">
+        <span style="font-size: 9px; font-weight: bold; text-transform: uppercase; color: #444; display: block; margin-bottom: 2px;">Pagos Registrados:</span>
+        ${paymentsRows}
+      </div>
+    `;
+
+    // 7. Observaciones
+    let notasHtml = '';
+    if (f.notas && String(f.notas).trim()) {
+      notasHtml = `
+        <div style="border-top: 1px dotted #999; padding-top: 4px; margin-bottom: 6px; font-size: 9px; color: #333;">
+          <strong>Notas:</strong> ${esc(f.notas)}
+        </div>
+      `;
+    }
+
+    // 8. Pie de Ticket
+    let footerHtml = `
+      <div class="avoid-page-break" style="border-top: 1px dashed #000; padding-top: 6px; text-align: center; font-size: 9px; color: #555;">
+        <p style="margin: 0; font-weight: bold;">¡Gracias por su compra y confianza!</p>
+        <p style="margin: 2px 0 0 0;">Comprobante generado electrónicamente.</p>
+      </div>
+    `;
+
+    return `
+      <div class="doc-factura doc-factura-ticket">
+        ${headerHtml}
+        ${clientHtml}
+        ${itemsTableHtml}
+        ${totalsHtml}
+        ${paymentsHtml}
+        ${notasHtml}
+        ${footerHtml}
+      </div>
+    `;
+  },
+
+  // Factura Comercial en Hoja Completa (Carta / A4 Vertical)
+  facturaHoja: function(f, config, paperFormat) {
+    if (!f) return '<p>Error: Datos de factura no disponibles.</p>';
+    const cfg = config || {};
+    const esc = DocumentPrinter.escape;
+    const isAnulada = String(f.estado).toLowerCase() === 'anulada';
+    const isCredito = String(f.tipo_venta).toLowerCase() === 'credito';
+
+    // 1. Banner Anulada
+    let anuladaBanner = '';
+    if (isAnulada) {
+      anuladaBanner = `
+        <div class="doc-anulada-banner">
+          *** DOCUMENTO ANULADO &bull; SIN VALIDEZ FISCAL NI COMERCIAL ***
+        </div>
+      `;
+    }
+
+    // 2. Encabezado Corporativo
+    let headerHtml = `
+      <div class="doc-header">
+        <div style="max-width: 60%;">
+          <h1 class="doc-company-title">${esc(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h1>
+          ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 11px; font-weight: bold; color: #475569;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
+          ${cfg.direccion ? `<p style="margin: 2px 0; font-size: 11px; color: #64748b;">${esc(cfg.direccion)}</p>` : ''}
+          ${cfg.telefono ? `<p style="margin: 2px 0; font-size: 11px; color: #64748b;">Teléfono: ${esc(cfg.telefono)}</p>` : ''}
+        </div>
+        <div style="text-align: right;">
+          <div class="doc-invoice-badge">
+            <span style="font-size: 12px; font-weight: 800; letter-spacing: 1px; display: block;">FACTURA DE VENTA</span>
+            <span style="font-size: 15px; font-weight: 900; font-family: monospace;">N° ${esc(f.numero_factura)}</span>
+          </div>
+          <div style="margin-top: 6px; font-size: 10px; color: #475569; line-height: 1.4;">
+            <p style="margin: 0;"><strong>Fecha de Emisión:</strong> ${typeof formatFecha === 'function' ? formatFecha(f.fecha) : esc(f.fecha)}</p>
+            <p style="margin: 0;"><strong>Condición:</strong> <span style="font-weight: 800; ${isCredito ? 'color: #b45309;' : 'color: #047857;'}">${isCredito ? 'A CRÉDITO' : 'AL CONTADO'}</span></p>
+            ${isCredito && f.fecha_vencimiento ? `<p style="margin: 0;"><strong>Vencimiento:</strong> ${typeof formatFecha === 'function' ? formatFecha(f.fecha_vencimiento) : esc(f.fecha_vencimiento)}</p>` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 3. Ficha del Cliente
+    let clientCardHtml = `
+      <div class="doc-client-card">
+        <div>
+          <span style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #64748b; display: block; margin-bottom: 2px;">Cliente / Razón Social</span>
+          <strong style="font-size: 13px; color: #0f172a;">${esc(f.cliente_nombre || 'Consumidor Final')}</strong>
+          ${f.cliente_direccion ? `<p style="margin: 2px 0 0 0; font-size: 10px; color: #64748b;">${esc(f.cliente_direccion)}</p>` : ''}
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr; gap: 2px; font-size: 11px;">
+          <div><strong style="color: #64748b;">Cédula / RIF:</strong> <span style="font-family: monospace; font-weight: 600;">${esc(f.cliente_cedula || '-')}</span></div>
+          <div><strong style="color: #64748b;">Teléfono:</strong> <span>${esc(f.cliente_telefono || '-')}</span></div>
+          ${f.cliente_correo ? `<div><strong style="color: #64748b;">Correo:</strong> <span>${esc(f.cliente_correo)}</span></div>` : ''}
+        </div>
+      </div>
+    `;
+
+    // 4. Tabla de Ítems
+    const detalles = f.detalles || f.items || [];
+    let itemsRows = '';
+    detalles.forEach((d, idx) => {
+      const num = idx + 1;
+      const codigo = esc(d.codigo || '—');
+      const nombre = esc(d.nombre || d.nombre_producto || 'Producto');
+      const tipo = d.tipo === 'servicio' ? 'Servicio' : 'Producto';
+      const cant = parseFloat(d.cantidad || 0).toFixed(2);
+      const pu = parseFloat(d.precio_unitario || 0).toFixed(2);
+      const imp = d.impuesto_tipo === 'gravado' ? '16%' : 'Exento';
+      const tot = parseFloat(d.total || 0).toFixed(2);
+
+      itemsRows += `
+        <tr>
+          <td style="text-align: center; color: #64748b; font-family: monospace;">${num}</td>
+          <td style="font-family: monospace; font-weight: 600;">${codigo}</td>
+          <td><strong>${nombre}</strong></td>
+          <td style="text-align: center; color: #64748b; font-size: 10px;">${tipo}</td>
+          <td style="text-align: right; font-weight: 600;">${cant}</td>
+          <td style="text-align: right; font-family: monospace;">$${pu}</td>
+          <td style="text-align: center; font-size: 10px; color: ${d.impuesto_tipo === 'gravado' ? '#0f172a' : '#059669'};">${imp}</td>
+          <td style="text-align: right; font-family: monospace; font-weight: 800;">$${tot}</td>
+        </tr>
+      `;
+    });
+
+    let tableHtml = `
+      <table class="doc-table">
+        <thead>
+          <tr>
+            <th style="width: 5%; text-align: center;">#</th>
+            <th style="width: 15%; text-align: left;">Código</th>
+            <th style="width: 40%; text-align: left;">Descripción</th>
+            <th style="width: 10%; text-align: center;">Tipo</th>
+            <th style="width: 8%; text-align: right;">Cant</th>
+            <th style="width: 11%; text-align: right;">P. Unit ($)</th>
+            <th style="width: 8%; text-align: center;">IVA</th>
+            <th style="width: 13%; text-align: right;">Total ($)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsRows}
+        </tbody>
+      </table>
+    `;
+
+    // 5. Bloque inferior (Totales, Pagos y Notas)
+    const subtotal = parseFloat(f.subtotal || 0).toFixed(2);
+    const iva = parseFloat(f.iva_total || 0).toFixed(2);
+    const totalUsd = parseFloat(f.total_usd || 0).toFixed(2);
+    const totalVes = parseFloat(f.total_ves || 0).toFixed(2);
+    const totalCop = Math.round(f.total_cop || 0).toLocaleString('es-CO');
+    const tasaVes = parseFloat(f.tasa_ves || 0).toFixed(2);
+    const tasaCop = Math.round(f.tasa_cop || 0).toLocaleString('es-CO');
+
+    // Desglose de pagos
+    const pagos = f.pagos || [];
+    let paymentsRows = '';
+    if (pagos.length > 0) {
+      pagos.forEach(p => {
+        const metodo = esc(p.metodo || 'Pago');
+        const moneda = esc(p.moneda || 'USD');
+        const montoMoneda = parseFloat(p.monto_moneda || 0).toLocaleString('es-VE');
+        const eqUsd = parseFloat(p.equivalente_usd || 0).toFixed(2);
+        const ref = p.referencia ? ` (Ref: ${esc(p.referencia)})` : '';
+        paymentsRows += `
+          <div style="display: flex; justify-content: space-between; padding: 2px 0; font-size: 10px; color: #334155;">
+            <span>&bull; ${metodo} (${moneda}):</span>
+            <span><strong>${montoMoneda} ${moneda}</strong> (≈ $${eqUsd})${ref}</span>
+          </div>
+        `;
+      });
+    } else {
+      paymentsRows = `<div style="font-size: 10px; color: #64748b; font-style: italic;">Sin abono inicial registrado.</div>`;
+    }
+
+    let bottomGridHtml = `
+      <div class="avoid-page-break doc-bottom-grid">
+        <!-- Columna Izquierda: Pagos y Notas -->
+        <div>
+          <div style="border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; padding: 8px 12px; margin-bottom: 8px;">
+            <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: #475569; display: block; margin-bottom: 4px;">Desglose de Pagos / Abonos</span>
+            ${paymentsRows}
+            ${isCredito && f.saldo_pendiente !== undefined ? `
+              <div style="border-top: 1px solid #cbd5e1; margin-top: 4px; padding-top: 4px; display: flex; justify-content: space-between; font-weight: bold; color: #b91c1c; font-size: 11px;">
+                <span>Saldo Pendiente de Cobro:</span>
+                <span>$${parseFloat(f.saldo_pendiente || 0).toFixed(2)}</span>
+              </div>
+            ` : ''}
+          </div>
+
+          ${f.notas && String(f.notas).trim() ? `
+            <div style="border: 1px solid #e2e8f0; background: #ffffff; border-radius: 6px; padding: 6px 10px; font-size: 10px; color: #475569;">
+              <strong style="color: #0f172a;">Observaciones:</strong> ${esc(f.notas)}
+            </div>
+          ` : ''}
+        </div>
+
+        <!-- Columna Derecha: Totales y Equivalencias -->
+        <div>
+          <div class="doc-totals-box">
+            <div style="display: flex; justify-content: space-between; padding: 3px 0;">
+              <span style="color: #475569;">Subtotal Base:</span>
+              <strong style="font-family: monospace;">$${subtotal}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 3px 0;">
+              <span style="color: #475569;">IVA Total (16%):</span>
+              <strong style="font-family: monospace;">$${iva}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 6px 0; border-top: 2px solid #0f172a; margin-top: 4px; font-size: 14px; font-weight: 900; color: #0f172a;">
+              <span>TOTAL USD:</span>
+              <span style="font-family: monospace;">$${totalUsd}</span>
+            </div>
+            ${parseFloat(totalVes) > 0 ? `
+              <div style="display: flex; justify-content: space-between; padding: 2px 0; font-size: 10px; color: #334155; border-top: 1px dotted #cbd5e1; margin-top: 4px; padding-top: 4px;">
+                <span>Total en Bolívares (Tasa ${tasaVes}):</span>
+                <strong style="font-family: monospace;">${totalVes} Bs.</strong>
+              </div>
+            ` : ''}
+            ${parseFloat(f.total_cop || 0) > 0 ? `
+              <div style="display: flex; justify-content: space-between; padding: 2px 0; font-size: 10px; color: #334155;">
+                <span>Total en Pesos COP (Tasa ${tasaCop}):</span>
+                <strong style="font-family: monospace;">${totalCop} COP</strong>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 6. Firmas
+    let signaturesHtml = `
+      <div class="avoid-page-break doc-signatures">
+        <div>
+          <div style="border-top: 1px solid #475569; width: 75%; margin: 0 auto; padding-top: 4px; font-weight: bold;">
+            EMISOR / FACTURACIÓN
+          </div>
+          <span style="font-size: 9px; color: #64748b;">Firma y Sello Comercial</span>
+        </div>
+        <div>
+          <div style="border-top: 1px solid #475569; width: 75%; margin: 0 auto; padding-top: 4px; font-weight: bold;">
+            RECIBIDO CONFORME
+          </div>
+          <span style="font-size: 9px; color: #64748b;">Firma y Sello del Cliente</span>
+        </div>
+      </div>
+    `;
+
+    return `
+      <div class="doc-factura doc-factura-sheet">
+        ${anuladaBanner}
+        ${headerHtml}
+        ${clientCardHtml}
+        ${tableHtml}
+        ${bottomGridHtml}
+        ${signaturesHtml}
+      </div>
+    `;
+  },
+
+  facturaCarta: function(f, config) {
+    return this.facturaHoja(f, config, 'letterPortrait');
+  },
+
+  facturaA4: function(f, config) {
+    return this.facturaHoja(f, config, 'a4Portrait');
+  },
+
+  // ========================================================
+  // FASE 2E-3: PLANTILLAS PARA NOTA DE DEVOLUCIÓN DE CLIENTE
+  // ========================================================
+
+  // Nota de Devolución en Formato Ticket Térmico 80mm
+  devolucionTicket: function(dev, config) {
+    if (!dev) return '<p>Error: Datos de devolución no disponibles.</p>';
+    const cfg = config || {};
+    const esc = DocumentPrinter.escape;
+    const isTotal = String(dev.tipo_devolucion).toLowerCase() === 'total';
+    const tipoDevLabel = isTotal ? 'DEVOLUCIÓN TOTAL' : 'DEVOLUCIÓN PARCIAL';
+
+    // 1. Encabezado de la Empresa
+    let headerHtml = `
+      <div class="doc-ticket-header" style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 6px;">
+        <h2 style="margin: 0; font-size: 14px; font-weight: 900; text-transform: uppercase;">${esc(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h2>
+        ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 10px;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
+        ${cfg.telefono ? `<p style="margin: 2px 0; font-size: 10px;">Tel: ${esc(cfg.telefono)}</p>` : ''}
+        ${cfg.direccion ? `<p style="margin: 2px 0; font-size: 9px; color: #333;">${esc(cfg.direccion)}</p>` : ''}
+        <div style="margin: 4px 0; display: inline-block; border: 1px solid #000; padding: 2px 6px; font-weight: 900; font-size: 11px; background: #ecfeff;">
+          NOTA DE DEVOLUCIÓN #${esc(dev.numero_devolucion)}
+        </div>
+        <p style="margin: 2px 0 0 0; font-size: 9px; color: #444;">Fecha: ${typeof formatFecha === 'function' ? formatFecha(dev.fecha_emision) : esc(dev.fecha_emision)}</p>
+      </div>
+    `;
+
+    // 2. Referencia, Factura de Origen, Cliente y Motivo
+    const refFactura = dev.numero_factura ? `Factura #${esc(dev.numero_factura)}` : (dev.factura_id ? `Factura #FAC-${esc(dev.factura_id)}` : 'Devolución Libre / Manual');
+    let refHtml = `
+      <div style="font-size: 10px; border-bottom: 1px dashed #000; padding-bottom: 5px; margin-bottom: 5px; line-height: 1.35;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Tipo:</span>
+          <strong>${tipoDevLabel}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Factura Origen:</span>
+          <strong>${refFactura}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Cliente:</span>
+          <strong>${esc(dev.cliente_nombre || 'Consumidor Final')}</strong>
+        </div>
+        ${dev.cliente_cedula ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #444;">Doc / RIF:</span>
+            <span>${esc(dev.cliente_cedula)}</span>
+          </div>
+        ` : ''}
+        ${dev.cliente_telefono ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #444;">Teléfono:</span>
+            <span>${esc(dev.cliente_telefono)}</span>
+          </div>
+        ` : ''}
+        <div style="border-top: 1px dotted #ccc; margin-top: 3px; padding-top: 3px;">
+          <span style="color: #444; display: block; font-weight: bold;">Motivo Declarado:</span>
+          <span style="font-style: italic; color: #222;">${esc(dev.motivo || '-')}</span>
+        </div>
+      </div>
+    `;
+
+    // 3. Detalle de Ítems Devueltos
+    const items = dev.items || dev.detalles || [];
+    let itemsRows = '';
+    items.forEach(it => {
+      const cant = parseFloat(it.cantidad || 0).toFixed(2);
+      const nombre = esc(it.nombre || it.nombre_producto || 'Ítem Devuelto');
+      const codigo = it.codigo ? `[${esc(it.codigo)}] ` : '';
+      const pu = parseFloat(it.precio_unitario || 0).toFixed(2);
+      const tot = parseFloat(it.total || it.subtotal || 0).toFixed(2);
+
+      itemsRows += `
+        <tr style="border-bottom: 1px dotted #e5e7eb;">
+          <td style="padding: 3px 0; vertical-align: top;">${cant}</td>
+          <td style="padding: 3px 4px; vertical-align: top;">${codigo}${nombre}</td>
+          <td style="padding: 3px 0; text-align: right; vertical-align: top;">$${pu}</td>
+          <td style="padding: 3px 0; text-align: right; vertical-align: top; font-weight: bold;">$${tot}</td>
+        </tr>
+      `;
+    });
+
+    let itemsTableHtml = `
+      <table style="width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 6px;">
+        <thead>
+          <tr style="border-bottom: 1px solid #000; font-size: 9px; text-transform: uppercase;">
+            <th style="text-align: left; padding: 2px 0;">Cant</th>
+            <th style="text-align: left; padding: 2px 4px;">Descripción</th>
+            <th style="text-align: right; padding: 2px 0;">P.U</th>
+            <th style="text-align: right; padding: 2px 0;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsRows}
+        </tbody>
+      </table>
+    `;
+
+    // 4. Totales y Equivalencias Multimoneda
+    const subtotal = parseFloat(dev.subtotal_usd || 0).toFixed(2);
+    const iva = parseFloat(dev.iva_usd || 0).toFixed(2);
+    const totalUsd = parseFloat(dev.total_usd || 0).toFixed(2);
+    const totalVes = parseFloat(dev.total_ves || 0).toFixed(2);
+    const totalCop = Math.round(dev.total_cop || 0).toLocaleString('es-CO');
+    const tasaVes = parseFloat(dev.tasa_ves || 0).toFixed(2);
+    const tasaCop = Math.round(dev.tasa_cop || 0).toLocaleString('es-CO');
+
+    let totalsHtml = `
+      <div style="border-top: 1px solid #000; padding-top: 5px; margin-bottom: 6px; font-size: 10px; line-height: 1.4;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Subtotal Devuelto:</span>
+          <span>$${subtotal}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">IVA Reintegrado:</span>
+          <span>$${iva}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 900; border-top: 1px dashed #000; margin-top: 3px; padding-top: 3px; color: #0891b2;">
+          <span>TOTAL REEMBOLSADO:</span>
+          <span>$${totalUsd}</span>
+        </div>
+        ${parseFloat(totalVes) > 0 ? `
+          <div style="display: flex; justify-content: space-between; font-size: 9px; color: #333;">
+            <span>Equivalente Bs (Tasa ${tasaVes}):</span>
+            <strong>${totalVes} Bs.</strong>
+          </div>
+        ` : ''}
+        ${parseFloat(dev.total_cop || 0) > 0 ? `
+          <div style="display: flex; justify-content: space-between; font-size: 9px; color: #333;">
+            <span>Equivalente COP (Tasa ${tasaCop}):</span>
+            <strong>${totalCop} COP</strong>
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    // 5. Desglose de Compensación / Reembolso
+    const pagos = dev.pagos || [];
+    let paymentsRows = '';
+    if (pagos.length > 0) {
+      pagos.forEach(p => {
+        const metodo = esc(p.metodo || 'Reembolso');
+        const moneda = esc(p.moneda || 'USD');
+        const montoMoneda = p.moneda === 'COP'
+          ? Math.round(p.monto_moneda || 0).toLocaleString('es-CO')
+          : parseFloat(p.monto_moneda || 0).toFixed(2);
+        const ref = p.referencia ? ` (Ref: ${esc(p.referencia)})` : '';
+        paymentsRows += `
+          <div style="display: flex; justify-content: space-between; font-size: 9px; color: #333;">
+            <span>&bull; ${metodo} (${moneda}):</span>
+            <span><strong>${montoMoneda} ${moneda}</strong>${ref}</span>
+          </div>
+        `;
+      });
+    } else {
+      const metodoTxt = dev.metodo_reembolso ? esc(String(dev.metodo_reembolso).replace(/_/g, ' ').toUpperCase()) : 'EFECTIVO USD';
+      paymentsRows = `<div style="font-size: 9px; color: #333;"><strong>${metodoTxt}</strong></div>`;
+    }
+
+    let paymentsHtml = `
+      <div style="border-top: 1px dotted #999; padding-top: 4px; margin-bottom: 6px;">
+        <span style="font-size: 9px; font-weight: bold; text-transform: uppercase; color: #444; display: block; margin-bottom: 2px;">Compensación / Reembolso:</span>
+        ${paymentsRows}
+      </div>
+    `;
+
+    // 6. Observaciones / Notas
+    let notasHtml = '';
+    if (dev.notas && String(dev.notas).trim()) {
+      notasHtml = `
+        <div style="border-top: 1px dotted #999; padding-top: 4px; margin-bottom: 6px; font-size: 9px; color: #333;">
+          <strong>Notas:</strong> ${esc(dev.notas)}
+        </div>
+      `;
+    }
+
+    // 7. Firmas Compactas para Ticket
+    let footerSignaturesHtml = `
+      <div class="avoid-page-break" style="border-top: 1px dashed #000; padding-top: 8px; margin-top: 6px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; text-align: center; font-size: 8px; color: #333;">
+          <div>
+            <div style="border-top: 1px solid #000; margin: 0 4px; padding-top: 2px; font-weight: bold;">Firma Almacén / Caja</div>
+            <p style="margin: 1px 0 0 0;">Mercancía Recibida en Stock</p>
+          </div>
+          <div>
+            <div style="border-top: 1px solid #000; margin: 0 4px; padding-top: 2px; font-weight: bold;">Firma Cliente</div>
+            <p style="margin: 1px 0 0 0;">Reembolso Recibido Conforme</p>
+          </div>
+        </div>
+        <p style="margin: 6px 0 0 0; text-align: center; font-size: 8px; color: #666;">Comprobante de Devolución Oficial</p>
+      </div>
+    `;
+
+    return `
+      <div class="doc-devolucion doc-devolucion-ticket">
+        ${headerHtml}
+        ${refHtml}
+        ${itemsTableHtml}
+        ${totalsHtml}
+        ${paymentsHtml}
+        ${notasHtml}
+        ${footerSignaturesHtml}
+      </div>
+    `;
+  },
+
+  // Nota de Devolución en Hoja Completa (Carta / A4 Vertical)
+  devolucionHoja: function(dev, config, paperFormat) {
+    if (!dev) return '<p>Error: Datos de devolución no disponibles.</p>';
+    const cfg = config || {};
+    const esc = DocumentPrinter.escape;
+    const isTotal = String(dev.tipo_devolucion).toLowerCase() === 'total';
+    const tipoDevLabel = isTotal ? 'DEVOLUCIÓN TOTAL' : 'DEVOLUCIÓN PARCIAL';
+    const isA4 = paperFormat === 'a4Portrait';
+
+    // 1. Encabezado Corporativo
+    let headerHtml = `
+      <div class="doc-header">
+        <div style="max-width: 60%;">
+          <h1 class="doc-company-title">${esc(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h1>
+          ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 11px; font-weight: bold; color: #475569;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
+          ${cfg.direccion ? `<p style="margin: 2px 0; font-size: 11px; color: #64748b;">${esc(cfg.direccion)}</p>` : ''}
+          ${cfg.telefono ? `<p style="margin: 2px 0; font-size: 11px; color: #64748b;">Teléfono: ${esc(cfg.telefono)}</p>` : ''}
+        </div>
+        <div style="text-align: right;">
+          <div class="doc-devolucion-badge">
+            <span style="font-size: 12px; font-weight: 800; letter-spacing: 1px; display: block;">NOTA OFICIAL DE DEVOLUCIÓN</span>
+            <span style="font-size: 15px; font-weight: 900; font-family: monospace;">N° ${esc(dev.numero_devolucion)}</span>
+          </div>
+          <div style="margin-top: 6px; font-size: 10px; color: #475569; line-height: 1.4;">
+            <p style="margin: 0;"><strong>Fecha de Emisión:</strong> ${typeof formatFecha === 'function' ? formatFecha(dev.fecha_emision) : esc(dev.fecha_emision)}</p>
+            <p style="margin: 0;"><strong>Modalidad:</strong> <span style="font-weight: 800; color: #0891b2;">${tipoDevLabel}</span></p>
+            <p style="margin: 0;"><strong>Factura Relacionada:</strong> <span style="font-weight: 700; font-family: monospace;">${esc(dev.numero_factura || (dev.factura_id ? 'FAC-' + dev.factura_id : 'Manual / Libre'))}</span></p>
+            ${dev.fecha_factura_original ? `<p style="margin: 0;"><strong>Fecha Factura:</strong> ${typeof formatFecha === 'function' ? formatFecha(dev.fecha_factura_original) : esc(dev.fecha_factura_original)}</p>` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 2. Ficha de Cliente y Motivo
+    let clientCardHtml = `
+      <div class="doc-client-card">
+        <div>
+          <span style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #64748b; display: block; margin-bottom: 2px;">Cliente / Beneficiario del Reintegro</span>
+          <strong style="font-size: 13px; color: #0f172a;">${esc(dev.cliente_nombre || 'Consumidor Final')}</strong>
+          ${dev.cliente_direccion ? `<p style="margin: 2px 0 0 0; font-size: 10px; color: #64748b;">${esc(dev.cliente_direccion)}</p>` : ''}
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr; gap: 2px; font-size: 11px;">
+          <div><strong style="color: #64748b;">Cédula / RIF:</strong> <span style="font-family: monospace; font-weight: 600;">${esc(dev.cliente_cedula || '-')}</span></div>
+          <div><strong style="color: #64748b;">Teléfono:</strong> <span>${esc(dev.cliente_telefono || '-')}</span></div>
+          ${dev.cliente_correo ? `<div><strong style="color: #64748b;">Correo:</strong> <span>${esc(dev.cliente_correo)}</span></div>` : ''}
+          <div style="border-top: 1px dotted #cbd5e1; margin-top: 4px; padding-top: 3px;">
+            <strong style="color: #0891b2;">Motivo Declarado:</strong> <span style="font-style: italic;">${esc(dev.motivo || '-')}</span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 3. Tabla Completa de Ítems Devueltos
+    const items = dev.items || dev.detalles || [];
+    let itemsRows = '';
+    items.forEach((it, idx) => {
+      const num = idx + 1;
+      const codigo = esc(it.codigo || '—');
+      const nombre = esc(it.nombre || it.nombre_producto || 'Ítem Devuelto');
+      const tipo = it.tipo === 'servicio' ? 'Servicio' : 'Producto';
+      const cant = parseFloat(it.cantidad || 0).toFixed(2);
+      const pu = parseFloat(it.precio_unitario || 0).toFixed(2);
+      const imp = it.impuesto_tipo === 'gravado' ? '16%' : 'Exento';
+      const tot = parseFloat(it.total || it.subtotal || 0).toFixed(2);
+
+      itemsRows += `
+        <tr>
+          <td style="text-align: center; color: #64748b; font-family: monospace;">${num}</td>
+          <td style="font-family: monospace; font-weight: 600;">${codigo}</td>
+          <td><strong>${nombre}</strong></td>
+          <td style="text-align: center; color: #64748b; font-size: 10px;">${tipo}</td>
+          <td style="text-align: right; font-weight: 600;">${cant}</td>
+          <td style="text-align: right; font-family: monospace;">$${pu}</td>
+          <td style="text-align: center; font-size: 10px; color: ${it.impuesto_tipo === 'gravado' ? '#0f172a' : '#059669'};">${imp}</td>
+          <td style="text-align: right; font-family: monospace; font-weight: 800; color: #0891b2;">$${tot}</td>
+        </tr>
+      `;
+    });
+
+    let tableHtml = `
+      <table class="doc-table">
+        <thead>
+          <tr>
+            <th style="width: 5%; text-align: center;">#</th>
+            <th style="width: 15%; text-align: left;">Código</th>
+            <th style="width: 38%; text-align: left;">Descripción del Ítem Devuelto</th>
+            <th style="width: 10%; text-align: center;">Tipo</th>
+            <th style="width: 8%; text-align: right;">Cant</th>
+            <th style="width: 11%; text-align: right;">P. Unit ($)</th>
+            <th style="width: 8%; text-align: center;">IVA</th>
+            <th style="width: 13%; text-align: right;">Total ($)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsRows}
+        </tbody>
+      </table>
+    `;
+
+    // 4. Bloque Inferior: Desglose de Compensaciones y Totales
+    const subtotal = parseFloat(dev.subtotal_usd || 0).toFixed(2);
+    const iva = parseFloat(dev.iva_usd || 0).toFixed(2);
+    const totalUsd = parseFloat(dev.total_usd || 0).toFixed(2);
+    const totalVes = parseFloat(dev.total_ves || 0).toFixed(2);
+    const totalCop = Math.round(dev.total_cop || 0).toLocaleString('es-CO');
+    const tasaVes = parseFloat(dev.tasa_ves || 0).toFixed(2);
+    const tasaCop = Math.round(dev.tasa_cop || 0).toLocaleString('es-CO');
+
+    // Desglose de pagos / reembolsos
+    const pagos = dev.pagos || [];
+    let paymentsRows = '';
+    if (pagos.length > 0) {
+      pagos.forEach(p => {
+        const metodo = esc(p.metodo || 'Reembolso');
+        const moneda = esc(p.moneda || 'USD');
+        const montoMoneda = p.moneda === 'COP'
+          ? Math.round(p.monto_moneda || 0).toLocaleString('es-CO')
+          : parseFloat(p.monto_moneda || 0).toFixed(2);
+        const ref = p.referencia ? ` (Ref: ${esc(p.referencia)})` : '';
+        paymentsRows += `
+          <div style="display: flex; justify-content: space-between; padding: 2px 0; font-size: 10px; color: #334155;">
+            <span>&bull; ${metodo} (${moneda}):</span>
+            <span><strong>${montoMoneda} ${moneda}</strong>${ref}</span>
+          </div>
+        `;
+      });
+    } else {
+      const metodoTxt = dev.metodo_reembolso ? esc(String(dev.metodo_reembolso).replace(/_/g, ' ').toUpperCase()) : 'EFECTIVO USD';
+      paymentsRows = `<div style="font-size: 10px; color: #334155; font-weight: bold;">${metodoTxt}</div>`;
+    }
+
+    let bottomGridHtml = `
+      <div class="avoid-page-break doc-bottom-grid">
+        <!-- Columna Izquierda: Reembolsos y Observaciones -->
+        <div>
+          <div style="border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; padding: 8px 12px; margin-bottom: 8px;">
+            <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; color: #475569; display: block; margin-bottom: 4px;">Desglose de Compensación / Reembolso</span>
+            ${paymentsRows}
+          </div>
+
+          ${dev.notas && String(dev.notas).trim() ? `
+            <div style="border: 1px solid #e2e8f0; background: #ffffff; border-radius: 6px; padding: 6px 10px; font-size: 10px; color: #475569;">
+              <strong style="color: #0f172a;">Observaciones de Devolución:</strong> ${esc(dev.notas)}
+            </div>
+          ` : ''}
+        </div>
+
+        <!-- Columna Derecha: Totales y Equivalencias -->
+        <div>
+          <div class="doc-totals-box">
+            <div style="display: flex; justify-content: space-between; padding: 3px 0;">
+              <span style="color: #475569;">Subtotal Devuelto:</span>
+              <strong style="font-family: monospace;">$${subtotal}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 3px 0;">
+              <span style="color: #475569;">IVA Reintegrado:</span>
+              <strong style="font-family: monospace;">$${iva}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 6px 0; border-top: 2px solid #0891b2; margin-top: 4px; font-size: 14px; font-weight: 900; color: #0891b2;">
+              <span>TOTAL REEMBOLSADO:</span>
+              <span style="font-family: monospace;">$${totalUsd}</span>
+            </div>
+            ${parseFloat(totalVes) > 0 ? `
+              <div style="display: flex; justify-content: space-between; padding: 2px 0; font-size: 10px; color: #334155; border-top: 1px dotted #cbd5e1; margin-top: 4px; padding-top: 4px;">
+                <span>Equivalente Bs (Tasa ${tasaVes}):</span>
+                <strong style="font-family: monospace;">${totalVes} Bs.</strong>
+              </div>
+            ` : ''}
+            ${parseFloat(dev.total_cop || 0) > 0 ? `
+              <div style="display: flex; justify-content: space-between; padding: 2px 0; font-size: 10px; color: #334155;">
+                <span>Equivalente Pesos COP (Tasa ${tasaCop}):</span>
+                <strong style="font-family: monospace;">${totalCop} COP</strong>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 5. Firmas Legales
+    let signaturesHtml = `
+      <div class="avoid-page-break doc-signatures">
+        <div>
+          <div style="border-top: 1px solid #475569; width: 75%; margin: 0 auto; padding-top: 4px; font-weight: bold;">
+            RESPONSABLE ALMACÉN / CAJA
+          </div>
+          <span style="font-size: 9px; color: #64748b;">Mercancía Reingresada Conforme a Inventario</span>
+        </div>
+        <div>
+          <div style="border-top: 1px solid #475569; width: 75%; margin: 0 auto; padding-top: 4px; font-weight: bold;">
+            CLIENTE / BENEFICIARIO
+          </div>
+          <span style="font-size: 9px; color: #64748b;">Importe y Reembolso Recibido Conforme</span>
+        </div>
+      </div>
+    `;
+
+    return `
+      <div class="doc-devolucion doc-devolucion-sheet ${isA4 ? 'doc-a4-sheet' : ''}">
+        ${headerHtml}
+        ${clientCardHtml}
+        ${tableHtml}
+        ${bottomGridHtml}
+        ${signaturesHtml}
+      </div>
+    `;
+  },
+
+  devolucionCarta: function(dev, config) {
+    return this.devolucionHoja(dev, config, 'letterPortrait');
+  },
+
+  devolucionA4: function(dev, config) {
+    return this.devolucionHoja(dev, config, 'a4Portrait');
+  },
+
+  // ========================================================
+  // FASE 2E-3 (BLOQUE 2): PLANTILLAS PARA MOVIMIENTOS / AJUSTES
+  // ========================================================
+
+  // Movimiento de Inventario en Ticket Térmico 80mm
+  movimientoTicket: function(data, config) {
+    if (!data) return '<p>Error: Datos de movimiento no disponibles.</p>';
+    const cfg = config || {};
+    const esc = DocumentPrinter.escape;
+    const titulo = getTituloMovimientoInventario(data);
+    const sentido = (data.sentido || (data.tipo_ajuste === 'CARGO' ? 'ENTRADA' : 'SALIDA')).toUpperCase();
+    const detalles = data.detalles || data.productos || [];
+
+    // 1. Encabezado de la Empresa
+    let headerHtml = `
+      <div class="doc-ticket-header" style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 6px;">
+        <h2 style="margin: 0; font-size: 14px; font-weight: 900; text-transform: uppercase;">${esc(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h2>
+        ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 10px;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
+        ${cfg.telefono ? `<p style="margin: 2px 0; font-size: 10px;">Tel: ${esc(cfg.telefono)}</p>` : ''}
+        ${cfg.direccion ? `<p style="margin: 2px 0; font-size: 9px; color: #333;">${esc(cfg.direccion)}</p>` : ''}
+        <div style="margin: 4px 0; border: 1px solid #000; padding: 3px 6px; font-weight: 900; font-size: 10px; background: #f0fdfa;">
+          ${esc(titulo)}
+        </div>
+        <p style="margin: 2px 0 0 0; font-size: 11px; font-weight: 900; font-family: monospace;">N° ${esc(data.numero_ajuste || 'AJU')}</p>
+        <p style="margin: 2px 0 0 0; font-size: 9px; color: #444;">Fecha: ${typeof formatFecha === 'function' ? formatFecha(data.fecha) : esc(data.fecha)}</p>
+      </div>
+    `;
+
+    // 2. Metadatos, Sentido y Motivo
+    let refHtml = `
+      <div style="font-size: 10px; border-bottom: 1px dashed #000; padding-bottom: 5px; margin-bottom: 5px; line-height: 1.35;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Operación:</span>
+          <strong>${esc(data.tipo_ajuste || 'AJUSTE')}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Sentido Físico:</span>
+          <strong style="${sentido === 'ENTRADA' ? 'color: #047857;' : 'color: #b91c1c;'}">${sentido}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Responsable:</span>
+          <span>${esc(data.usuario_nombre || `Usuario #${data.usuario_id || 1}`)}</span>
+        </div>
+        <div style="border-top: 1px dotted #ccc; margin-top: 3px; padding-top: 3px;">
+          <span style="color: #444; display: block; font-weight: bold;">Motivo Declarado:</span>
+          <span style="font-style: italic; color: #222;">${esc(data.motivo || '-')}</span>
+        </div>
+        ${data.observaciones ? `
+          <div style="margin-top: 2px;">
+            <span style="color: #444; font-weight: bold;">Observaciones:</span>
+            <span style="color: #333;">${esc(data.observaciones)}</span>
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    // 3. Detalle de Ítems Afectados
+    let totalUnits = 0;
+    let totalValuation = 0;
+    let itemsRows = '';
+
+    detalles.forEach(d => {
+      const cant = parseFloat(d.cantidad || 0);
+      const cu = parseFloat(d.costo_unitario || 0);
+      const tot = parseFloat(d.costo_total !== undefined ? d.costo_total : (cant * cu));
+      totalUnits += cant;
+      totalValuation += tot;
+
+      const codigo = esc(d.producto_codigo || d.codigo || '—');
+      const nombre = esc(d.producto_nombre || d.nombre || 'Producto');
+      const stkAnt = parseFloat(d.stock_anterior || 0).toFixed(2);
+      const stkNue = parseFloat(d.stock_nuevo || 0).toFixed(2);
+
+      itemsRows += `
+        <tr style="border-bottom: 1px dotted #e5e7eb;">
+          <td style="padding: 3px 0; vertical-align: top;">
+            <div style="font-weight: bold;">[${codigo}] ${nombre}</div>
+            <div style="font-size: 8px; color: #555;">Stock: ${stkAnt} &rarr; ${stkNue}</div>
+          </td>
+          <td style="padding: 3px 2px; text-align: center; vertical-align: top; font-weight: bold;">${cant.toFixed(2)}</td>
+          <td style="padding: 3px 0; text-align: right; vertical-align: top;">$${cu.toFixed(2)}</td>
+          <td style="padding: 3px 0; text-align: right; vertical-align: top; font-weight: bold;">$${tot.toFixed(2)}</td>
+        </tr>
+      `;
+    });
+
+    let itemsTableHtml = `
+      <table style="width: 100%; border-collapse: collapse; font-size: 9px; margin-bottom: 6px;">
+        <thead>
+          <tr style="border-bottom: 1px solid #000; font-size: 8px; text-transform: uppercase;">
+            <th style="text-align: left; padding: 2px 0;">Ítem / Stock</th>
+            <th style="text-align: center; padding: 2px 2px;">Cant</th>
+            <th style="text-align: right; padding: 2px 0;">Costo U.</th>
+            <th style="text-align: right; padding: 2px 0;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsRows}
+        </tbody>
+      </table>
+    `;
+
+    // 4. Resumen
+    let summaryHtml = `
+      <div style="border-top: 1px solid #000; padding-top: 4px; margin-bottom: 6px; font-size: 10px; line-height: 1.4;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Total Líneas / Ítems:</span>
+          <strong>${detalles.length}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Total Unidades Afectadas:</span>
+          <strong>${totalUnits.toFixed(2)}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 900; border-top: 1px dashed #000; margin-top: 3px; padding-top: 3px; color: #0d9488;">
+          <span>VALORIZACIÓN TOTAL:</span>
+          <span>$${totalValuation.toFixed(2)}</span>
+        </div>
+      </div>
+    `;
+
+    // 5. Firmas Compactas
+    let signaturesHtml = `
+      <div class="avoid-page-break" style="border-top: 1px dashed #000; padding-top: 8px; margin-top: 6px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; text-align: center; font-size: 8px; color: #333;">
+          <div>
+            <div style="border-top: 1px solid #000; margin: 0 4px; padding-top: 2px; font-weight: bold;">RESPONSABLE</div>
+            <p style="margin: 1px 0 0 0;">Firma de Ejecución</p>
+          </div>
+          <div>
+            <div style="border-top: 1px solid #000; margin: 0 4px; padding-top: 2px; font-weight: bold;">AUTORIZADO POR</div>
+            <p style="margin: 1px 0 0 0;">Control de Auditoría</p>
+          </div>
+        </div>
+        <p style="margin: 6px 0 0 0; text-align: center; font-size: 8px; color: #666;">Comprobante Oficial de Inventario</p>
+      </div>
+    `;
+
+    return `
+      <div class="doc-movimiento doc-movimiento-ticket">
+        ${headerHtml}
+        ${refHtml}
+        ${itemsTableHtml}
+        ${summaryHtml}
+        ${signaturesHtml}
+      </div>
+    `;
+  },
+
+  // Movimiento de Inventario en Hoja Completa (Carta / A4 Vertical)
+  movimientoHoja: function(data, config, paperFormat) {
+    if (!data) return '<p>Error: Datos de movimiento no disponibles.</p>';
+    const cfg = config || {};
+    const esc = DocumentPrinter.escape;
+    const titulo = getTituloMovimientoInventario(data);
+    const sentido = (data.sentido || (data.tipo_ajuste === 'CARGO' ? 'ENTRADA' : 'SALIDA')).toUpperCase();
+    const isA4 = paperFormat === 'a4Portrait';
+    const detalles = data.detalles || data.productos || [];
+
+    // 1. Encabezado Corporativo
+    let headerHtml = `
+      <div class="doc-header">
+        <div style="max-width: 58%;">
+          <h1 class="doc-company-title">${esc(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h1>
+          ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 11px; font-weight: bold; color: #475569;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
+          ${cfg.direccion ? `<p style="margin: 2px 0; font-size: 11px; color: #64748b;">${esc(cfg.direccion)}</p>` : ''}
+          ${cfg.telefono ? `<p style="margin: 2px 0; font-size: 11px; color: #64748b;">Teléfono: ${esc(cfg.telefono)}</p>` : ''}
+        </div>
+        <div style="text-align: right; max-width: 42%;">
+          <div class="doc-movimiento-badge">
+            <span style="font-size: 11px; font-weight: 800; letter-spacing: 0.5px; display: block;">${esc(titulo)}</span>
+            <span style="font-size: 15px; font-weight: 900; font-family: monospace;">N° ${esc(data.numero_ajuste || 'AJU')}</span>
+          </div>
+          <div style="margin-top: 6px; font-size: 10px; color: #475569; line-height: 1.4;">
+            <p style="margin: 0;"><strong>Fecha de Operación:</strong> ${typeof formatFecha === 'function' ? formatFecha(data.fecha) : esc(data.fecha)}</p>
+            <p style="margin: 0;"><strong>Sentido:</strong> <span style="font-weight: 800; ${sentido === 'ENTRADA' ? 'color: #047857;' : 'color: #b91c1c;'}">${sentido}</span> &bull; <strong>Operación:</strong> ${esc(data.tipo_ajuste || 'AJUSTE')}</p>
+            <p style="margin: 0;"><strong>Responsable:</strong> <span>${esc(data.usuario_nombre || `Usuario #${data.usuario_id || 1}`)}</span></p>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 2. Ficha de Motivo y Justificación
+    let infoCardHtml = `
+      <div class="doc-info-card">
+        <div>
+          <span style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #64748b; display: block; margin-bottom: 2px;">Causal y Justificación Operativa</span>
+          <strong style="font-size: 12px; color: #0f172a;">${esc(data.motivo || 'Ajuste formal de inventario')}</strong>
+        </div>
+        <div>
+          <span style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #64748b; display: block; margin-bottom: 2px;">Observaciones / Notas de Auditoría</span>
+          <p style="margin: 0; font-size: 11px; color: #334155;">${esc(data.observaciones || 'Sin observaciones adicionales registradas.')}</p>
+        </div>
+      </div>
+    `;
+
+    // 3. Tabla Completa de Ítems Afectados
+    let totalUnits = 0;
+    let totalValuation = 0;
+    let itemsRows = '';
+
+    detalles.forEach((d, idx) => {
+      const num = idx + 1;
+      const cant = parseFloat(d.cantidad || 0);
+      const cu = parseFloat(d.costo_unitario || 0);
+      const tot = parseFloat(d.costo_total !== undefined ? d.costo_total : (cant * cu));
+      totalUnits += cant;
+      totalValuation += tot;
+
+      const codigo = esc(d.producto_codigo || d.codigo || '—');
+      const nombre = esc(d.producto_nombre || d.nombre || 'Producto');
+      const stkAnt = parseFloat(d.stock_anterior || 0).toFixed(2);
+      const stkNue = parseFloat(d.stock_nuevo || 0).toFixed(2);
+
+      itemsRows += `
+        <tr>
+          <td style="text-align: center; color: #64748b; font-family: monospace;">${num}</td>
+          <td style="font-family: monospace; font-weight: 600;">${codigo}</td>
+          <td><strong>${nombre}</strong>${d.motivo_detalle ? `<br><small style="color: #64748b; font-style: italic;">${esc(d.motivo_detalle)}</small>` : ''}</td>
+          <td style="text-align: right; font-weight: 700; font-family: monospace; ${sentido === 'ENTRADA' ? 'color: #047857;' : 'color: #b91c1c;'}">${sentido === 'ENTRADA' ? '+' : '-'}${cant.toFixed(2)}</td>
+          <td style="text-align: center; font-family: monospace; color: #475569;">${stkAnt}</td>
+          <td style="text-align: center; font-family: monospace; font-weight: 700; color: #0f172a;">${stkNue}</td>
+          <td style="text-align: right; font-family: monospace;">$${cu.toFixed(2)}</td>
+          <td style="text-align: right; font-family: monospace; font-weight: 800; color: #0f766e;">$${tot.toFixed(2)}</td>
+        </tr>
+      `;
+    });
+
+    let tableHtml = `
+      <table class="doc-table">
+        <thead>
+          <tr>
+            <th style="width: 4%; text-align: center;">#</th>
+            <th style="width: 14%; text-align: left;">Código</th>
+            <th style="width: 34%; text-align: left;">Descripción del Producto</th>
+            <th style="width: 10%; text-align: right;">Cant. (${sentido === 'ENTRADA' ? '+' : '-'})</th>
+            <th style="width: 10%; text-align: center;">Stock Ant.</th>
+            <th style="width: 10%; text-align: center;">Stock Nue.</th>
+            <th style="width: 9%; text-align: right;">Costo U. ($)</th>
+            <th style="width: 9%; text-align: right;">Valuación ($)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsRows}
+        </tbody>
+      </table>
+    `;
+
+    // 4. Bloque Inferior: Resumen Físico y Valuación
+    let bottomGridHtml = `
+      <div class="avoid-page-break doc-bottom-grid">
+        <!-- Columna Izquierda: Información de Trazabilidad -->
+        <div>
+          <div style="border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; padding: 8px 12px; font-size: 10px; color: #475569;">
+            <span style="font-weight: 800; text-transform: uppercase; display: block; margin-bottom: 2px;">Certificación de Trazabilidad</span>
+            <p style="margin: 0; line-height: 1.35;">
+              Asiento formal auditado en el libro mayor persistente <code>inventario_movimientos</code>.
+              Afectación física materializada en el catálogo de productos con respaldo de saldos anteriores y resultantes.
+            </p>
+          </div>
+        </div>
+
+        <!-- Columna Derecha: Totales Físicos y Valuación -->
+        <div>
+          <div class="doc-totals-box">
+            <div style="display: flex; justify-content: space-between; padding: 3px 0;">
+              <span style="color: #475569;">Líneas de Productos:</span>
+              <strong style="font-family: monospace;">${detalles.length}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 3px 0;">
+              <span style="color: #475569;">Total Unidades Afectadas:</span>
+              <strong style="font-family: monospace;">${totalUnits.toFixed(2)}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 6px 0; border-top: 2px solid #0d9488; margin-top: 4px; font-size: 13px; font-weight: 900; color: #0f766e;">
+              <span>VALUACIÓN TOTAL:</span>
+              <span style="font-family: monospace;">$${totalValuation.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 5. Firmas Formales
+    let signaturesHtml = `
+      <div class="avoid-page-break doc-signatures">
+        <div>
+          <div style="border-top: 1px solid #475569; width: 75%; margin: 0 auto; padding-top: 4px; font-weight: bold;">
+            RESPONSABLE DE INVENTARIO
+          </div>
+          <span style="font-size: 9px; color: #64748b;">Firma y Sello de Almacén / Ejecución</span>
+        </div>
+        <div>
+          <div style="border-top: 1px solid #475569; width: 75%; margin: 0 auto; padding-top: 4px; font-weight: bold;">
+            AUTORIZADO POR
+          </div>
+          <span style="font-size: 9px; color: #64748b;">Firma y Sello de Auditoría / Gerencia</span>
+        </div>
+      </div>
+    `;
+
+    return `
+      <div class="doc-movimiento doc-movimiento-sheet ${isA4 ? 'doc-a4-sheet doc-a4-movimiento' : ''}">
+        ${headerHtml}
+        ${infoCardHtml}
+        ${tableHtml}
+        ${bottomGridHtml}
+        ${signaturesHtml}
+      </div>
+    `;
+  },
+
+  movimientoCarta: function(data, config) {
+    return this.movimientoHoja(data, config, 'letterPortrait');
+  },
+
+  movimientoA4: function(data, config) {
+    return this.movimientoHoja(data, config, 'a4Portrait');
+  }
+};
+
+// ========================================================
+// DETERMINACIÓN DE TÍTULO DINÁMICO DE MOVIMIENTO DE INVENTARIO
+// ========================================================
+function getTituloMovimientoInventario(data) {
+  if (!data) return 'COMPROBANTE OFICIAL DE MOVIMIENTO DE INVENTARIO';
+  const tipoAju = String(data.tipo_ajuste || '').trim().toLowerCase();
+  const tipoMov = String(data.tipo_movimiento || '').trim().toLowerCase();
+  const motivo = String(data.motivo || '').trim().toLowerCase();
+  const all = `${tipoAju} ${tipoMov} ${motivo}`;
+
+  // 1. Inventario Inicial
+  if (all.includes('inicial') || all.includes('apertura')) {
+    return 'ACTA FORMAL DE INVENTARIO INICIAL';
+  }
+  // 2. Merma
+  if (all.includes('merma')) {
+    return 'COMPROBANTE DE DESCARGO POR MERMA OPERATIVA';
+  }
+  // 3. Vencimiento
+  if (all.includes('venc') || all.includes('caduc')) {
+    return 'ACTA DE DESINCORPORACIÓN POR VENCIMIENTO';
+  }
+  // 4. Rotura / Daño
+  if (all.includes('rotura') || all.includes('dano') || all.includes('daño') || all.includes('averia')) {
+    return 'COMPROBANTE DE DESCARGO POR ROTURA / DAÑO';
+  }
+  // 5. Uso Interno
+  if (all.includes('uso_interno') || all.includes('uso interno') || all.includes('consumo_interno') || all.includes('consumo interno')) {
+    return 'VALE DE SALIDA PARA CONSUMO INTERNO';
+  }
+  // 6. Cargo por Ajuste Positivo
+  if (tipoAju === 'cargo' || tipoMov === 'cargo' || tipoMov === 'cargo_ajuste' || (all.includes('cargo') && !all.includes('descargo'))) {
+    return 'COMPROBANTE OFICIAL DE CARGO POR AJUSTE POSITIVO';
+  }
+  // 7. Descargo genérico si no coincide con los anteriores
+  if (tipoAju === 'descargo' || tipoMov.startsWith('descargo') || all.includes('descargo')) {
+    return 'COMPROBANTE DE DESCARGO DE INVENTARIO';
+  }
+
+  return 'COMPROBANTE OFICIAL DE MOVIMIENTO DE INVENTARIO';
+}
+
+// ========================================================
+// CONTROLADOR DE COMPROBANTE DE AJUSTE DE INVENTARIO
+// ========================================================
+async function abrirComprobanteAjuste(ajusteId) {
+  try {
+    const res = await fetch(`/api/inventario/ajustes/${ajusteId}`);
+    if (!res.ok) {
+      alert('No se pudo cargar el comprobante del ajuste.');
+      return;
+    }
+    const ajuste = await res.json();
+    AppState.ultimoMovimientoInventario = ajuste;
+    AppState.ultimoAjusteInventario = ajuste;
+
+    const previewContainer = document.getElementById('previewComprobanteAjusteContenido');
+    if (previewContainer) {
+      const titulo = getTituloMovimientoInventario(ajuste);
+      const sentido = (ajuste.sentido || (ajuste.tipo_ajuste === 'CARGO' ? 'ENTRADA' : 'SALIDA')).toUpperCase();
+      const detalles = ajuste.detalles || [];
+      const totalUnits = detalles.reduce((sum, d) => sum + parseFloat(d.cantidad || 0), 0);
+      const totalCosto = detalles.reduce((sum, d) => sum + parseFloat(d.costo_total !== undefined ? d.costo_total : (d.cantidad * d.costo_unitario) || 0), 0);
+
+      previewContainer.innerHTML = `
+        <div class="border-b pb-2 flex justify-between items-start">
+          <div>
+            <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold ${sentido === 'ENTRADA' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}">
+              ${sentido} &bull; ${escapeHtml(ajuste.tipo_ajuste)}
+            </span>
+            <h4 class="font-bold text-sm text-slate-800 mt-1">${escapeHtml(titulo)}</h4>
+          </div>
+          <span class="font-mono font-black text-sm text-teal-800">${escapeHtml(ajuste.numero_ajuste)}</span>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-slate-600 text-[11px]">
+          <div><strong>Fecha:</strong> ${typeof formatFecha === 'function' ? formatFecha(ajuste.fecha) : escapeHtml(ajuste.fecha)}</div>
+          <div><strong>Operador ID:</strong> #${escapeHtml(ajuste.usuario_id || 1)}</div>
+          <div class="col-span-2"><strong>Motivo:</strong> ${escapeHtml(ajuste.motivo || '-')}</div>
+          ${ajuste.observaciones ? `<div class="col-span-2"><strong>Observaciones:</strong> ${escapeHtml(ajuste.observaciones)}</div>` : ''}
+        </div>
+        <div class="border-t pt-2">
+          <table class="w-full text-[11px] text-left">
+            <thead>
+              <tr class="border-b font-bold text-slate-700">
+                <th class="py-1">Producto</th>
+                <th class="py-1 text-right">Cant</th>
+                <th class="py-1 text-center">Stock Ant &rarr; Nue</th>
+                <th class="py-1 text-right">Valuación</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              ${detalles.map(d => `
+                <tr>
+                  <td class="py-1">
+                    <span class="font-bold text-slate-900">${escapeHtml(d.producto_nombre || d.nombre || 'Producto')}</span>
+                    ${d.producto_codigo ? `<span class="block text-[10px] text-slate-400 font-mono">${escapeHtml(d.producto_codigo)}</span>` : ''}
+                  </td>
+                  <td class="py-1 text-right font-mono font-bold">${parseFloat(d.cantidad || 0).toFixed(2)}</td>
+                  <td class="py-1 text-center font-mono text-[10px] text-slate-500">${parseFloat(d.stock_anterior || 0).toFixed(2)} &rarr; ${parseFloat(d.stock_nuevo || 0).toFixed(2)}</td>
+                  <td class="py-1 text-right font-mono font-bold">$${parseFloat(d.costo_total !== undefined ? d.costo_total : (d.cantidad * d.costo_unitario) || 0).toFixed(2)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="border-t pt-2 flex justify-between font-bold text-slate-800 text-xs">
+          <span>Total: ${detalles.length} ítem(s) &bull; ${totalUnits.toFixed(2)} unidades</span>
+          <span class="text-teal-700 font-mono text-sm">Valuación Total: $${totalCosto.toFixed(2)}</span>
+        </div>
+      `;
+    }
+
+    const modal = document.getElementById('modalComprobanteAjuste');
+    if (modal) modal.classList.remove('hidden');
+  } catch (err) {
+    console.error('Error al abrir comprobante de ajuste:', err);
+    alert('Error al visualizar comprobante: ' + err.message);
+  }
+}
+
+function cerrarModalComprobanteAjuste() {
+  const modal = document.getElementById('modalComprobanteAjuste');
+  if (modal) modal.classList.add('hidden');
+}
+
+async function abrirComprobanteDesdeKardex(ajusteId) {
+  if (!ajusteId) {
+    alert('No hay comprobante de ajuste asociado a este movimiento.');
+    return;
+  }
+  await abrirComprobanteAjuste(ajusteId);
+}
+
+// ========================================================
+// CONTROLADOR DE IMPRESIÓN DE MOVIMIENTO (DocumentPrinter)
+// ========================================================
+function imprimirMovimientoActual(formatoForzado) {
+  const data = AppState.ultimoMovimientoInventario || AppState.ultimoAjusteInventario;
+  if (!data) {
+    alert('No hay información de ajuste o movimiento cargada para imprimir.');
+    return false;
+  }
+
+  const select = document.getElementById('selectFormatoImpresionMovimiento');
+  const formato = formatoForzado || (select ? select.value : 'letterPortrait') || 'letterPortrait';
+  const cfg = AppState.config || {};
+
+  let htmlDoc = '';
+  let printType = 'letterPortrait';
+
+  if (formato === 'ticket80') {
+    htmlDoc = DocumentTemplates.movimientoTicket(data, cfg);
+    printType = 'ticket80';
+  } else if (formato === 'a4Portrait') {
+    htmlDoc = DocumentTemplates.movimientoA4(data, cfg);
+    printType = 'a4Portrait';
+  } else {
+    htmlDoc = DocumentTemplates.movimientoCarta(data, cfg);
+    printType = 'letterPortrait';
+  }
+
+  const numDoc = data.numero_ajuste || 'Ajuste';
+  return DocumentPrinter.print({
+    type: printType,
+    title: `Comprobante Movimiento ${numDoc}`,
+    html: htmlDoc
+  });
+}
+
+// ========================================================
+// CONTROLADOR DE IMPRESIÓN DE DEVOLUCIÓN (DocumentPrinter)
+// ========================================================
+function imprimirDevolucionActual(formatoForzado) {
+  const dev = AppState.ultimaDevolucionEmitida;
+  if (!dev) {
+    alert('No hay información de devolución cargada para imprimir.');
+    return false;
+  }
+
+  const select = document.getElementById('selectFormatoImpresionDevolucion');
+  const formato = formatoForzado || (select ? select.value : 'letterPortrait') || 'letterPortrait';
+  const cfg = AppState.config || {};
+
+  let htmlDoc = '';
+  let printType = 'letterPortrait';
+
+  if (formato === 'ticket80') {
+    htmlDoc = DocumentTemplates.devolucionTicket(dev, cfg);
+    printType = 'ticket80';
+  } else if (formato === 'a4Portrait') {
+    htmlDoc = DocumentTemplates.devolucionA4(dev, cfg);
+    printType = 'a4Portrait';
+  } else {
+    htmlDoc = DocumentTemplates.devolucionCarta(dev, cfg);
+    printType = 'letterPortrait';
+  }
+
+  const numDoc = dev.numero_devolucion || 'Devolucion';
+  return DocumentPrinter.print({
+    type: printType,
+    title: `Nota de Devolucion ${numDoc}`,
+    html: htmlDoc
+  });
+}
+
+// ========================================================
+// CONTROLADOR DE IMPRESIÓN DE FACTURA (DocumentPrinter)
+// ========================================================
+function imprimirFacturaActual(formatoForzado) {
+  const f = AppState.ultimaFacturaEmitida;
+  if (!f) {
+    alert('No hay información de factura cargada para imprimir.');
+    return false;
+  }
+
+  const select = document.getElementById('selectFormatoImpresionFactura');
+  const formato = formatoForzado || (select ? select.value : 'letterPortrait') || 'letterPortrait';
+  const cfg = AppState.config || {};
+
+  let htmlDoc = '';
+  let printType = 'letterPortrait';
+
+  if (formato === 'ticket80') {
+    htmlDoc = DocumentTemplates.facturaTicket(f, cfg);
+    printType = 'ticket80';
+  } else if (formato === 'a4Portrait') {
+    htmlDoc = DocumentTemplates.facturaA4(f, cfg);
+    printType = 'a4Portrait';
+  } else {
+    htmlDoc = DocumentTemplates.facturaCarta(f, cfg);
+    printType = 'letterPortrait';
+  }
+
+  const numDoc = f.numero_factura || 'Factura';
+  return DocumentPrinter.print({
+    type: printType,
+    title: `Factura ${numDoc}`,
+    html: htmlDoc
+  });
+}
+
+// Compatibilidad Legacy
+function imprimirFacturaLegacy() {
+  window.print();
+}
+
+window.AppState = AppState;
+window.DocumentTemplates = DocumentTemplates;
+window.imprimirFacturaActual = imprimirFacturaActual;
+window.imprimirFacturaLegacy = imprimirFacturaLegacy;
+window.imprimirDevolucionActual = imprimirDevolucionActual;
+window.imprimirTicketDevolucion = imprimirTicketDevolucion;
+window.imprimirMovimientoActual = imprimirMovimientoActual;
+window.abrirComprobanteAjuste = abrirComprobanteAjuste;
+window.cerrarModalComprobanteAjuste = cerrarModalComprobanteAjuste;
+window.abrirComprobanteDesdeKardex = abrirComprobanteDesdeKardex;
+window.getTituloMovimientoInventario = getTituloMovimientoInventario;
+window.verDetalleMovimientoKardex = verDetalleMovimientoKardex;
+window.cerrarModalDetalleMovimiento = cerrarModalDetalleMovimiento;

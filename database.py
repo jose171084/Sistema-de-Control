@@ -11,6 +11,8 @@ import urllib.error
 import threading
 import time
 import shutil
+import hashlib
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inventario.db")
@@ -233,6 +235,42 @@ def auditar_y_migrar_db(conn=None, cursor=None):
 
     # 4. CUENTAS POR PAGAR (CXP)
     add_col_if_missing("cuentas_por_pagar", "tipo_registro", "TEXT DEFAULT 'compra'")
+    add_col_if_missing("cuentas_por_pagar", "numero_control", "TEXT")
+    add_col_if_missing("cuentas_por_pagar", "impuesto_tipo", "TEXT DEFAULT 'exento'")
+    add_col_if_missing("cuentas_por_pagar", "base_imponible_usd", "REAL DEFAULT 0.0")
+    add_col_if_missing("cuentas_por_pagar", "iva_usd", "REAL DEFAULT 0.0")
+    add_col_if_missing("cuentas_por_pagar", "tasa_bcv", "REAL DEFAULT 0.0")
+    add_col_if_missing("cuentas_por_pagar", "base_imponible_ves", "REAL DEFAULT 0.0")
+    add_col_if_missing("cuentas_por_pagar", "iva_ves", "REAL DEFAULT 0.0")
+    add_col_if_missing("cuentas_por_pagar", "total_ves", "REAL DEFAULT 0.0")
+    add_col_if_missing("cuentas_por_pagar", "afecta_libro_compras", "INTEGER DEFAULT 0")
+
+    # 4.1 NOTAS DE AJUSTE COMERCIAL (CXC Y CXP)
+    try:
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notas_ajuste_comercial (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            modulo TEXT NOT NULL CHECK(modulo IN ('cxc', 'cxp')),
+            tercero_id INTEGER NOT NULL,
+            cuenta_id INTEGER,
+            tipo_nota TEXT NOT NULL CHECK(tipo_nota IN ('credito', 'debito')),
+            numero_nota TEXT NOT NULL,
+            fecha TEXT NOT NULL,
+            monto_usd REAL NOT NULL CHECK(monto_usd > 0),
+            tasa_bcv REAL NOT NULL DEFAULT 1.0,
+            monto_ves REAL NOT NULL DEFAULT 0.0,
+            efecto TEXT NOT NULL CHECK(efecto IN ('disminuye', 'incrementa')),
+            motivo TEXT NOT NULL,
+            numero_control TEXT,
+            afecta_libro_fiscal INTEGER DEFAULT 0,
+            usuario_id INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_notas_mod_tercero ON notas_ajuste_comercial(modulo, tercero_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_notas_cuenta ON notas_ajuste_comercial(cuenta_id)")
+    except Exception as e:
+        print(f"[MIGRACIÓN AVISO] Error creando tabla notas_ajuste_comercial: {e}")
 
     # 5. CONFIGURACION
     add_col_if_missing("configuracion", "tema_config", "TEXT")
@@ -279,6 +317,7 @@ def auditar_y_migrar_db(conn=None, cursor=None):
         documento_numero TEXT,
         motivo TEXT,
         usuario_id INTEGER,
+        documento_linea_id INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE RESTRICT
     )
@@ -334,6 +373,39 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajustes_fecha ON inventario_ajustes(fecha)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajuste_det_ajuste ON inventario_ajuste_detalles(ajuste_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajuste_det_prod ON inventario_ajuste_detalles(producto_id)")
+
+    # 8. MOTOR DE COSTO PROMEDIO PONDERADO (CPP) - FASE 2F-1B / 2F-2B / 2F-3B / 2F-4B
+    add_col_if_missing("productos", "costo_cpp", "REAL DEFAULT 0.0")
+    add_col_if_missing("inventario_movimientos", "documento_linea_id", "INTEGER")
+    add_col_if_missing("factura_detalles", "costo_unitario", "REAL")
+    add_col_if_missing("factura_detalles", "costo_total", "REAL")
+    add_col_if_missing("devolucion_detalles", "factura_detalle_id", "INTEGER")
+    add_col_if_missing("devolucion_detalles", "costo_unitario", "REAL")
+    add_col_if_missing("devolucion_detalles", "costo_total", "REAL")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dev_det_factura_det ON devolucion_detalles(factura_detalle_id)")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_saldos_apertura_cpp (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha_corte TEXT NOT NULL,
+        ultimo_movimiento_id_corte INTEGER NOT NULL,
+        producto_id INTEGER NOT NULL,
+        sku TEXT NOT NULL,
+        stock_apertura REAL NOT NULL,
+        costo_unitario_apertura REAL NOT NULL,
+        valor_apertura REAL NOT NULL,
+        moneda TEXT NOT NULL DEFAULT 'USD',
+        fuente_valor TEXT NOT NULL,
+        certificado_por TEXT NOT NULL,
+        certificado_at TEXT NOT NULL,
+        observacion TEXT,
+        checksum TEXT NOT NULL,
+        UNIQUE(fecha_corte, producto_id),
+        FOREIGN KEY (producto_id) REFERENCES productos(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_apertura_corte ON inventario_saldos_apertura_cpp(fecha_corte, producto_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_apertura_sku ON inventario_saldos_apertura_cpp(sku)")
 
     conn.commit()
 
@@ -405,6 +477,7 @@ def init_db():
         iva_monto REAL NOT NULL DEFAULT 0.0,
         precio_total REAL NOT NULL DEFAULT 0.0,
         costo REAL DEFAULT 0.0,
+        costo_cpp REAL DEFAULT 0.0,
         stock REAL DEFAULT 0.0,
         stock_minimo REAL DEFAULT 5.0,
         imagen TEXT,
@@ -528,6 +601,8 @@ def init_db():
         iva_unitario REAL NOT NULL,
         subtotal REAL NOT NULL,
         total REAL NOT NULL,
+        costo_unitario REAL,
+        costo_total REAL,
         FOREIGN KEY (factura_id) REFERENCES facturas(id) ON DELETE CASCADE,
         FOREIGN KEY (producto_id) REFERENCES productos(id)
     )
@@ -705,6 +780,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS devolucion_detalles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         devolucion_id INTEGER NOT NULL,
+        factura_detalle_id INTEGER,
         producto_id INTEGER,
         codigo TEXT,
         nombre_producto TEXT NOT NULL,
@@ -715,10 +791,14 @@ def init_db():
         iva_unitario REAL NOT NULL DEFAULT 0.0,
         subtotal REAL NOT NULL DEFAULT 0.0,
         total REAL NOT NULL DEFAULT 0.0,
+        costo_unitario REAL,
+        costo_total REAL,
         FOREIGN KEY (devolucion_id) REFERENCES devoluciones(id) ON DELETE CASCADE,
+        FOREIGN KEY (factura_detalle_id) REFERENCES factura_detalles(id),
         FOREIGN KEY (producto_id) REFERENCES productos(id)
     )
     """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dev_det_factura_det ON devolucion_detalles(factura_detalle_id)")
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS devolucion_pagos (
@@ -766,6 +846,7 @@ def init_db():
         documento_numero TEXT,
         motivo TEXT,
         usuario_id INTEGER,
+        documento_linea_id INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE RESTRICT
     )
@@ -824,6 +905,32 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajustes_fecha ON inventario_ajustes(fecha)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajuste_det_ajuste ON inventario_ajuste_detalles(ajuste_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajuste_det_prod ON inventario_ajuste_detalles(producto_id)")
+
+    # ==========================================
+    # TABLA DE APERTURA CERTIFICADA CPP (FASE 2F-1B)
+    # ==========================================
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS inventario_saldos_apertura_cpp (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha_corte TEXT NOT NULL,
+        ultimo_movimiento_id_corte INTEGER NOT NULL,
+        producto_id INTEGER NOT NULL,
+        sku TEXT NOT NULL,
+        stock_apertura REAL NOT NULL,
+        costo_unitario_apertura REAL NOT NULL,
+        valor_apertura REAL NOT NULL,
+        moneda TEXT NOT NULL DEFAULT 'USD',
+        fuente_valor TEXT NOT NULL,
+        certificado_por TEXT NOT NULL,
+        certificado_at TEXT NOT NULL,
+        observacion TEXT,
+        checksum TEXT NOT NULL,
+        UNIQUE(fecha_corte, producto_id),
+        FOREIGN KEY (producto_id) REFERENCES productos(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_apertura_corte ON inventario_saldos_apertura_cpp(fecha_corte, producto_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_apertura_sku ON inventario_saldos_apertura_cpp(sku)")
 
     # Sembrar configuración inicial si no existe
     cursor.execute("SELECT COUNT(*) FROM configuracion")
@@ -929,17 +1036,18 @@ def registrar_movimiento_inventario(
     documento_id,
     documento_numero=None,
     motivo=None,
-    usuario_id=1
+    usuario_id=1,
+    documento_linea_id=None
 ):
     """
-    Función central para registrar movimientos en el libro mayor persistente (FASE 2B).
+    Función central para registrar movimientos en el libro mayor persistente (FASE 2B / 2F-2B).
     - Valida producto y tipo (omite servicios según Regla 22).
     - Valida cantidad > 0.
     - Valida sentido ('ENTRADA' o 'SALIDA').
     - Valida tipo_movimiento.
-    - Idempotencia / Protección contra duplicados (Sección 8):
-      Si ya existe un movimiento idéntico para (documento_tipo, documento_id, producto_id, tipo_movimiento),
-      evita duplicidad y retorna el id existente.
+    - Idempotencia / Protección contra duplicados (Sección 8 / Fase 2F-2B):
+      Si viene documento_linea_id, valida exactitud por línea física de compra.
+      Si no viene, valida por (documento_tipo, documento_id, producto_id, tipo_movimiento).
     - Inserta el registro inmutable en inventario_movimientos.
     - No realiza commit directo: opera dentro de la transacción activa del llamador (Principio de Atomicidad).
     """
@@ -963,17 +1071,26 @@ def registrar_movimiento_inventario(
     tipos_validos = (
         'inventario_inicial', 'compra', 'venta', 
         'devolucion_cliente', 'devolucion_proveedor', 
-        'cargo_ajuste', 'descargo_merma', 'descargo_vencimiento', 
+        'cargo_ajuste', 'cargo_ajuste_sobrante', 'cargo_ajuste_hallazgo',
+        'sobrante_conteo', 'hallazgo_mercancia', 'tasacion_manual',
+        'descargo', 'descargo_ajuste',
+        'descargo_merma', 'descargo_vencimiento', 
         'descargo_rotura', 'descargo_uso_interno', 'APERTURA_MIGRACION'
     )
     if tipo_movimiento not in tipos_validos:
         raise ValueError(f"Tipo de movimiento inválido: {tipo_movimiento}")
 
-    # Protección contra duplicados (Sección 8)
-    cursor.execute("""
-        SELECT id FROM inventario_movimientos 
-        WHERE documento_tipo = ? AND documento_id = ? AND producto_id = ? AND tipo_movimiento = ?
-    """, (documento_tipo, documento_id, producto_id, tipo_movimiento))
+    # Protección contra duplicados (Sección 8 / Fase 2F-2B: soporte para múltiples líneas del mismo SKU)
+    if documento_linea_id is not None:
+        cursor.execute("""
+            SELECT id FROM inventario_movimientos 
+            WHERE documento_tipo = ? AND documento_id = ? AND producto_id = ? AND tipo_movimiento = ? AND documento_linea_id = ?
+        """, (documento_tipo, documento_id, producto_id, tipo_movimiento, documento_linea_id))
+    else:
+        cursor.execute("""
+            SELECT id FROM inventario_movimientos 
+            WHERE documento_tipo = ? AND documento_id = ? AND producto_id = ? AND tipo_movimiento = ?
+        """, (documento_tipo, documento_id, producto_id, tipo_movimiento))
     existente = cursor.fetchone()
     if existente:
         return existente[0]
@@ -988,12 +1105,14 @@ def registrar_movimiento_inventario(
         INSERT INTO inventario_movimientos (
             fecha, producto_id, tipo_movimiento, sentido, cantidad,
             costo_unitario, costo_total, stock_anterior, stock_nuevo,
-            documento_tipo, documento_id, documento_numero, motivo, usuario_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            documento_tipo, documento_id, documento_numero, motivo, usuario_id,
+            documento_linea_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         fec, producto_id, tipo_movimiento, sent, cant,
         c_unit, c_tot, stk_ant, stk_nue,
-        documento_tipo, documento_id, documento_numero, motivo, usuario_id
+        documento_tipo, documento_id, documento_numero, motivo, usuario_id,
+        documento_linea_id
     ))
     return cursor.lastrowid
 
@@ -1337,6 +1456,454 @@ def conciliar_inventario(conn=None, cursor=None):
         conn.close()
 
     return resumen
+
+# ========================================================
+# MOTOR DE COSTO PROMEDIO PONDERADO (CPP) - FASE 2F-1B
+# ========================================================
+
+class ErrorStockNegativo(ValueError):
+    """Excepción lanzada cuando una operación intenta producir stock físico < 0."""
+    pass
+
+class ErrorCostoHistoricoNoRecuperable(ValueError):
+    """Excepción lanzada cuando una devolución no puede recuperar el costo histórico original."""
+    pass
+
+class ErrorCantidadDevolucionExcedeDisponible(ValueError):
+    """Excepción lanzada cuando la cantidad solicitada para devolver excede la cantidad disponible de la venta original."""
+    pass
+
+class ErrorCancelacionCompraNoPermitida(ValueError):
+    """Excepción lanzada cuando una compra no puede anularse porque existen salidas o consumos posteriores."""
+    pass
+
+class ErrorMovimientoRetroactivoNoPermitido(ValueError):
+    """Excepción lanzada cuando una operación de inventario tiene fecha anterior al último movimiento del SKU."""
+    pass
+
+class ErrorInconsistenciaCPP(ValueError):
+    """Excepción lanzada cuando un producto tiene stock positivo pero costo_cpp nulo, cero o inválido."""
+    pass
+
+CPP_TIPOS_ENTRADA_PONDERADA = {
+    'compra',
+    'devolucion_cliente',
+    'cargo_ajuste_hallazgo',
+    'hallazgo_mercancia',
+    'tasacion_manual',
+    'produccion_interna',
+    'traspaso_entrada',
+    'inventario_inicial'
+}
+
+CPP_TIPOS_SALIDA = {
+    'venta',
+    'descargo',
+    'descargo_ajuste',
+    'descargo_merma',
+    'descargo_vencimiento',
+    'descargo_rotura',
+    'descargo_uso_interno'
+}
+
+CPP_TIPOS_ENTRADA_INVARIANTE = {
+    'sobrante_conteo',
+    'cargo_ajuste_sobrante'
+}
+
+def validar_stock_no_negativo(stock_actual, cantidad_salida):
+    """
+    Valida matemáticamente que una salida no produzca stock < 0.
+    Lanza ErrorStockNegativo si cantidad_salida > stock_actual.
+    """
+    stk = Decimal(str(stock_actual))
+    cant = Decimal(str(cantidad_salida))
+    if cant < Decimal("0"):
+        raise ValueError(f"La cantidad de salida no puede ser negativa: {cantidad_salida}")
+    if cant > stk:
+        raise ErrorStockNegativo(
+            f"STOCK_INSUFICIENTE: Salida solicitada ({cant}) supera existencia disponible ({stk}). Stock < 0 prohibido."
+        )
+    return True
+
+def reiniciar_cpp_si_stock_cero(stock_actual, costo_nueva_entrada):
+    """
+    Si el stock actual es exactamente 0, el nuevo ingreso establece el CPP directamente al costo de entrada.
+    Si stock_actual < 0, lanza ErrorStockNegativo (bloqueo estricto).
+    Si stock_actual > 0, retorna None para ejecutar ponderación.
+    """
+    stk = Decimal(str(stock_actual))
+    if stk < Decimal("0"):
+        raise ErrorStockNegativo(f"STOCK_NEGATIVO: Imposible operar con stock físico negativo ({stk}). Stock < 0 prohibido.")
+    if stk == Decimal("0"):
+        c_ent = Decimal(str(costo_nueva_entrada)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        return float(c_ent)
+    return None
+
+def calcular_cpp_entrada(stock_anterior, cpp_anterior, cantidad_entrada, costo_entrada):
+    """
+    Cálculo matemático puro de entrada ponderada para motor CPP (Fase 2F-2B).
+    Máquina de 4 estados:
+        1. stock_anterior < 0: ERROR -> ErrorStockNegativo (bloqueo estricto).
+        2. stock_anterior == 0: CPP_nuevo = costo_entrada (inicio limpio).
+        3. stock_anterior > 0 y cpp_anterior > 0:
+            CPP_nuevo = ((stock_anterior * cpp_anterior) + (cantidad_entrada * costo_entrada)) / (stock_anterior + cantidad_entrada)
+        4. stock_anterior > 0 y (cpp_anterior is None o cpp_anterior <= 0):
+            ERROR -> ValueError/ErrorInconsistenciaCPP (bloqueo estricto; prohibido fallback a productos.costo).
+    Utiliza Decimal en memoria con precisión y redondeo ROUND_HALF_UP a 4 decimales.
+    """
+    stk_ant = Decimal(str(stock_anterior))
+    cant_ent = Decimal(str(cantidad_entrada))
+    costo_ent = Decimal(str(costo_entrada))
+
+    if cant_ent <= Decimal("0"):
+        raise ValueError(f"La cantidad de entrada debe ser mayor a 0, recibido: {cantidad_entrada}")
+    if costo_ent < Decimal("0"):
+        raise ValueError(f"El costo de entrada no puede ser negativo, recibido: {costo_entrada}")
+
+    if stk_ant < Decimal("0"):
+        raise ErrorStockNegativo(
+            f"STOCK_NEGATIVO: Stock anterior no puede ser negativo ({stk_ant}). Operación bloqueada."
+        )
+
+    if stk_ant == Decimal("0"):
+        nuevo_cpp = costo_ent.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        nuevo_stk = cant_ent.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        nuevo_valor = (cant_ent * costo_ent).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        valor_entrada = nuevo_valor
+    else:
+        # stk_ant > 0
+        if cpp_anterior is None or Decimal(str(cpp_anterior)) <= Decimal("0"):
+            raise ErrorInconsistenciaCPP(
+                f"INCONSISTENCIA_CPP: Producto con stock positivo ({stk_ant}) pero costo_cpp inválido ({cpp_anterior}). "
+                "Operación bloqueada. Prohibido usar productos.costo como sustituto."
+            )
+        cpp_ant = Decimal(str(cpp_anterior))
+        valor_ant = stk_ant * cpp_ant
+        valor_ent = cant_ent * costo_ent
+        valor_nuevo_calc = valor_ant + valor_ent
+        nuevo_stk_calc = stk_ant + cant_ent
+        nuevo_cpp = (valor_nuevo_calc / nuevo_stk_calc).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        nuevo_stk = nuevo_stk_calc.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        nuevo_valor = (nuevo_stk * nuevo_cpp).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        valor_entrada = valor_ent.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+    return {
+        "stock_nuevo": float(nuevo_stk),
+        "cpp_nuevo": float(nuevo_cpp),
+        "valor_nuevo": float(nuevo_valor),
+        "valor_entrada": float(valor_entrada)
+    }
+
+def validar_movimiento_no_retroactivo(cursor, producto_id, fecha_movimiento):
+    """
+    Valida que la fecha del movimiento no sea anterior al último movimiento registrado
+    para el producto_id. Lanza ErrorMovimientoRetroactivoNoPermitido si viola la secuencia temporal.
+    """
+    if not fecha_movimiento:
+        return True
+    cursor.execute("""
+        SELECT fecha, id FROM inventario_movimientos
+        WHERE producto_id = ?
+        ORDER BY fecha DESC, id DESC
+        LIMIT 1
+    """, (producto_id,))
+    row = cursor.fetchone()
+    if row:
+        ultima_fecha = row["fecha"] if isinstance(row, sqlite3.Row) else row[0]
+        if str(fecha_movimiento) < str(ultima_fecha):
+            raise ErrorMovimientoRetroactivoNoPermitido(
+                f"MOVIMIENTO_RETROACTIVO_BLOQUEADO: La fecha del movimiento ({fecha_movimiento}) "
+                f"es anterior al último movimiento registrado ({ultima_fecha}) para el producto ID {producto_id}."
+            )
+    return True
+
+def calcular_valor_salida_cpp(cantidad_salida, cpp_actual, stock_actual=None):
+    """
+    Cálculo matemático puro de salida bajo motor CPP.
+    La salida NO modifica el costo unitario promedio (invariante).
+    Valor_salida = cantidad_salida * cpp_actual.
+    """
+    cant_sal = Decimal(str(cantidad_salida))
+    cpp_act = Decimal(str(cpp_actual or 0.0))
+
+    if cant_sal <= Decimal("0"):
+        raise ValueError(f"La cantidad de salida debe ser mayor a 0, recibido: {cantidad_salida}")
+
+    if stock_actual is not None:
+        validar_stock_no_negativo(stock_actual, cantidad_salida)
+        stk_nue = (Decimal(str(stock_actual)) - cant_sal).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    else:
+        stk_nue = None
+
+    valor_salida = (cant_sal * cpp_act).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+    res = {
+        "cantidad_salida": float(cant_sal),
+        "costo_unitario": float(cpp_act.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
+        "valor_salida": float(valor_salida),
+        "cpp_nuevo": float(cpp_act.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
+    }
+    if stk_nue is not None:
+        res["stock_nuevo"] = float(stk_nue)
+        res["valor_remanente"] = float((stk_nue * cpp_act).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
+    return res
+
+def calcular_valor_apertura(stock_apertura, costo_unitario_apertura):
+    """
+    Calcula el valor inicial de apertura: stock * costo_unitario.
+    """
+    stk = Decimal(str(stock_apertura)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    c_u = Decimal(str(costo_unitario_apertura)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    return float((stk * c_u).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
+
+def calcular_checksum_apertura(sku, stock_apertura, costo_unitario_apertura, valor_apertura, fecha_corte, ultimo_movimiento_id_corte):
+    """
+    Calcula el hash SHA-256 determinístico para la tupla de apertura CPP.
+    Formato canónico de serialización UTF-8:
+    '{sku}|{stock:.4f}|{costo:.4f}|{valor:.4f}|{fecha_corte}|{ultimo_movimiento_id_corte}'
+    """
+    stk = Decimal(str(stock_apertura)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    c_u = Decimal(str(costo_unitario_apertura)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    val = Decimal(str(valor_apertura)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    fec = str(fecha_corte).strip()
+    mid = int(ultimo_movimiento_id_corte)
+    
+    canonical_str = f"{str(sku).strip().upper()}|{stk:.4f}|{c_u:.4f}|{val:.4f}|{fec}|{mid}"
+    return hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
+
+def validar_apertura_cpp(producto_dict, stock_esperado, costo_apertura, fecha_corte="2026-10-23 23:59:59", ultimo_mov_id=108):
+    """
+    Valida la coherencia de datos previa a la certificación de apertura.
+    """
+    sku = producto_dict.get("codigo", "").strip().upper()
+    stk_act = float(producto_dict.get("stock", 0.0))
+    stk_esp = float(stock_esperado)
+    costo_ap = float(costo_apertura)
+
+    if abs(stk_act - stk_esp) > 0.0001:
+        return {
+            "valido": False,
+            "error": f"Discrepancia en stock para {sku}: actual en DB={stk_act}, esperado={stk_esp}"
+        }
+
+    if costo_ap <= 0.0:
+        return {
+            "valido": False,
+            "error": f"Costo de apertura inválido para {sku}: {costo_ap} (debe ser > 0)"
+        }
+
+    val_calc = calcular_valor_apertura(stk_esp, costo_ap)
+    chk = calcular_checksum_apertura(sku, stk_esp, costo_ap, val_calc, fecha_corte, ultimo_mov_id)
+
+    return {
+        "valido": True,
+        "sku": sku,
+        "stock": stk_esp,
+        "costo_unitario": costo_ap,
+        "valor": val_calc,
+        "checksum": chk
+    }
+
+def certificar_apertura_cpp(conn=None, cursor=None, certificado_por="FASE_2F_1B_CERTIFICADOR",
+                           fecha_corte="2026-10-23 23:59:59", ultimo_mov_id=108,
+                           observacion="Certificación formal de saldo inicial para motor CPP (Fase 2F-1B)"):
+    """
+    Registra de forma controlada y certificada los saldos de apertura CPP aprobados para los 5 productos.
+    Actualiza productos.costo_cpp exclusivamente dentro de este flujo certificado.
+    Es idempotente: si ya fue certificado para esta fecha_corte, valida checksums y retorna estado existente.
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    if cursor is None:
+        cursor = conn.cursor()
+
+    # Asegurar que la tabla y columna existan
+    auditar_y_migrar_db(conn, cursor)
+
+    # Definición formal de los 5 productos aprobados
+    aperturas_aprobadas = [
+        {"sku": "HAR008", "stock": 1733.0, "costo": 29.0, "fuente": "FACTURA_100_Y_CATALOGO_CERTIFICADO"},
+        {"sku": "HARPIZZ", "stock": 860.0, "costo": 29.0, "fuente": "RESOLUCION_CERTIFICACION_CONTABLE_2F"},
+        {"sku": "HAR010", "stock": 860.0, "costo": 100.0, "fuente": "RESOLUCION_CERTIFICACION_CONTABLE_2F"},
+        {"sku": "HARRESP", "stock": 500.0, "costo": 5.0, "fuente": "RESOLUCION_CERTIFICACION_CONTABLE_2F"},
+        {"sku": "HARIESPOST", "stock": 501.0, "costo": 95.0, "fuente": "RESOLUCION_CERTIFICACION_CONTABLE_2F"}
+    ]
+
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    registros_certificados = []
+    total_stock = 0.0
+    total_valor = 0.0
+
+    # Verificar si ya existe certificación previa completa para este corte
+    cursor.execute("""
+        SELECT count(*) FROM inventario_saldos_apertura_cpp WHERE fecha_corte = ?
+    """, (fecha_corte,))
+    count_previo = cursor.fetchone()[0]
+    if count_previo == len(aperturas_aprobadas):
+        cursor.execute("""
+            SELECT producto_id, sku, stock_apertura, costo_unitario_apertura, valor_apertura, checksum
+            FROM inventario_saldos_apertura_cpp WHERE fecha_corte = ? ORDER BY producto_id ASC
+        """, (fecha_corte,))
+        filas = cursor.fetchall()
+        for f in filas:
+            chk_esperado = calcular_checksum_apertura(f["sku"], f["stock_apertura"], f["costo_unitario_apertura"], f["valor_apertura"], fecha_corte, ultimo_mov_id)
+            if f["checksum"] != chk_esperado:
+                raise ValueError(f"CRÍTICO: Checksum corrupto en apertura para SKU {f['sku']}")
+            total_stock += float(f["stock_apertura"])
+            total_valor += float(f["valor_apertura"])
+            registros_certificados.append(dict(f))
+
+        res = {
+            "estado": "YA_CERTIFICADO_PREVIAMENTE",
+            "fecha_corte": fecha_corte,
+            "ultimo_movimiento_id_corte": ultimo_mov_id,
+            "total_productos": len(registros_certificados),
+            "total_stock": round(total_stock, 4),
+            "total_valor": round(total_valor, 4),
+            "certificados": registros_certificados
+        }
+        if should_close:
+            conn.close()
+        return res
+
+    for item in aperturas_aprobadas:
+        sku = item["sku"]
+        cursor.execute("SELECT id, codigo, nombre, stock, costo FROM productos WHERE UPPER(codigo) = ?", (sku,))
+        p = cursor.fetchone()
+        if not p:
+            raise ValueError(f"Producto con SKU {sku} no existe en catálogo")
+        
+        p_id = p["id"]
+        val_res = validar_apertura_cpp(dict(p), item["stock"], item["costo"], fecha_corte, ultimo_mov_id)
+        if not val_res["valido"]:
+            raise ValueError(val_res["error"])
+
+        stk = val_res["stock"]
+        c_u = val_res["costo_unitario"]
+        val = val_res["valor"]
+        chk = val_res["checksum"]
+
+        # Insertar apertura certificada
+        cursor.execute("""
+            INSERT OR REPLACE INTO inventario_saldos_apertura_cpp (
+                fecha_corte, ultimo_movimiento_id_corte, producto_id, sku,
+                stock_apertura, costo_unitario_apertura, valor_apertura,
+                moneda, fuente_valor, certificado_por, certificado_at, observacion, checksum
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'USD', ?, ?, ?, ?, ?)
+        """, (
+            fecha_corte, ultimo_mov_id, p_id, sku,
+            stk, c_u, val,
+            item["fuente"], certificado_por, ahora, observacion, chk
+        ))
+
+        # Actualizar costo_cpp exclusivamente mediante esta certificación formal
+        cursor.execute("UPDATE productos SET costo_cpp = ? WHERE id = ?", (c_u, p_id))
+
+        total_stock += stk
+        total_valor += val
+        registros_certificados.append({
+            "producto_id": p_id,
+            "sku": sku,
+            "stock_apertura": stk,
+            "costo_unitario_apertura": c_u,
+            "valor_apertura": val,
+            "checksum": chk
+        })
+
+    conn.commit()
+
+    resultado = {
+        "estado": "CERTIFICADO_OK",
+        "fecha_corte": fecha_corte,
+        "ultimo_movimiento_id_corte": ultimo_mov_id,
+        "total_productos": len(registros_certificados),
+        "total_stock": round(total_stock, 4),
+        "total_valor": round(total_valor, 4),
+        "certificados": registros_certificados
+    }
+
+    if should_close:
+        conn.close()
+
+    return resultado
+
+def reconstruir_cpp_desde_apertura(cursor, producto_id, fecha_corte="2026-10-23 23:59:59", ultimo_mov_id=108):
+    """
+    Reconstrucción determinística del CPP a partir del saldo certificado de apertura
+    y los movimientos posteriores con id > ultimo_mov_id ordenados por (fecha ASC, id ASC).
+    El ID de corte es la frontera primaria obligatoria.
+    """
+    cursor.execute("""
+        SELECT stock_apertura, costo_unitario_apertura, valor_apertura, sku, checksum
+        FROM inventario_saldos_apertura_cpp
+        WHERE producto_id = ? AND ultimo_movimiento_id_corte = ?
+    """, (producto_id, ultimo_mov_id))
+    ap = cursor.fetchone()
+    if not ap:
+        raise ValueError(f"CRÍTICO: No existe saldo de apertura certificado para producto ID {producto_id} con corte ID {ultimo_mov_id}")
+
+    # Validar integridad del checksum antes de reconstruir
+    chk_calc = calcular_checksum_apertura(ap["sku"], ap["stock_apertura"], ap["costo_unitario_apertura"], ap["valor_apertura"], fecha_corte, ultimo_mov_id)
+    if ap["checksum"] != chk_calc:
+        raise ValueError(f"CRÍTICO: Checksum inválido en apertura para producto ID {producto_id}")
+
+    stock_acum = Decimal(str(ap["stock_apertura"]))
+    cpp_acum = Decimal(str(ap["costo_unitario_apertura"]))
+    valor_acum = Decimal(str(ap["valor_apertura"]))
+
+    # Traer movimientos posteriores al corte (id > ultimo_mov_id)
+    cursor.execute("""
+        SELECT id, fecha, tipo_movimiento, sentido, cantidad, costo_unitario, costo_total, documento_tipo, documento_id, motivo
+        FROM inventario_movimientos
+        WHERE producto_id = ? AND id > ?
+        ORDER BY fecha ASC, id ASC
+    """, (producto_id, ultimo_mov_id))
+    
+    movs = cursor.fetchall()
+    procesados = 0
+
+    for m in movs:
+        procesados += 1
+        m_id = m["id"]
+        tipo = m["tipo_movimiento"]
+        sentido = m["sentido"]
+        cant = Decimal(str(m["cantidad"]))
+        c_u = Decimal(str(m["costo_unitario"]))
+        motivo_m = str(m["motivo"] or "").lower()
+
+        if sentido == 'ENTRADA':
+            es_invariante = (
+                tipo in CPP_TIPOS_ENTRADA_INVARIANTE or
+                (tipo == 'cargo_ajuste' and any(k in motivo_m for k in ['sobrante', 'conteo', 'regularizacion', 'invariante']))
+            )
+            if es_invariante:
+                # Entrada que no altera el CPP (sobrante fisico)
+                stock_acum = stock_acum + cant
+                valor_acum = (stock_acum * cpp_acum).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+            else:
+                # Entrada ponderada (compra, devolucion_cliente, cargo_ajuste_hallazgo, etc.)
+                res_ent = calcular_cpp_entrada(stock_acum, cpp_acum, cant, c_u)
+                stock_acum = Decimal(str(res_ent['stock_nuevo']))
+                cpp_acum = Decimal(str(res_ent['cpp_nuevo']))
+                valor_acum = Decimal(str(res_ent['valor_nuevo']))
+        elif sentido == 'SALIDA':
+            validar_stock_no_negativo(stock_acum, cant)
+            res_sal = calcular_valor_salida_cpp(cant, cpp_acum, stock_acum)
+            stock_acum = Decimal(str(res_sal["stock_nuevo"]))
+            valor_acum = Decimal(str(res_sal["valor_remanente"]))
+            # Salidas no alteran cpp_acum
+
+    return {
+        "producto_id": producto_id,
+        "sku": ap["sku"],
+        "stock_reconstruido": float(stock_acum.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
+        "cpp_reconstruido": float(cpp_acum.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
+        "valor_reconstruido": float(valor_acum.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
+        "movimientos_procesados": procesados
+    }
 
 if __name__ == "__main__":
     init_db()
