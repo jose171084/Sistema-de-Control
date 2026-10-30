@@ -18,6 +18,7 @@ import re
 import shutil
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+import database
 from database import (
     get_connection, init_db, DB_PATH, 
     limpiar_transacciones_db, restablecer_fabrica_db, 
@@ -293,19 +294,36 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json(f"Error al exportar base de datos: {str(e)}", 500)
                     return
 
-            # Estado de Persistencia y Estadísticas de la Base de Datos
+            # Estado de Persistencia y Estadísticas de la Base de Datos (Auditoría Render / Cloud)
             elif path == "/api/database/status":
                 cfg_supabase = get_supabase_config()
+                is_persistent_disk = (DB_PATH != getattr(database, "DEFAULT_DB_PATH", DB_PATH)) or os.path.exists("/data/inventario.db") or os.path.exists("/var/data/inventario.db")
+                is_render = bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"))
+                is_ephemeral = is_render and not is_persistent_disk and not bool(cfg_supabase)
+
                 size_bytes = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
                 c_facturas = cursor.execute("SELECT count(*) FROM facturas").fetchone()[0]
                 c_productos = cursor.execute("SELECT count(*) FROM productos").fetchone()[0]
                 c_clientes = cursor.execute("SELECT count(*) FROM clientes").fetchone()[0]
                 c_compras = cursor.execute("SELECT count(*) FROM compras").fetchone()[0]
                 c_devoluciones = cursor.execute("SELECT count(*) FROM devoluciones").fetchone()[0]
+                c_cxc = cursor.execute("SELECT count(*) FROM cuentas_por_cobrar").fetchone()[0]
+                c_cxp = cursor.execute("SELECT count(*) FROM cuentas_por_pagar").fetchone()[0]
+                c_movs = cursor.execute("SELECT count(*) FROM inventario_movimientos").fetchone()[0]
+
+                last_sync = getattr(database, "_last_cloud_sync_status", {})
+
                 self.send_json({
-                    "modo_persistencia": "supabase_storage" if cfg_supabase else "local_disk",
+                    "modo_persistencia": "persistent_disk" if is_persistent_disk else ("supabase_storage" if cfg_supabase else "local_disk"),
+                    "es_efimero": is_ephemeral,
+                    "is_render": is_render,
+                    "db_path": DB_PATH,
                     "supabase_conectado": bool(cfg_supabase),
                     "supabase_bucket": cfg_supabase["bucket"] if cfg_supabase else None,
+                    "supabase_url_masked": (cfg_supabase["url"][:18] + "...") if cfg_supabase else None,
+                    "ultimo_sync_estado": last_sync.get("ok"),
+                    "ultimo_sync_fecha": last_sync.get("timestamp"),
+                    "ultimo_sync_error": last_sync.get("error"),
                     "tamano_bytes": size_bytes,
                     "tamano_formateado": f"{size_bytes / 1024:.1f} KB",
                     "facturas_count": c_facturas,
@@ -313,8 +331,16 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "clientes_count": c_clientes,
                     "compras_count": c_compras,
                     "devoluciones_count": c_devoluciones,
+                    "cxc_count": c_cxc,
+                    "cxp_count": c_cxp,
+                    "movimientos_count": c_movs,
                     "tiene_datos_prueba": (c_facturas > 0 or c_compras > 0 or c_devoluciones > 0)
                 })
+                return
+
+            elif path == "/api/database/test-supabase":
+                res = database.test_supabase_connection()
+                self.send_json(res)
                 return
 
             # Auditoría Completa y Diagnóstico de Base de Datos
@@ -645,12 +671,15 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     self.send_error_json("Proveedor no encontrado", 404)
 
-            # 7. Facturas (Ventas)
+            # 7. Facturas (Ventas) - Defensivo con LEFT JOIN
             elif path == "/api/facturas":
                 cursor.execute("""
-                    SELECT f.*, c.nombre as cliente_nombre, c.cedula as cliente_cedula, c.telefono as cliente_telefono 
+                    SELECT f.*, 
+                           COALESCE(c.nombre, 'Cliente General') as cliente_nombre, 
+                           COALESCE(c.cedula, '-') as cliente_cedula, 
+                           COALESCE(c.telefono, '-') as cliente_telefono 
                     FROM facturas f 
-                    JOIN clientes c ON f.cliente_id = c.id 
+                    LEFT JOIN clientes c ON f.cliente_id = c.id 
                     ORDER BY f.id DESC
                 """)
                 rows = [dict(r) for r in cursor.fetchall()]
@@ -750,10 +779,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                            COUNT(cxc.id) as total_facturas_count,
                            COALESCE(SUM(cxc.monto_total), 0.0) as total_facturado_usd,
                            COALESCE(SUM(cxc.monto_pagado), 0.0) as total_cobrado_usd,
+                           COALESCE(SUM(cxc.monto_pagado), 0.0) as total_pagado_usd,
                            COALESCE(SUM(cxc.saldo_pendiente), 0.0) as saldo_pendiente_total_usd,
+                           COALESCE(SUM(cxc.saldo_pendiente), 0.0) as saldo_pendiente_usd,
                            SUM(CASE WHEN cxc.saldo_pendiente > 0.001 AND date(cxc.fecha_vencimiento) < date('now') THEN 1 ELSE 0 END) as facturas_vencidas_count,
                            cfg.tasa_ves, cfg.tasa_cop,
                            ROUND(COALESCE(SUM(cxc.saldo_pendiente), 0.0) * cfg.tasa_ves, 2) as saldo_pendiente_total_ves,
+                           ROUND(COALESCE(SUM(cxc.saldo_pendiente), 0.0) * cfg.tasa_ves, 2) as saldo_pendiente_ves,
                            ROUND(COALESCE(SUM(cxc.saldo_pendiente), 0.0) * cfg.tasa_cop, 2) as saldo_pendiente_total_cop
                     FROM clientes c
                     JOIN cuentas_por_cobrar cxc ON cxc.cliente_id = c.id
@@ -881,11 +913,14 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                            COUNT(CASE WHEN cxp.saldo_pendiente > 0.001 THEN 1 END) as cuentas_pendientes_count,
                            COUNT(cxp.id) as total_cuentas_count,
                            COALESCE(SUM(cxp.monto_total), 0.0) as total_deuda_usd,
+                           COALESCE(SUM(cxp.monto_total), 0.0) as total_facturado_usd,
                            COALESCE(SUM(cxp.monto_pagado), 0.0) as total_pagado_usd,
                            COALESCE(SUM(cxp.saldo_pendiente), 0.0) as saldo_pendiente_total_usd,
+                           COALESCE(SUM(cxp.saldo_pendiente), 0.0) as saldo_pendiente_usd,
                            SUM(CASE WHEN cxp.saldo_pendiente > 0.001 AND date(cxp.fecha_vencimiento) < date('now') THEN 1 ELSE 0 END) as cuentas_vencidas_count,
                            cfg.tasa_ves, cfg.tasa_cop,
                            ROUND(COALESCE(SUM(cxp.saldo_pendiente), 0.0) * cfg.tasa_ves, 2) as saldo_pendiente_total_ves,
+                           ROUND(COALESCE(SUM(cxp.saldo_pendiente), 0.0) * cfg.tasa_ves, 2) as saldo_pendiente_ves,
                            ROUND(COALESCE(SUM(cxp.saldo_pendiente), 0.0) * cfg.tasa_cop, 2) as saldo_pendiente_total_cop
                     FROM proveedores p
                     JOIN cuentas_por_pagar cxp ON cxp.proveedor_id = p.id
@@ -2196,9 +2231,16 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         cursor = conn.cursor()
 
         try:
-            # 0. Mantenimiento y Gestión de Base de Datos para Beta Tester
+            # 0. Mantenimiento y Gestión de Base de Datos para Beta Tester (Protegido con Frases de Seguridad)
             if path == "/api/database/clean-transactions":
-                limpiar_transacciones_db()
+                confirmacion = (body.get("confirmacion") or "").strip()
+                if confirmacion != "CONFIRMAR_BORRADO_TOTAL_AUTORIZADO":
+                    self.send_error_json(
+                        "Operación de alta seguridad bloqueada: Se requiere confirmacion='CONFIRMAR_BORRADO_TOTAL_AUTORIZADO' para prevenir borrado accidental de transacciones.",
+                        403
+                    )
+                    return
+                limpiar_transacciones_db(confirmacion)
                 self.send_json({
                     "success": True,
                     "message": "Datos de prueba eliminados correctamente. Facturas, compras y deudas en 0. Stock reiniciado."
@@ -2206,7 +2248,14 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 return
 
             elif path == "/api/database/factory-reset":
-                restablecer_fabrica_db()
+                confirmacion = (body.get("confirmacion") or "").strip()
+                if confirmacion != "CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO":
+                    self.send_error_json(
+                        "Operación de alta seguridad bloqueada: Se requiere confirmacion='CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO'.",
+                        403
+                    )
+                    return
+                restablecer_fabrica_db(confirmacion)
                 self.send_json({
                     "success": True,
                     "message": "Base de datos restablecida a valores de fábrica limpios para el Beta Tester."

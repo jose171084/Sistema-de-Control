@@ -163,6 +163,22 @@
        ======================================================== -->
   <div class="app-main-wrapper flex-1 flex flex-col min-w-0 min-h-screen w-full">
     
+    <!-- Banner de Alerta para Entorno Efímero en la Nube (Render sin Persistencia) -->
+    <div id="cloudEphemeralAlert" class="hidden bg-gradient-to-r from-amber-600 to-rose-600 text-white px-3 sm:px-6 py-2 text-xs font-semibold flex items-center justify-between shadow-md sticky top-0 z-30 transition">
+      <div class="flex items-center space-x-2">
+        <i class="fa-solid fa-triangle-exclamation text-base text-amber-200 animate-pulse"></i>
+        <span><strong>MODO VOLÁTIL DETECTADO:</strong> El servidor en la nube no tiene persistencia activa. Las facturas y pagos se perderán al suspenderse Render si no configuras Supabase Storage.</span>
+      </div>
+      <div class="flex items-center space-x-2 shrink-0">
+        <button onclick="openDatabaseModal()" class="bg-white text-rose-800 hover:bg-amber-50 px-3 py-1 rounded-lg text-xs font-bold shadow-xs transition cursor-pointer">
+          <i class="fa-solid fa-cloud-arrow-up mr-1 text-rose-600"></i>Configurar Nube
+        </button>
+        <button onclick="document.getElementById('cloudEphemeralAlert').classList.add('hidden')" class="text-white hover:text-amber-200 p-1 cursor-pointer" title="Cerrar aviso temporalmente">
+          <i class="fa-solid fa-xmark text-sm"></i>
+        </button>
+      </div>
+    </div>
+
     <!-- Barra Superior (Header) -->
     <header class="app-header bg-white border-b border-slate-200 sticky top-0 z-20 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between shadow-xs">
       <div class="flex items-center space-x-2 sm:space-x-3 min-w-0">
@@ -3703,6 +3719,14 @@
               <i class="fa-solid fa-hard-drive mr-1"></i>Almacenamiento Local
             </span>
           </div>
+        </div>
+
+        <!-- Diagnóstico Activo de Conexión Supabase -->
+        <div class="flex items-center justify-between pt-1 border-t border-slate-200">
+          <button type="button" onclick="probarConexionSupabase()" id="btnProbarSupabase" class="text-xs bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-300 font-semibold py-1.5 px-3 rounded-lg flex items-center transition cursor-pointer">
+            <i class="fa-solid fa-plug mr-1.5 text-sky-600"></i>Probar Conexión Supabase
+          </button>
+          <span id="dbSupabaseTestResult" class="text-[11px] text-slate-500 font-mono"></span>
         </div>
 
         <!-- Alerta de Render si no está conectado Supabase -->

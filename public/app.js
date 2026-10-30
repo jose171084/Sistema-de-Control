@@ -223,6 +223,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadClientes();
   await loadProveedores();
   await loadDashboard();
+  await loadDatabaseStatus();
 
   // Fecha por defecto en compras (hoy)
   const today = new Date().toISOString().split('T')[0];
@@ -1167,15 +1168,31 @@ async function loadDatabaseStatus() {
     if (!res.ok) return;
     const data = await res.json();
     
+    const isCloudEphemeral = data.es_efimero || (data.is_render && !data.supabase_conectado) || (window.location.hostname.includes('onrender.com') && !data.supabase_conectado);
+    
+    // Banner superior si está en la nube efímera
+    const alertBanner = document.getElementById('cloudEphemeralAlert');
+    if (alertBanner) {
+      if (isCloudEphemeral) {
+        alertBanner.classList.remove('hidden');
+      } else {
+        alertBanner.classList.add('hidden');
+      }
+    }
+
     const badgeEl = document.getElementById('dbPersistenceBadge');
     if (badgeEl) {
       if (data.supabase_conectado) {
         badgeEl.innerHTML = `<span class="bg-emerald-100 text-emerald-800 border border-emerald-300 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center">
           <i class="fa-solid fa-cloud mr-1.5 text-emerald-600"></i>Persistencia Nube Supabase (Activa - No se borra)
         </span>`;
+      } else if (isCloudEphemeral) {
+        badgeEl.innerHTML = `<span class="bg-rose-100 text-rose-800 border border-rose-300 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center">
+          <i class="fa-solid fa-triangle-exclamation mr-1.5 text-rose-600"></i>Modo Volátil Efímero (Render sin Supabase)
+        </span>`;
       } else {
         badgeEl.innerHTML = `<span class="bg-sky-100 text-sky-800 border border-sky-300 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center">
-          <i class="fa-solid fa-hard-drive mr-1.5 text-sky-600"></i>Almacenamiento Local (SQLite en Disco)
+          <i class="fa-solid fa-hard-drive mr-1.5 text-sky-600"></i>Almacenamiento Local Permanente (SQLite en Disco)
         </span>`;
       }
     }
@@ -1192,7 +1209,7 @@ async function loadDatabaseStatus() {
 
     const noticeEl = document.getElementById('dbWarningNotice');
     if (noticeEl) {
-      if (!data.supabase_conectado && window.location.hostname.includes('onrender.com')) {
+      if (isCloudEphemeral) {
         noticeEl.classList.remove('hidden');
       } else {
         noticeEl.classList.add('hidden');
@@ -1200,6 +1217,35 @@ async function loadDatabaseStatus() {
     }
   } catch (err) {
     console.error('Error cargando estado de base de datos:', err);
+  }
+}
+
+async function probarConexionSupabase() {
+  const resultEl = document.getElementById('dbSupabaseTestResult');
+  const btn = document.getElementById('btnProbarSupabase');
+  if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Probando...';
+  if (resultEl) resultEl.textContent = 'Verificando credenciales...';
+
+  try {
+    const res = await fetch('/api/database/test-supabase');
+    const data = await res.json();
+    if (data.conectado) {
+      if (resultEl) {
+        resultEl.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-check mr-1"></i>Conectado exitosamente (Bucket: ${data.bucket || 'database'})</span>`;
+      }
+      alert('✅ Conexión con Supabase verificada exitosamente.\n\nLa base de datos se respaldará automáticamente en la nube de Supabase.');
+      await loadDatabaseStatus();
+    } else {
+      if (resultEl) {
+        resultEl.innerHTML = `<span class="text-rose-600 font-semibold"><i class="fa-solid fa-xmark mr-1"></i>No conectado: ${data.error || 'Credenciales no configuradas'}</span>`;
+      }
+      alert('⚠️ Supabase no está conectado.\n\nDetalle: ' + (data.error || 'Faltan SUPABASE_URL o SUPABASE_KEY en Render.'));
+    }
+  } catch (err) {
+    if (resultEl) resultEl.textContent = 'Error: ' + err.message;
+    alert('Error al probar conexión: ' + err.message);
+  } finally {
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-plug mr-1.5 text-sky-600"></i>Probar Conexión Supabase';
   }
 }
 
@@ -1252,14 +1298,16 @@ async function ejecutarAuditoriaBD() {
 }
 
 async function triggerDatabaseClean() {
-  if (!confirm('⚠️ ¿Estás seguro de que deseas LIMPIAR las ventas y compras de prueba?\n\nEsta acción vaciará todas las facturas, compras, devoluciones y deudas, reiniciando los stocks en 0 para comenzar un ciclo de pruebas nuevo.\n\nSe conservarán tus categorías, productos y clientes.')) {
+  const code = prompt('⚠️ ATENCIÓN: Esta acción LIMPIARÁ todas las ventas, compras y deudas de prueba para iniciar un ciclo nuevo.\n\nSe conservarán productos, categorías y clientes.\n\nEscribe "BORRAR" para confirmar:');
+  if (code !== 'BORRAR') {
+    if (code !== null) alert('Operación cancelada. El código ingresado no coincide.');
     return;
   }
   try {
     const res = await fetch('/api/database/clean-transactions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
+      body: JSON.stringify({ confirmacion: 'CONFIRMAR_BORRADO_TOTAL_AUTORIZADO' })
     });
     const data = await res.json();
     if (data.success) {
@@ -1278,7 +1326,7 @@ async function triggerDatabaseClean() {
 }
 
 async function triggerFactoryReset() {
-  const code = prompt('⚠️ ATENCIÓN: Esta acción restablecerá el sistema a una BASE DE DATOS 100% LIMPIA DE FÁBRICA.\n\nSe eliminarán todas las facturas, compras, productos y clientes creados, dejando únicamente la estructura limpia lista para el Beta Tester.\n\nEscribe "LIMPIAR" para confirmar:');
+  const code = prompt('⚠️ PELIGRO: Esta acción restablecerá el sistema a una BASE DE DATOS LIMPIA DE FÁBRICA.\n\nSe eliminarán facturas, compras, productos y clientes creados.\n\nEscribe "LIMPIAR" para confirmar:');
   if (code !== 'LIMPIAR') {
     if (code !== null) alert('Operación cancelada. El código ingresado no coincide.');
     return;
@@ -1287,7 +1335,7 @@ async function triggerFactoryReset() {
     const res = await fetch('/api/database/factory-reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
+      body: JSON.stringify({ confirmacion: 'CONFIRMAR_BORRADO_TOTAL_AUTORIZADO' })
     });
     const data = await res.json();
     if (data.success) {
@@ -1946,6 +1994,7 @@ async function saveProducto(e) {
       closeProductoModal();
       await loadProductos();
       await loadDashboard();
+  await loadDatabaseStatus();
 
       // Si se creó desde Compras, poblar y auto-seleccionar el nuevo ítem
       if (AppState.productoModalOrigen === 'compras' || AppState.currentView === 'compras') {
@@ -1984,6 +2033,7 @@ async function deleteProducto(id) {
     if (res.ok) {
       await loadProductos();
       await loadDashboard();
+  await loadDatabaseStatus();
     } else {
       const err = await res.json();
       alert('Error: ' + (err.error || 'No se pudo eliminar'));
@@ -2757,6 +2807,7 @@ async function procesarFactura(tipoVentaForzado = null) {
       limpiarPOS();
       await loadProductos();
       await loadDashboard();
+  await loadDatabaseStatus();
       if (AppState.currentView === 'cxc') await loadCxc();
       await verFacturaEmitida(data.id);
     } else {
@@ -4149,6 +4200,7 @@ async function procesarDevolucionConfirm() {
     // Actualizar inventario, dashboard, facturas y cxc
     await loadProductos();
     await loadDashboard();
+  await loadDatabaseStatus();
     await loadFacturasParaDevolucion();
     if (AppState.devolucionFacturaSeleccionada?.tipo_venta === 'credito') {
       await loadCxc();
@@ -4830,6 +4882,7 @@ async function guardarCompra() {
       nuevaCompraForm();
       await loadProductos();
       await loadDashboard();
+  await loadDatabaseStatus();
       if (AppState.currentView === 'cxp') loadCxp();
       toggleHistorialCompras();
     } else {
@@ -5118,11 +5171,17 @@ function renderCxcConsolidadoTable() {
   const filtro = AppState.cxcConsFilter || 'todos';
 
   if (filtro === 'pendientes') {
-    lista = lista.filter(c => parseFloat(c.saldo_pendiente_usd) > 0.001);
+    lista = lista.filter(c => {
+      const saldo = parseFloat(c.saldo_pendiente_total_usd !== undefined ? c.saldo_pendiente_total_usd : (c.saldo_pendiente_usd || 0));
+      return saldo > 0.001;
+    });
   } else if (filtro === 'vencidas') {
-    lista = lista.filter(c => parseInt(c.facturas_vencidas_count) > 0);
+    lista = lista.filter(c => parseInt(c.facturas_vencidas_count || 0) > 0);
   } else if (filtro === 'saldados') {
-    lista = lista.filter(c => parseFloat(c.saldo_pendiente_usd) <= 0.001);
+    lista = lista.filter(c => {
+      const saldo = parseFloat(c.saldo_pendiente_total_usd !== undefined ? c.saldo_pendiente_total_usd : (c.saldo_pendiente_usd || 0));
+      return saldo <= 0.001;
+    });
   }
 
   if (lista.length === 0) {
@@ -5133,22 +5192,24 @@ function renderCxcConsolidadoTable() {
   const tasaVes = AppState.config.tasa_ves || 45.0;
 
   tbody.innerHTML = lista.map(c => {
-    const saldoUsd = parseFloat(c.saldo_pendiente_usd || 0);
-    const saldoBs = parseFloat(c.saldo_pendiente_ves || (saldoUsd * tasaVes)).toLocaleString('es-VE');
+    const saldoUsd = parseFloat(c.saldo_pendiente_total_usd !== undefined ? c.saldo_pendiente_total_usd : (c.saldo_pendiente_usd || 0));
+    const saldoBs = (c.saldo_pendiente_total_ves !== undefined ? parseFloat(c.saldo_pendiente_total_ves) : (c.saldo_pendiente_ves !== undefined ? parseFloat(c.saldo_pendiente_ves) : (saldoUsd * tasaVes))).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const waPhone = (c.cliente_telefono || '').replace(/[^0-9]/g, '');
+    const totalFacturado = parseFloat(c.total_facturado_usd !== undefined ? c.total_facturado_usd : (c.total_deuda_usd || 0));
+    const totalCobrado = parseFloat(c.total_cobrado_usd !== undefined ? c.total_cobrado_usd : (c.total_pagado_usd || 0));
 
-    const badgeFacturas = c.facturas_pendientes_count > 0 
+    const badgeFacturas = (c.facturas_pendientes_count || 0) > 0 
       ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">${c.facturas_pendientes_count} pendiente(s)</span>`
       : `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">0 pendientes</span>`;
 
-    const badgeVencidas = c.facturas_vencidas_count > 0
+    const badgeVencidas = (c.facturas_vencidas_count || 0) > 0
       ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800"><i class="fa-solid fa-triangle-exclamation mr-1"></i>${c.facturas_vencidas_count}</span>`
       : `<span class="text-xs text-slate-400">0</span>`;
 
     return `
       <tr class="hover:bg-slate-50 transition">
         <td class="py-3 px-4">
-          <p class="font-bold text-slate-900">${escapeHtml(c.cliente_nombre)}</p>
+          <p class="font-bold text-slate-900">${escapeHtml(c.cliente_nombre || 'Cliente')}</p>
           <span class="text-xs text-slate-400 font-mono font-semibold">${escapeHtml(c.cliente_cedula || '-')}</span>
         </td>
         <td class="py-3 px-4 text-xs text-slate-600">
@@ -5160,8 +5221,8 @@ function renderCxcConsolidadoTable() {
         </td>
         <td class="py-3 px-4 text-center">${badgeFacturas}</td>
         <td class="py-3 px-4 text-center">${badgeVencidas}</td>
-        <td class="py-3 px-4 font-bold text-slate-700 text-sm">$${parseFloat(c.total_facturado_usd || 0).toFixed(2)}</td>
-        <td class="py-3 px-4 font-semibold text-emerald-700 text-sm">$${parseFloat(c.total_pagado_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4 font-bold text-slate-700 text-sm">$${totalFacturado.toFixed(2)}</td>
+        <td class="py-3 px-4 font-semibold text-emerald-700 text-sm">$${totalCobrado.toFixed(2)}</td>
         <td class="py-3 px-4">
           <span class="font-black text-sm ${saldoUsd > 0.001 ? 'text-rose-600' : 'text-emerald-700'} block">$${saldoUsd.toFixed(2)}</span>
           <span class="text-[11px] text-slate-500">≈ ${saldoBs} Bs.</span>
@@ -5532,6 +5593,7 @@ async function confirmarAbonoCXC() {
       alert(`¡Abono de $${data.monto_abono_usd.toFixed(2)} registrado exitosamente!\nNuevo saldo pendiente: $${data.nuevo_saldo_pendiente.toFixed(2)}`);
       await loadCxc();
       await loadDashboard();
+  await loadDatabaseStatus();
     } else {
       const err = await res.json();
       alert('Error registrando abono: ' + (err.error || 'No se pudo guardar'));
@@ -5691,11 +5753,17 @@ function renderCxpConsolidadoTable() {
   const filtro = AppState.cxpConsFilter || 'todos';
 
   if (filtro === 'pendientes') {
-    lista = lista.filter(c => parseFloat(c.saldo_pendiente_usd) > 0.001);
+    lista = lista.filter(c => {
+      const saldo = parseFloat(c.saldo_pendiente_total_usd !== undefined ? c.saldo_pendiente_total_usd : (c.saldo_pendiente_usd || 0));
+      return saldo > 0.001;
+    });
   } else if (filtro === 'vencidas') {
-    lista = lista.filter(c => parseInt(c.cuentas_vencidas_count) > 0);
+    lista = lista.filter(c => parseInt(c.cuentas_vencidas_count || 0) > 0);
   } else if (filtro === 'saldados') {
-    lista = lista.filter(c => parseFloat(c.saldo_pendiente_usd) <= 0.001);
+    lista = lista.filter(c => {
+      const saldo = parseFloat(c.saldo_pendiente_total_usd !== undefined ? c.saldo_pendiente_total_usd : (c.saldo_pendiente_usd || 0));
+      return saldo <= 0.001;
+    });
   }
 
   if (lista.length === 0) {
@@ -5706,22 +5774,24 @@ function renderCxpConsolidadoTable() {
   const tasaVes = AppState.config.tasa_ves || 45.0;
 
   tbody.innerHTML = lista.map(c => {
-    const saldoUsd = parseFloat(c.saldo_pendiente_usd || 0);
-    const saldoBs = parseFloat(c.saldo_pendiente_ves || (saldoUsd * tasaVes)).toLocaleString('es-VE');
+    const saldoUsd = parseFloat(c.saldo_pendiente_total_usd !== undefined ? c.saldo_pendiente_total_usd : (c.saldo_pendiente_usd || 0));
+    const saldoBs = (c.saldo_pendiente_total_ves !== undefined ? parseFloat(c.saldo_pendiente_total_ves) : (c.saldo_pendiente_ves !== undefined ? parseFloat(c.saldo_pendiente_ves) : (saldoUsd * tasaVes))).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const waPhone = (c.proveedor_telefono || '').replace(/[^0-9]/g, '');
+    const totalFacturado = parseFloat(c.total_facturado_usd !== undefined ? c.total_facturado_usd : (c.total_deuda_usd || 0));
+    const totalCobrado = parseFloat(c.total_pagado_usd !== undefined ? c.total_pagado_usd : (c.total_cobrado_usd || 0));
 
-    const badgeCuentas = c.cuentas_pendientes_count > 0 
+    const badgeCuentas = (c.cuentas_pendientes_count || 0) > 0 
       ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">${c.cuentas_pendientes_count} pendiente(s)</span>`
       : `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">0 pendientes</span>`;
 
-    const badgeVencidas = c.cuentas_vencidas_count > 0
+    const badgeVencidas = (c.cuentas_vencidas_count || 0) > 0
       ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800"><i class="fa-solid fa-triangle-exclamation mr-1"></i>${c.cuentas_vencidas_count}</span>`
       : `<span class="text-xs text-slate-400">0</span>`;
 
     return `
       <tr class="hover:bg-slate-50 transition">
         <td class="py-3 px-4">
-          <p class="font-bold text-slate-900">${escapeHtml(c.proveedor_nombre)}</p>
+          <p class="font-bold text-slate-900">${escapeHtml(c.proveedor_nombre || 'Proveedor')}</p>
           <span class="text-xs text-slate-400 font-mono font-semibold">${escapeHtml(c.proveedor_cedula || '-')}</span>
         </td>
         <td class="py-3 px-4 text-xs text-slate-600">
@@ -5733,8 +5803,8 @@ function renderCxpConsolidadoTable() {
         </td>
         <td class="py-3 px-4 text-center">${badgeCuentas}</td>
         <td class="py-3 px-4 text-center">${badgeVencidas}</td>
-        <td class="py-3 px-4 font-bold text-slate-700 text-sm">$${parseFloat(c.total_facturado_usd || 0).toFixed(2)}</td>
-        <td class="py-3 px-4 font-semibold text-emerald-700 text-sm">$${parseFloat(c.total_pagado_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4 font-bold text-slate-700 text-sm">$${totalFacturado.toFixed(2)}</td>
+        <td class="py-3 px-4 font-semibold text-emerald-700 text-sm">$${totalCobrado.toFixed(2)}</td>
         <td class="py-3 px-4">
           <span class="font-black text-sm ${saldoUsd > 0.001 ? 'text-rose-600' : 'text-emerald-700'} block">$${saldoUsd.toFixed(2)}</span>
           <span class="text-[11px] text-slate-500">≈ ${saldoBs} Bs.</span>
@@ -6093,6 +6163,7 @@ async function guardarDirectoCXP(e) {
       closeModalDirectoCXP();
       await loadCxp();
       await loadDashboard();
+  await loadDatabaseStatus();
     } else {
       const err = await res.json();
       alert('Error: ' + (err.error || 'No se pudo guardar la cuenta'));
@@ -6276,6 +6347,7 @@ Efecto: ${efecto.toUpperCase()} saldo por $${montoUsd.toFixed(2)} USD (${data.mo
         await loadCxpConsolidado();
       }
       await loadDashboard();
+  await loadDatabaseStatus();
     } else {
       const err = await res.json();
       alert('Error: ' + (err.error || 'No se pudo guardar la nota de ajuste'));
@@ -9158,6 +9230,7 @@ async function saveAjuste(e) {
     try {
       await loadProductos();
       await loadDashboard();
+  await loadDatabaseStatus();
       if (typeof loadReporteKardex === 'function' && AppState.currentView === 'reportes') {
         loadReporteKardex();
       }

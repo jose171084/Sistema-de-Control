@@ -15,112 +15,318 @@ import hashlib
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inventario.db")
+DEFAULT_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inventario.db")
 DB_LIMPIA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inventario_limpia.db")
 
+def resolver_db_path():
+    """
+    Detección y resolución inteligente de almacenamiento persistente en la nube / local:
+    1. Si se define PERSISTENT_DATA_PATH o DATA_DIR (o carpetas montadas en Render como /data o /var/data).
+    2. Si existe un disco montado y no contiene inventario.db, inicializa clonando la base del repositorio.
+    3. Si no hay disco externo montado, opera sobre DEFAULT_DB_PATH local de forma segura.
+    """
+    candidate_dirs = [
+        os.environ.get("PERSISTENT_DATA_PATH"),
+        os.environ.get("DATA_DIR"),
+        "/data",
+        "/var/data",
+        "/mnt/data"
+    ]
+    for c_dir in candidate_dirs:
+        if c_dir and os.path.exists(c_dir) and os.path.isdir(c_dir):
+            try:
+                test_f = os.path.join(c_dir, ".test_write")
+                with open(test_f, "w") as tf:
+                    tf.write("ok")
+                os.remove(test_f)
+                target = os.path.join(c_dir, "inventario.db")
+                if not os.path.exists(target) and os.path.exists(DEFAULT_DB_PATH):
+                    shutil.copy2(DEFAULT_DB_PATH, target)
+                    print(f"[ALMACENAMIENTO PERSISTENTE] Clonada base inicial hacia disco persistente: {target}")
+                print(f"[ALMACENAMIENTO PERSISTENTE] Operando sobre disco persistente: {target}")
+                return target
+            except Exception as e:
+                print(f"[ALMACENAMIENTO PERSISTENTE] Directorio no utilizable ({c_dir}): {e}")
+    return DEFAULT_DB_PATH
+
+DB_PATH = resolver_db_path()
+
 # ========================================================
-# PERSISTENCIA EN LA NUBE (SUPABASE STORAGE AUTO-SYNC)
+# PERSISTENCIA EN LA NUBE (SUPABASE STORAGE AUTO-SYNC RESILIENTE)
 # ========================================================
 _sync_timer = None
 _sync_lock = threading.Lock()
+_last_cloud_sync_status = {
+    "ok": False,
+    "timestamp": None,
+    "error": None,
+    "bytes": 0,
+    "modo": "local_disk"
+}
 
 def get_supabase_config():
-    url = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
-    key = os.environ.get("SUPABASE_KEY", "").strip()
-    bucket = os.environ.get("SUPABASE_BUCKET", "database").strip()
-    filename = os.environ.get("SUPABASE_FILENAME", "inventario.db").strip()
+    """
+    Busca configuración de Supabase Storage con tolerancia a múltiples alias de variables de entorno comunes:
+    URL: SUPABASE_URL, SUPABASE_PROJECT_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_ENDPOINT.
+    Key: SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_SERVICE_KEY, SUPABASE_ANON_KEY, SUPABASE_API_KEY.
+    Bucket: SUPABASE_BUCKET, SUPABASE_STORAGE_BUCKET (default: 'database').
+    """
+    url = (
+        os.environ.get("SUPABASE_URL") or
+        os.environ.get("SUPABASE_PROJECT_URL") or
+        os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or
+        os.environ.get("SUPABASE_ENDPOINT") or
+        ""
+    ).strip().rstrip("/")
+
+    key = (
+        os.environ.get("SUPABASE_KEY") or
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or
+        os.environ.get("SUPABASE_SERVICE_KEY") or
+        os.environ.get("SUPABASE_ANON_KEY") or
+        os.environ.get("SUPABASE_API_KEY") or
+        os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") or
+        ""
+    ).strip()
+
+    bucket = (
+        os.environ.get("SUPABASE_BUCKET") or
+        os.environ.get("SUPABASE_STORAGE_BUCKET") or
+        "database"
+    ).strip()
+
+    filename = (
+        os.environ.get("SUPABASE_FILENAME") or
+        "inventario.db"
+    ).strip()
+
     if url and key:
         return {"url": url, "key": key, "bucket": bucket, "filename": filename}
     return None
 
+def test_supabase_connection():
+    """Realiza una prueba activa de lectura/escritura en Supabase Storage y retorna diagnóstico detallado."""
+    cfg = get_supabase_config()
+    if not cfg:
+        return {
+            "ok": False,
+            "error": "Variables de entorno de Supabase no configuradas en Render.",
+            "detalle": "Debe agregar SUPABASE_URL y SUPABASE_KEY en la pestaña Environment de Render."
+        }
+
+    # Probar acceso al bucket u objeto
+    url_test = f"{cfg['url']}/storage/v1/bucket/{cfg['bucket']}"
+    req = urllib.request.Request(
+        url_test,
+        headers={
+            "apikey": cfg["key"],
+            "Authorization": f"Bearer {cfg['key']}",
+            "User-Agent": "SistemaInventario/1.0"
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return {
+                "ok": True,
+                "mensaje": f"Conexión exitosa a Supabase Storage. Bucket '{cfg['bucket']}' activo y accesible.",
+                "url": cfg["url"],
+                "bucket": cfg["bucket"]
+            }
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            # Probar si el objeto existe directamente con autenticación
+            url_obj = f"{cfg['url']}/storage/v1/object/authenticated/{cfg['bucket']}/{cfg['filename']}"
+            req2 = urllib.request.Request(url_obj, headers={"apikey": cfg["key"], "Authorization": f"Bearer {cfg['key']}"})
+            try:
+                with urllib.request.urlopen(req2, timeout=8):
+                    return {
+                        "ok": True,
+                        "mensaje": f"Conexión exitosa a Supabase con archivo '{cfg['filename']}' verificado.",
+                        "url": cfg["url"],
+                        "bucket": cfg["bucket"]
+                    }
+            except urllib.error.HTTPError as e2:
+                if e2.code == 404:
+                    return {
+                        "ok": True,
+                        "mensaje": f"Conexión autenticada OK a Supabase. El archivo '{cfg['filename']}' se creará automáticamente en la primera sincronización.",
+                        "url": cfg["url"],
+                        "bucket": cfg["bucket"]
+                    }
+        return {
+            "ok": False,
+            "error": f"Error HTTP {e.code}: {e.reason}",
+            "detalle": f"Verifique que el bucket '{cfg['bucket']}' esté creado en Supabase Storage.",
+            "url": cfg["url"],
+            "bucket": cfg["bucket"]
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": f"Error de conexión: {str(e)}",
+            "url": cfg["url"],
+            "bucket": cfg["bucket"]
+        }
+
 def sync_from_supabase_storage():
     """Descarga inventario.db desde Supabase Storage si está configurado (persistencia en Render)."""
+    global _last_cloud_sync_status
     cfg = get_supabase_config()
     if not cfg:
         return False
 
-    endpoints = [
-        f"{cfg['url']}/storage/v1/object/authenticated/{cfg['bucket']}/{cfg['filename']}",
-        f"{cfg['url']}/storage/v1/object/{cfg['bucket']}/{cfg['filename']}"
-    ]
+    buckets_to_try = [cfg['bucket']]
+    for b_alt in ["database", "inventario", "backups", "public"]:
+        if b_alt not in buckets_to_try:
+            buckets_to_try.append(b_alt)
 
-    for url in endpoints:
-        req = urllib.request.Request(
-            url,
-            headers={
-                "apikey": cfg["key"],
-                "Authorization": f"Bearer {cfg['key']}",
-                "User-Agent": "SistemaInventario/1.0"
-            }
-        )
-        try:
-            print(f"[PERSISTENCIA NUBE] Consultando base persistente en Supabase Storage ({cfg['bucket']}/{cfg['filename']})...")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = resp.read()
-                if data and len(data) > 100:
-                    with open(DB_PATH, "wb") as f:
-                        f.write(data)
-                    print(f"[PERSISTENCIA NUBE] Base de datos persistente descargada exitosamente ({len(data)} bytes).")
-                    return True
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                continue
-            else:
-                print(f"[PERSISTENCIA NUBE] Error HTTP {e.code} en {url}: {e.reason}")
-        except Exception as e:
-            print(f"[PERSISTENCIA NUBE] Error de conexión a {url}: {str(e)}")
+    for b in buckets_to_try:
+        endpoints = [
+            f"{cfg['url']}/storage/v1/object/authenticated/{b}/{cfg['filename']}",
+            f"{cfg['url']}/storage/v1/object/{b}/{cfg['filename']}"
+        ]
 
-    print(f"[PERSISTENCIA NUBE] Aún no existe '{cfg['filename']}' en Supabase Storage o no se pudo descargar. Se respaldará la base local actual.")
+        for url in endpoints:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "apikey": cfg["key"],
+                    "Authorization": f"Bearer {cfg['key']}",
+                    "User-Agent": "SistemaInventario/1.0"
+                }
+            )
+            try:
+                print(f"[PERSISTENCIA NUBE] Consultando base persistente en Supabase Storage ({b}/{cfg['filename']})...")
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    data = resp.read()
+                    if data and len(data) > 100:
+                        # Respaldo de seguridad local antes de sobrescribir
+                        if os.path.exists(DB_PATH):
+                            shutil.copy2(DB_PATH, DB_PATH + ".pre_cloud_sync.bak")
+                        with open(DB_PATH, "wb") as f:
+                            f.write(data)
+                        print(f"[PERSISTENCIA NUBE] Base de datos persistente descargada exitosamente ({len(data)} bytes) desde bucket '{b}'.")
+                        _last_cloud_sync_status = {
+                            "ok": True,
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "error": None,
+                            "bytes": len(data),
+                            "bucket": b,
+                            "modo": "supabase_storage"
+                        }
+                        return True
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    continue
+                else:
+                    print(f"[PERSISTENCIA NUBE] Error HTTP {e.code} en {url}: {e.reason}")
+            except Exception as e:
+                print(f"[PERSISTENCIA NUBE] Error de conexión a {url}: {str(e)}")
+
+    print(f"[PERSISTENCIA NUBE] Aún no existe '{cfg['filename']}' en Supabase Storage. Subiendo base actual como imagen persistente...")
     sync_to_supabase_storage()
     return False
 
 def sync_to_supabase_storage():
     """Sube el archivo inventario.db a Supabase Storage con x-upsert para persistencia permanente."""
+    global _last_cloud_sync_status
     cfg = get_supabase_config()
     if not cfg or not os.path.exists(DB_PATH):
         return False
 
     try:
-        with open(DB_PATH, "rb") as f:
-            data = f.read()
+        data = None
+        for _ in range(3):
+            try:
+                with open(DB_PATH, "rb") as f:
+                    data = f.read()
+                if data and len(data) >= 100:
+                    break
+            except Exception:
+                time.sleep(0.1)
 
-        url = f"{cfg['url']}/storage/v1/object/{cfg['bucket']}/{cfg['filename']}"
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={
-                "apikey": cfg["key"],
-                "Authorization": f"Bearer {cfg['key']}",
-                "x-upsert": "true",
-                "Content-Type": "application/x-sqlite3",
-                "User-Agent": "SistemaInventario/1.0"
-            },
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            print(f"[PERSISTENCIA NUBE] Base de datos guardada en Supabase Storage ({len(data)} bytes).")
-            return True
+        if not data or len(data) < 100:
+            print("[PERSISTENCIA NUBE] Error: archivo de base de datos vacío o ilegible.")
+            return False
+
+        buckets_to_try = [cfg['bucket']]
+        for b_alt in ["database", "inventario"]:
+            if b_alt not in buckets_to_try:
+                buckets_to_try.append(b_alt)
+
+        exito = False
+        ultimo_error = None
+
+        for b in buckets_to_try:
+            url = f"{cfg['url']}/storage/v1/object/{b}/{cfg['filename']}"
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={
+                    "apikey": cfg["key"],
+                    "Authorization": f"Bearer {cfg['key']}",
+                    "x-upsert": "true",
+                    "Content-Type": "application/x-sqlite3",
+                    "User-Agent": "SistemaInventario/1.0"
+                },
+                method="POST"
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    print(f"[PERSISTENCIA NUBE] Base de datos guardada en Supabase Storage (bucket '{b}', {len(data)} bytes).")
+                    _last_cloud_sync_status = {
+                        "ok": True,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "error": None,
+                        "bytes": len(data),
+                        "bucket": b,
+                        "modo": "supabase_storage"
+                    }
+                    exito = True
+                    break
+            except urllib.error.HTTPError as e:
+                ultimo_error = f"HTTP {e.code}: {e.reason}"
+                if e.code == 404:
+                    continue
+                else:
+                    break
+            except Exception as e:
+                ultimo_error = str(e)
+                break
+
+        if not exito:
+            _last_cloud_sync_status = {
+                "ok": False,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "error": ultimo_error,
+                "bytes": len(data) if data else 0,
+                "bucket": cfg['bucket'],
+                "modo": "error_sincronizacion"
+            }
+            print(f"[PERSISTENCIA NUBE] Fallo al sincronizar con Supabase Storage: {ultimo_error}")
+            return False
+
+        return True
     except Exception as e:
-        print(f"[PERSISTENCIA NUBE] Error al sincronizar con Supabase Storage: {str(e)}")
+        print(f"[PERSISTENCIA NUBE] Error general al sincronizar: {str(e)}")
         return False
 
-def schedule_cloud_sync():
-    """Programa una sincronización diferida (espera 3 segundos tras el último commit)."""
-    global _sync_timer
+def trigger_cloud_sync_async():
+    """Ejecuta sincronización en segundo plano de manera inmediata sin bloquear la transacción HTTP."""
     if not get_supabase_config():
         return
-    with _sync_lock:
-        if _sync_timer:
-            _sync_timer.cancel()
-        _sync_timer = threading.Timer(3.0, sync_to_supabase_storage)
-        _sync_timer.daemon = True
-        _sync_timer.start()
+    t = threading.Thread(target=sync_to_supabase_storage, daemon=True)
+    t.start()
+
+def schedule_cloud_sync():
+    """Programa o despacha sincronización inmediata/diferida hacia la nube."""
+    trigger_cloud_sync_async()
 
 class MonitoredConnection(sqlite3.Connection):
     """Conexión SQLite que intercepta commit() para auto-guardar en la nube sin bloquear peticiones."""
     def commit(self):
         super().commit()
-        schedule_cloud_sync()
+        trigger_cloud_sync_async()
 
 def get_connection():
     conn = sqlite3.connect(DB_PATH, factory=MonitoredConnection)
@@ -976,17 +1182,14 @@ def init_db():
     conn.commit()
     conn.close()
 
-def limpiar_transacciones_db():
+def limpiar_transacciones_db(confirmacion=""):
     """
-    Limpia todas las transacciones para pruebas del Beta Tester:
-    - Facturas, detalles y pagos
-    - Compras, detalles y pagos
-    - Cuentas por cobrar y abonos
-    - Cuentas por pagar y abonos
-    - Devoluciones y notas de crédito
-    - Reinicia el stock de todos los productos a 0
-    Conserva intactos las categorías, productos, clientes y configuración.
+    Limpia transacciones para pruebas de Beta Tester.
+    PROTECCIÓN CRÍTICA: Exige confirmacion == 'CONFIRMAR_BORRADO_TOTAL_AUTORIZADO' para evitar pérdidas accidentales.
     """
+    if confirmacion != "CONFIRMAR_BORRADO_TOTAL_AUTORIZADO":
+        raise PermissionError("Acción bloqueada: Debe proporcionar la frase de seguridad 'CONFIRMAR_BORRADO_TOTAL_AUTORIZADO'.")
+
     conn = get_connection()
     c = conn.cursor()
     tablas = [
@@ -996,7 +1199,8 @@ def limpiar_transacciones_db():
         "compra_pagos", "compra_detalles", "compras",
         "abono_cxc_pagos", "abonos_cxc", "cuentas_por_cobrar",
         "abono_cxp_pagos", "abonos_cxp", "cuentas_por_pagar",
-        "devolucion_pagos", "devolucion_detalles", "devoluciones"
+        "devolucion_pagos", "devolucion_detalles", "devoluciones",
+        "notas_ajuste_comercial"
     ]
     for t in tablas:
         try:
@@ -1010,8 +1214,14 @@ def limpiar_transacciones_db():
     sync_to_supabase_storage()
     return True
 
-def restablecer_fabrica_db():
-    """Restaura completamente la base de datos limpia de fábrica."""
+def restablecer_fabrica_db(confirmacion=""):
+    """
+    Restaura completamente la base de datos limpia de fábrica.
+    PROTECCIÓN CRÍTICA: Exige confirmacion == 'CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO'.
+    """
+    if confirmacion != "CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO":
+        raise PermissionError("Acción bloqueada: Debe proporcionar la frase de seguridad 'CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO'.")
+
     from crear_base_datos_limpia import crear_base_limpia
     crear_base_limpia(DB_PATH)
     sync_to_supabase_storage()
