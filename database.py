@@ -66,37 +66,44 @@ _last_cloud_sync_status = {
 
 def get_supabase_config():
     """
-    Busca configuración de Supabase Storage con tolerancia a múltiples alias de variables de entorno comunes:
-    URL: SUPABASE_URL, SUPABASE_PROJECT_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_ENDPOINT.
-    Key: SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_SERVICE_KEY, SUPABASE_ANON_KEY, SUPABASE_API_KEY.
-    Bucket: SUPABASE_BUCKET, SUPABASE_STORAGE_BUCKET (default: 'database').
+    Busca configuración de Supabase Storage con tolerancia insensible a mayúsculas/minúsculas
+    y auto-limpieza de sufijos (/rest/v1) en URLs.
     """
+    # Diccionario con claves en mayúsculas para tolerancia total (Linux case-insensitive)
+    env_upper = {k.upper(): str(v).strip() for k, v in os.environ.items() if v is not None}
+
     url = (
-        os.environ.get("SUPABASE_URL") or
-        os.environ.get("SUPABASE_PROJECT_URL") or
-        os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or
-        os.environ.get("SUPABASE_ENDPOINT") or
+        env_upper.get("SUPABASE_URL") or
+        env_upper.get("SUPABASE_PROJECT_URL") or
+        env_upper.get("NEXT_PUBLIC_SUPABASE_URL") or
+        env_upper.get("SUPABASE_ENDPOINT") or
         ""
-    ).strip().rstrip("/")
+    ).strip()
+
+    # Sanitizar URL: eliminar sufijo de REST API si el usuario lo incluyó por error
+    if url:
+        if "/rest" in url:
+            url = url.split("/rest")[0]
+        url = url.rstrip("/")
 
     key = (
-        os.environ.get("SUPABASE_KEY") or
-        os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or
-        os.environ.get("SUPABASE_SERVICE_KEY") or
-        os.environ.get("SUPABASE_ANON_KEY") or
-        os.environ.get("SUPABASE_API_KEY") or
-        os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") or
+        env_upper.get("SUPABASE_KEY") or
+        env_upper.get("SUPABASE_SERVICE_ROLE_KEY") or
+        env_upper.get("SUPABASE_SERVICE_KEY") or
+        env_upper.get("SUPABASE_ANON_KEY") or
+        env_upper.get("SUPABASE_API_KEY") or
+        env_upper.get("NEXT_PUBLIC_SUPABASE_ANON_KEY") or
         ""
     ).strip()
 
     bucket = (
-        os.environ.get("SUPABASE_BUCKET") or
-        os.environ.get("SUPABASE_STORAGE_BUCKET") or
+        env_upper.get("SUPABASE_BUCKET") or
+        env_upper.get("SUPABASE_STORAGE_BUCKET") or
         "database"
     ).strip()
 
     filename = (
-        os.environ.get("SUPABASE_FILENAME") or
+        env_upper.get("SUPABASE_FILENAME") or
         "inventario.db"
     ).strip()
 
@@ -110,6 +117,8 @@ def test_supabase_connection():
     if not cfg:
         return {
             "ok": False,
+            "conectado": False,
+            "success": False,
             "error": "Variables de entorno de Supabase no configuradas en Render.",
             "detalle": "Debe agregar SUPABASE_URL y SUPABASE_KEY en la pestaña Environment de Render."
         }
@@ -128,6 +137,8 @@ def test_supabase_connection():
         with urllib.request.urlopen(req, timeout=10) as resp:
             return {
                 "ok": True,
+                "conectado": True,
+                "success": True,
                 "mensaje": f"Conexión exitosa a Supabase Storage. Bucket '{cfg['bucket']}' activo y accesible.",
                 "url": cfg["url"],
                 "bucket": cfg["bucket"]
@@ -141,6 +152,8 @@ def test_supabase_connection():
                 with urllib.request.urlopen(req2, timeout=8):
                     return {
                         "ok": True,
+                        "conectado": True,
+                        "success": True,
                         "mensaje": f"Conexión exitosa a Supabase con archivo '{cfg['filename']}' verificado.",
                         "url": cfg["url"],
                         "bucket": cfg["bucket"]
@@ -149,12 +162,16 @@ def test_supabase_connection():
                 if e2.code == 404:
                     return {
                         "ok": True,
+                        "conectado": True,
+                        "success": True,
                         "mensaje": f"Conexión autenticada OK a Supabase. El archivo '{cfg['filename']}' se creará automáticamente en la primera sincronización.",
                         "url": cfg["url"],
                         "bucket": cfg["bucket"]
                     }
         return {
             "ok": False,
+            "conectado": False,
+            "success": False,
             "error": f"Error HTTP {e.code}: {e.reason}",
             "detalle": f"Verifique que el bucket '{cfg['bucket']}' esté creado en Supabase Storage.",
             "url": cfg["url"],
@@ -163,6 +180,8 @@ def test_supabase_connection():
     except Exception as e:
         return {
             "ok": False,
+            "conectado": False,
+            "success": False,
             "error": f"Error de conexión: {str(e)}",
             "url": cfg["url"],
             "bucket": cfg["bucket"]

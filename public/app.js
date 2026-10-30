@@ -1229,17 +1229,18 @@ async function probarConexionSupabase() {
   try {
     const res = await fetch('/api/database/test-supabase');
     const data = await res.json();
-    if (data.conectado) {
+    const isOk = Boolean(data.ok || data.conectado || data.success);
+    if (isOk) {
       if (resultEl) {
         resultEl.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-check mr-1"></i>Conectado exitosamente (Bucket: ${data.bucket || 'database'})</span>`;
       }
-      alert('✅ Conexión con Supabase verificada exitosamente.\n\nLa base de datos se respaldará automáticamente en la nube de Supabase.');
+      alert('✅ Conexión con Supabase verificada exitosamente.\n\nBucket: ' + (data.bucket || 'database') + '\n\nLa base de datos se respaldará automáticamente en la nube.');
       await loadDatabaseStatus();
     } else {
       if (resultEl) {
         resultEl.innerHTML = `<span class="text-rose-600 font-semibold"><i class="fa-solid fa-xmark mr-1"></i>No conectado: ${data.error || 'Credenciales no configuradas'}</span>`;
       }
-      alert('⚠️ Supabase no está conectado.\n\nDetalle: ' + (data.error || 'Faltan SUPABASE_URL o SUPABASE_KEY en Render.'));
+      alert('⚠️ Supabase no está conectado.\n\nDetalle: ' + (data.detalle || data.error || 'Faltan SUPABASE_URL o SUPABASE_KEY en Render.'));
     }
   } catch (err) {
     if (resultEl) resultEl.textContent = 'Error: ' + err.message;
