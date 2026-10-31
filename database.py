@@ -2618,11 +2618,12 @@ def anular_abono_cxc(cursor, abono_id, motivo="Anulación de cobro", usuario_id=
     # Actualizar factura vinculada si existe
     fac_id = cxc.get("factura_id")
     if fac_id:
+        nuevo_estado_fac = "pagada" if nuevo_saldo <= 0.001 else "pendiente"
         cursor.execute("""
             UPDATE facturas 
-            SET saldo_pendiente = round(saldo_pendiente + ?, 2) 
+            SET saldo_pendiente = ?, estado = ? 
             WHERE id = ? AND estado != 'anulada'
-        """, (monto_abono, fac_id))
+        """, (nuevo_saldo, nuevo_estado_fac, fac_id))
 
     # Marcar abono como anulado
     cursor.execute("""
@@ -2636,6 +2637,7 @@ def anular_abono_cxc(cursor, abono_id, motivo="Anulación de cobro", usuario_id=
         "abono_id": abono_id,
         "cxc_id": cxc_id,
         "monto_reintegrado_usd": monto_abono,
+        "nuevo_monto_pagado": nuevo_pagado,
         "nuevo_saldo_pendiente": nuevo_saldo,
         "nuevo_estado_cxc": nuevo_estado,
         "fecha_anulacion": fecha_hoy
@@ -2703,6 +2705,7 @@ def anular_abono_cxp(cursor, abono_id, motivo="Anulación de pago a proveedor", 
         "abono_id": abono_id,
         "cxp_id": cxp_id,
         "monto_reintegrado_usd": monto_abono,
+        "nuevo_monto_pagado": nuevo_pagado,
         "nuevo_saldo_pendiente": nuevo_saldo,
         "nuevo_estado_cxp": nuevo_estado,
         "fecha_anulacion": fecha_hoy

@@ -5260,9 +5260,14 @@ function renderCxcConsolidadoTable() {
           <span class="text-[11px] text-slate-500">≈ ${saldoBs} Bs.</span>
         </td>
         <td class="py-3 px-4 text-right">
-          <button onclick="verEstadoCuentaCliente(${c.cliente_id})" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 ml-auto">
-            <i class="fa-solid fa-folder-open"></i> Ver Estado de Cuenta
-          </button>
+          <div class="flex items-center justify-end gap-1.5 flex-wrap">
+            <button onclick="abrirPagosDirectoCliente(${c.cliente_id})" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5" title="Aplicar Pago Multimoneda o Anular Pagos del Cliente">
+              <i class="fa-solid fa-money-bill-wave"></i> Pagos
+            </button>
+            <button onclick="verEstadoCuentaCliente(${c.cliente_id})" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5" title="Ver facturas del cliente, pagos y opciones de anulación">
+              <i class="fa-solid fa-folder-open"></i> Estado de Cuenta / Anular
+            </button>
+          </div>
         </td>
       </tr>
     `;
@@ -5304,8 +5309,8 @@ async function verEstadoCuentaCliente(clienteId) {
         : '';
     }
 
-    // Calcular saldos del cliente
-    const totalSaldoUsd = facturas.reduce((acc, f) => acc + parseFloat(f.saldo_pendiente || 0), 0);
+    // Calcular saldos del cliente (excluyendo facturas anuladas)
+    const totalSaldoUsd = facturas.filter(f => f.estado !== 'anulada').reduce((acc, f) => acc + parseFloat(f.saldo_pendiente || 0), 0);
     const tasaVes = AppState.config.tasa_ves || 45.0;
     const totalSaldoBs = (totalSaldoUsd * tasaVes).toFixed(2);
 
@@ -5331,7 +5336,7 @@ function volverACxcConsolidado() {
 
 function filterCxcClienteEstado(estado) {
   AppState.cxcClienteFilter = estado;
-  ['todos', 'pendiente', 'vencida', 'pagada'].forEach(e => {
+  ['todos', 'pendiente', 'vencida', 'pagada', 'anulada'].forEach(e => {
     const btn = document.getElementById(`cxcDetFilter-${e}`);
     if (btn) {
       if (e === estado) {
@@ -5352,11 +5357,13 @@ function renderCxcClienteFacturasTable() {
   const filtro = AppState.cxcClienteFilter || 'todos';
 
   if (filtro === 'pendiente') {
-    facturas = facturas.filter(f => f.estado !== 'pagada');
+    facturas = facturas.filter(f => f.estado !== 'pagada' && f.estado !== 'anulada');
   } else if (filtro === 'vencida') {
-    facturas = facturas.filter(f => f.estado !== 'pagada' && new Date(f.fecha_vencimiento) < new Date(new Date().toDateString()));
+    facturas = facturas.filter(f => f.estado !== 'pagada' && f.estado !== 'anulada' && new Date(f.fecha_vencimiento) < new Date(new Date().toDateString()));
   } else if (filtro === 'pagada') {
     facturas = facturas.filter(f => f.estado === 'pagada');
+  } else if (filtro === 'anulada') {
+    facturas = facturas.filter(f => f.estado === 'anulada');
   }
 
   if (facturas.length === 0) {
@@ -5367,9 +5374,12 @@ function renderCxcClienteFacturasTable() {
   const tasaVes = AppState.config.tasa_ves || 45.0;
 
   tbody.innerHTML = facturas.map(c => {
-    const esVencida = c.estado !== 'pagada' && new Date(c.fecha_vencimiento) < new Date(new Date().toDateString());
+    const esAnulada = c.estado === 'anulada';
+    const esVencida = !esAnulada && c.estado !== 'pagada' && new Date(c.fecha_vencimiento) < new Date(new Date().toDateString());
     let badgeEstado = '';
-    if (c.estado === 'pagada') {
+    if (esAnulada) {
+      badgeEstado = `<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800"><i class="fa-solid fa-ban mr-1"></i>Anulada</span>`;
+    } else if (c.estado === 'pagada') {
       badgeEstado = `<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800"><i class="fa-solid fa-check mr-1"></i>Pagada</span>`;
     } else if (esVencida) {
       badgeEstado = `<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800"><i class="fa-solid fa-clock-rotate-left mr-1"></i>Vencida</span>`;
@@ -5380,9 +5390,10 @@ function renderCxcClienteFacturasTable() {
     }
 
     const saldoBs = (c.saldo_pendiente * tasaVes).toFixed(2);
+    const abonosActivos = parseInt(c.abonos_activos_count || 0);
 
     return `
-      <tr class="hover:bg-slate-50 transition">
+      <tr class="hover:bg-slate-50 transition ${esAnulada ? 'opacity-60 bg-rose-50/30' : ''}">
         <td class="py-3 px-4 font-mono font-bold text-slate-900">${escapeHtml(c.numero_factura)}</td>
         <td class="py-3 px-4 text-xs text-slate-500">${formatFecha(c.fecha_emision)}</td>
         <td class="py-3 px-4 text-xs">
@@ -5397,19 +5408,24 @@ function renderCxcClienteFacturasTable() {
         </td>
         <td class="py-3 px-4">${badgeEstado}</td>
         <td class="py-3 px-4 text-right space-x-1 whitespace-nowrap">
-          ${c.saldo_pendiente > 0.001 ? `
-            <button onclick="abrirModalAbonoCXC(${c.id})" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-xs">
-              <i class="fa-solid fa-hand-holding-dollar mr-1"></i>Abonar
+          ${(!esAnulada && c.saldo_pendiente > 0.001) ? `
+            <button onclick="abrirModalAbonoCXC(${c.id})" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-xs" title="Aplicar Pago Multimoneda (USD, VES, COP) para rebajar saldo">
+              <i class="fa-solid fa-money-bill-wave mr-1"></i>Pagos
             </button>
-          ` : `
-            <span class="px-2 py-1 text-slate-400 text-xs font-semibold">Saldada</span>
-          `}
-          <button onclick="abrirModalNotaAjuste('cxc', ${c.cliente_id}, ${c.id})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold transition" title="Aplicar Nota Débito / Crédito">
-            <i class="fa-solid fa-file-invoice-dollar mr-0.5"></i>+ Nota
+          ` : (!esAnulada ? `
+            <span class="px-2 py-1 text-emerald-600 text-xs font-bold">Saldada</span>
+          ` : '')}
+          <button onclick="verHistorialAbonosCXC(${c.id})" class="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg text-xs font-bold transition" title="Ver historial de pagos recibidos y anular pagos">
+            <i class="fa-solid fa-rotate-left mr-1"></i>Anular Pago${abonosActivos > 0 ? ' (' + abonosActivos + ')' : ''}
           </button>
-          <button onclick="verHistorialAbonosCXC(${c.id})" class="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Ver Historial">
-            <i class="fa-solid fa-list-ul"></i>
-          </button>
+          ${!esAnulada ? `
+            <button onclick="anularFacturaDesdeCXC(${c.factura_id}, '${escapeHtml(c.numero_factura)}')" class="px-2.5 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-xs font-bold transition" title="Anular esta factura y revertir inventario y saldo">
+              <i class="fa-solid fa-ban mr-1"></i>Anular Factura
+            </button>
+            <button onclick="abrirModalNotaAjuste('cxc', ${c.cliente_id}, ${c.id})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold transition" title="Aplicar Nota Débito / Crédito">
+              <i class="fa-solid fa-file-invoice-dollar mr-0.5"></i>+ Nota
+            </button>
+          ` : ''}
           <button onclick="enviarRecordatorioWhatsAppCXC(${c.id})" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Recordatorio WhatsApp">
             <i class="fa-brands fa-whatsapp text-sm"></i>
           </button>
@@ -5419,13 +5435,66 @@ function renderCxcClienteFacturasTable() {
   }).join('');
 }
 
-// Modal de Abonos a Cuenta por Cobrar
-async function abrirModalAbonoCXC(cxcId) {
+// Abrir modal de Pagos directamente desde la fila del cliente (Consolidado) o desde el encabezado del Estado de Cuenta
+async function abrirPagosDirectoCliente(clienteId) {
+  try {
+    const res = await fetch(`/api/cxc?cliente_id=${clienteId}`);
+    if (!res.ok) throw new Error("No se pudieron cargar las cuentas del cliente");
+    const cuentas = await res.json();
+    const activas = cuentas.filter(c => c.estado !== 'anulada');
+    if (activas.length === 0) {
+      alert("Este cliente no tiene facturas activas en Cuentas por Cobrar.");
+      return;
+    }
+    // Preferir la factura pendiente más antigua (menor id con saldo > 0), o si todas están saldadas, la más reciente para permitir ver/anular pagos
+    const pendientes = activas.filter(c => parseFloat(c.saldo_pendiente || 0) > 0.001).sort((a, b) => a.id - b.id);
+    const cuentaInicial = pendientes.length > 0 ? pendientes[0] : activas[0];
+
+    await abrirModalAbonoCXC(cuentaInicial.id, activas);
+  } catch (err) {
+    alert("Error al abrir Pagos del cliente: " + err.message);
+  }
+}
+
+function abrirModalPagosClienteActual() {
+  if (AppState.cxcClienteSeleccionado) {
+    abrirPagosDirectoCliente(AppState.cxcClienteSeleccionado);
+  }
+}
+
+async function onCambioCuentaEnModalPagoCXC(nuevoCxcId) {
+  if (!nuevoCxcId) return;
+  await abrirModalAbonoCXC(parseInt(nuevoCxcId), AppState.abonoCxcListaCliente || null);
+}
+
+// Modal de Pagos / Abonos a Cuenta por Cobrar (Multimoneda)
+async function abrirModalAbonoCXC(cxcId, listaCuentasCliente = null) {
   try {
     const res = await fetch(`/api/cxc/${cxcId}`);
     if (!res.ok) return;
     const c = await res.json();
     AppState.abonoCxcActual = c;
+
+    // Si no se pasó listaCuentasCliente pero hay varias facturas del cliente en memoria, usarlas
+    if (!listaCuentasCliente && AppState.cxcClienteFacturas && AppState.cxcClienteFacturas.length > 1) {
+      listaCuentasCliente = AppState.cxcClienteFacturas.filter(x => x.estado !== 'anulada');
+    }
+    AppState.abonoCxcListaCliente = listaCuentasCliente;
+
+    const wrapperSelect = document.getElementById('abonoCxcSelectCuentaWrapper');
+    const selectCuenta = document.getElementById('abonoCxcSelectCuenta');
+    if (wrapperSelect && selectCuenta) {
+      if (listaCuentasCliente && listaCuentasCliente.length > 0) {
+        wrapperSelect.classList.remove('hidden');
+        selectCuenta.innerHTML = listaCuentasCliente.map(item => {
+          const s = parseFloat(item.saldo_pendiente || 0).toFixed(2);
+          const pag = parseFloat(item.monto_pagado || 0).toFixed(2);
+          return `<option value="${item.id}" ${item.id === c.id ? 'selected' : ''}>Factura ${escapeHtml(item.numero_factura)} — Saldo: $${s} (Abonado: $${pag})</option>`;
+        }).join('');
+      } else {
+        wrapperSelect.classList.add('hidden');
+      }
+    }
 
     document.getElementById('abonoCxcId').value = c.id;
     document.getElementById('abonoClienteNombre').textContent = `${c.cliente_nombre} (${c.cliente_cedula})`;
@@ -5443,14 +5512,15 @@ async function abrirModalAbonoCXC(cxcId) {
         id: 1,
         moneda: 'USD',
         metodo: 'Dólar Efectivo',
-        monto: parseFloat(c.saldo_pendiente)
+        monto: parseFloat(c.saldo_pendiente),
+        referencia: ''
       }
     ];
     renderAbonoPagos();
 
     document.getElementById('modalAbonoCXC').classList.remove('hidden');
   } catch (err) {
-    console.error("Error abriendo abono:", err);
+    console.error("Error abriendo modal de pagos CXC:", err);
   }
 }
 
@@ -5487,7 +5557,8 @@ function addAbonoPagoRow() {
     id: nextId,
     moneda: defaultMoneda,
     metodo: metodosDisponibles[0],
-    monto: montoAuto
+    monto: montoAuto,
+    referencia: ''
   });
   renderAbonoPagos();
 }
@@ -5516,26 +5587,33 @@ function renderAbonoPagos() {
     `).join('');
 
     return `
-      <div class="flex items-center space-x-2 bg-slate-50 p-2 rounded-xl border border-slate-200 text-xs">
-        <select onchange="updateAbonoPagoMoneda(${p.id}, this.value)" class="bg-white border border-slate-200 rounded-lg py-1 px-2 font-bold text-slate-700">
-          <option value="USD" ${p.moneda === 'USD' ? 'selected' : ''}>USD ($)</option>
-          <option value="VES" ${p.moneda === 'VES' ? 'selected' : ''}>VES (Bs.)</option>
-          <option value="COP" ${p.moneda === 'COP' ? 'selected' : ''}>COP (Pesos)</option>
-        </select>
+      <div class="bg-slate-50 p-2 rounded-xl border border-slate-200 text-xs space-y-1.5">
+        <div class="flex items-center space-x-2">
+          <select onchange="updateAbonoPagoMoneda(${p.id}, this.value)" class="bg-white border border-slate-200 rounded-lg py-1 px-2 font-bold text-slate-700">
+            <option value="USD" ${p.moneda === 'USD' ? 'selected' : ''}>USD ($)</option>
+            <option value="VES" ${p.moneda === 'VES' ? 'selected' : ''}>VES (Bs.)</option>
+            <option value="COP" ${p.moneda === 'COP' ? 'selected' : ''}>COP (Pesos)</option>
+          </select>
 
-        <select onchange="updateAbonoPagoMetodo(${p.id}, this.value)" class="bg-white border border-slate-200 rounded-lg py-1 px-2 font-medium text-slate-700">
-          ${metodosOptions}
-        </select>
+          <select onchange="updateAbonoPagoMetodo(${p.id}, this.value)" class="bg-white border border-slate-200 rounded-lg py-1 px-2 font-medium text-slate-700">
+            ${metodosOptions}
+          </select>
 
-        <div class="relative flex-1">
-          <input type="number" step="any" min="0" value="${p.monto !== undefined && p.monto !== null ? p.monto : ''}" placeholder="Monto"
-                 oninput="updateAbonoPagoMonto(${p.id}, this.value)"
-                 class="w-full bg-white border border-slate-200 rounded-lg py-1 px-2 text-xs font-bold text-slate-900 text-right">
+          <div class="relative flex-1">
+            <input type="number" step="any" min="0" value="${p.monto !== undefined && p.monto !== null ? p.monto : ''}" placeholder="Monto"
+                   oninput="updateAbonoPagoMonto(${p.id}, this.value)"
+                   class="w-full bg-white border border-slate-200 rounded-lg py-1 px-2 text-xs font-bold text-slate-900 text-right">
+          </div>
+
+          <button onclick="removeAbonoPagoRow(${p.id})" class="text-rose-500 hover:text-rose-700 p-1">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
         </div>
-
-        <button onclick="removeAbonoPagoRow(${p.id})" class="text-rose-500 hover:text-rose-700 p-1">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
+        <div class="flex items-center justify-between gap-2">
+          <input type="text" value="${escapeHtml(p.referencia || '')}" placeholder="N° Referencia / Comprobante (opcional)"
+                 oninput="updateAbonoPagoReferencia(${p.id}, this.value)"
+                 class="flex-1 bg-white border border-slate-200 rounded-lg py-1 px-2 text-[11px] text-slate-700">
+        </div>
       </div>
     `;
   }).join('');
@@ -5557,6 +5635,11 @@ function updateAbonoPagoMoneda(id, nuevaMoneda) {
 function updateAbonoPagoMetodo(id, metodo) {
   const p = AppState.abonoPagos.find(x => x.id === id);
   if (p) p.metodo = metodo;
+}
+
+function updateAbonoPagoReferencia(id, ref) {
+  const p = AppState.abonoPagos.find(x => x.id === id);
+  if (p) p.referencia = ref;
 }
 
 function updateAbonoPagoMonto(id, monto) {
@@ -5601,16 +5684,16 @@ async function confirmarAbonoCXC() {
       metodo: p.metodo,
       monto_moneda: p.monto,
       tasa_cambio: tasa,
-      referencia: ''
+      referencia: (p.referencia || '').trim()
     };
   });
 
   if (pagos.length === 0) {
-    alert('Ingresa al menos un monto de abono mayor a cero.');
+    alert('Ingresa al menos un monto de pago mayor a cero.');
     return;
   }
 
-  const notas = document.getElementById('abonoNotas')?.value.trim() || 'Abono a cuenta por cobrar';
+  const notas = document.getElementById('abonoNotas')?.value.trim() || 'Pago aplicado en CXC';
 
   try {
     const res = await fetch(`/api/cxc/${c.id}/abonos`, {
@@ -5622,16 +5705,17 @@ async function confirmarAbonoCXC() {
     if (res.ok) {
       const data = await res.json();
       closeModalAbonoCXC();
-      alert(`¡Abono de $${data.monto_abono_usd.toFixed(2)} registrado exitosamente!\nNuevo saldo pendiente: $${data.nuevo_saldo_pendiente.toFixed(2)}`);
+      alert(`¡Pago de $${data.monto_abono_usd.toFixed(2)} USD registrado exitosamente!\nNuevo saldo pendiente: $${data.nuevo_saldo_pendiente.toFixed(2)}`);
       await loadCxc();
       await loadDashboard();
-  await loadDatabaseStatus();
+      await loadDatabaseStatus();
+      if (AppState.currentView === 'reportes' && AppState.reportesTabActual === 'cxc') loadReporteCxc();
     } else {
       const err = await res.json();
-      alert('Error registrando abono: ' + (err.error || 'No se pudo guardar'));
+      alert('Error registrando pago: ' + (err.error || 'No se pudo guardar'));
     }
   } catch (err) {
-    alert('Error al registrar abono: ' + err.message);
+    alert('Error al registrar pago: ' + err.message);
   }
 }
 
@@ -5854,9 +5938,14 @@ function renderCxpConsolidadoTable() {
           <span class="text-[11px] text-slate-500">≈ ${saldoBs} Bs.</span>
         </td>
         <td class="py-3 px-4 text-right">
-          <button onclick="verEstadoCuentaProveedor(${c.proveedor_id})" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 ml-auto">
-            <i class="fa-solid fa-folder-open"></i> Ver Estado de Cuenta
-          </button>
+          <div class="flex items-center justify-end gap-1.5 flex-wrap">
+            <button onclick="abrirPagosDirectoProveedor(${c.proveedor_id})" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5" title="Aplicar Pago Multimoneda o Anular Pagos al Proveedor">
+              <i class="fa-solid fa-money-bill-wave"></i> Pagos
+            </button>
+            <button onclick="verEstadoCuentaProveedor(${c.proveedor_id})" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5" title="Ver cuentas del proveedor, pagos y opciones de anulación">
+              <i class="fa-solid fa-folder-open"></i> Estado de Cuenta / Anular
+            </button>
+          </div>
         </td>
       </tr>
     `;
@@ -5898,8 +5987,8 @@ async function verEstadoCuentaProveedor(proveedorId) {
         : '';
     }
 
-    // Calcular saldos del proveedor
-    const totalSaldoUsd = cuentas.reduce((acc, c) => acc + parseFloat(c.saldo_pendiente || 0), 0);
+    // Calcular saldos del proveedor (excluyendo cuentas anuladas)
+    const totalSaldoUsd = cuentas.filter(c => c.estado !== 'anulada').reduce((acc, c) => acc + parseFloat(c.saldo_pendiente || 0), 0);
     const tasaVes = AppState.config.tasa_ves || 45.0;
     const totalSaldoBs = (totalSaldoUsd * tasaVes).toFixed(2);
 
@@ -5925,7 +6014,7 @@ function volverACxpConsolidado() {
 
 function filterCxpProveedorEstado(estado) {
   AppState.cxpProveedorFilter = estado;
-  ['todos', 'pendiente', 'parcial', 'vencida', 'pagada'].forEach(e => {
+  ['todos', 'pendiente', 'parcial', 'vencida', 'pagada', 'anulada'].forEach(e => {
     const btn = document.getElementById(`cxpDetFilter-${e}`);
     if (btn) {
       if (e === estado) {
@@ -5950,9 +6039,11 @@ function renderCxpProveedorCuentasTable() {
   } else if (filtro === 'parcial') {
     cuentas = cuentas.filter(c => c.estado === 'parcial');
   } else if (filtro === 'vencida') {
-    cuentas = cuentas.filter(c => c.estado !== 'pagada' && (parseInt(c.dias_vencido) || 0) > 0);
+    cuentas = cuentas.filter(c => c.estado !== 'pagada' && c.estado !== 'anulada' && (parseInt(c.dias_vencido) || 0) > 0);
   } else if (filtro === 'pagada') {
     cuentas = cuentas.filter(c => c.estado === 'pagada');
+  } else if (filtro === 'anulada') {
+    cuentas = cuentas.filter(c => c.estado === 'anulada');
   }
 
   if (cuentas.length === 0) {
@@ -5963,11 +6054,14 @@ function renderCxpProveedorCuentasTable() {
   const tasaVes = AppState.config.tasa_ves || 45.0;
 
   tbody.innerHTML = cuentas.map(c => {
+    const esAnulada = c.estado === 'anulada';
     const diasVenc = parseInt(c.dias_vencido) || 0;
-    const esVencida = c.estado !== 'pagada' && diasVenc > 0;
+    const esVencida = !esAnulada && c.estado !== 'pagada' && diasVenc > 0;
 
     let badgeEstado = '';
-    if (c.estado === 'pagada') {
+    if (esAnulada) {
+      badgeEstado = `<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800"><i class="fa-solid fa-ban mr-1"></i>Anulada</span>`;
+    } else if (c.estado === 'pagada') {
       badgeEstado = `<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800"><i class="fa-solid fa-check mr-1"></i>Saldada</span>`;
     } else if (esVencida) {
       badgeEstado = `<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800"><i class="fa-solid fa-clock-rotate-left mr-1"></i>Vencida</span>`;
@@ -5987,8 +6081,11 @@ function renderCxpProveedorCuentasTable() {
       ? `<span class="text-rose-600 font-bold text-xs"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Vencida (${diasVenc} d)</span>`
       : `<span class="text-slate-600 text-xs">${c.fecha_vencimiento}</span>`;
 
+    const abonosActivos = parseInt(c.abonos_activos_count || 0);
+    const numDocCxp = escapeHtml(c.numero_factura || c.compra_numero_control || `#${c.id}`);
+
     return `
-      <tr class="hover:bg-slate-50 transition">
+      <tr class="hover:bg-slate-50 transition ${esAnulada ? 'opacity-60 bg-rose-50/30' : ''}">
         <td class="py-3 px-4 font-mono font-bold text-slate-900 text-xs">
           <p>${escapeHtml(c.numero_factura || '-')}</p>
           <span class="text-[10px] text-slate-400 font-sans font-normal">${escapeHtml(c.descripcion_concepto || 'Compra de mercancía')}</span>
@@ -6004,22 +6101,28 @@ function renderCxpProveedorCuentasTable() {
         </td>
         <td class="py-3 px-4 text-center">${badgeEstado}</td>
         <td class="py-3 px-4 text-right space-x-1 whitespace-nowrap">
-          ${c.saldo_pendiente > 0.001 ? `
-            <button onclick="abrirModalAbonoCXP(${c.id})" class="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition shadow-xs">
-              <i class="fa-solid fa-money-bill-transfer mr-1"></i>Pagar
+          ${(!esAnulada && c.saldo_pendiente > 0.001) ? `
+            <button onclick="abrirModalAbonoCXP(${c.id})" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-xs" title="Aplicar Pago Multimoneda (USD, VES, COP) para rebajar saldo">
+              <i class="fa-solid fa-money-bill-wave mr-1"></i>Pagos
+            </button>
+          ` : (!esAnulada ? `
+            <span class="px-2 py-1 text-emerald-600 text-xs font-bold">Saldada</span>
+          ` : '')}
+          <button onclick="verHistorialAbonosCXP(${c.id})" class="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg text-xs font-bold transition" title="Ver historial de pagos al proveedor y anular pagos">
+            <i class="fa-solid fa-rotate-left mr-1"></i>Anular Pago${abonosActivos > 0 ? ' (' + abonosActivos + ')' : ''}
+          </button>
+          ${!esAnulada ? (c.compra_id ? `
+            <button onclick="anularCompraDesdeCXP(${c.compra_id}, '${numDocCxp}')" class="px-2.5 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-xs font-bold transition" title="Anular esta compra y revertir inventario y deuda">
+              <i class="fa-solid fa-ban mr-1"></i>Anular Compra
             </button>
           ` : `
-            <span class="px-2 py-1 text-slate-400 text-xs font-semibold">Saldada</span>
-          `}
-          <button onclick="abrirModalNotaAjuste('cxp', ${c.proveedor_id}, ${c.id})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold transition" title="Aplicar Nota Débito / Crédito">
-            <i class="fa-solid fa-file-invoice-dollar mr-0.5"></i>+ Nota
-          </button>
-          <button onclick="verHistorialAbonosCXP(${c.id})" class="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg text-xs" title="Historial de Pagos">
-            <i class="fa-solid fa-clock-rotate-left"></i>
-          </button>
-          ${(c.estado !== 'anulada' && !c.compra_id) ? `
-            <button onclick="anularCuentaCXP(${c.id}, '${escapeHtml(c.numero_factura || '')}')" class="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg text-xs" title="Anular Cuenta Directa">
-              <i class="fa-solid fa-ban"></i>
+            <button onclick="anularCuentaCXP(${c.id}, '${numDocCxp}')" class="px-2.5 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-xs font-bold transition" title="Anular esta cuenta por pagar directa">
+              <i class="fa-solid fa-ban mr-1"></i>Anular Cuenta
+            </button>
+          `) : ''}
+          ${!esAnulada ? `
+            <button onclick="abrirModalNotaAjuste('cxp', ${c.proveedor_id}, ${c.id})" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold transition" title="Aplicar Nota Débito / Crédito">
+              <i class="fa-solid fa-file-invoice-dollar mr-0.5"></i>+ Nota
             </button>
           ` : ''}
         </td>
@@ -6406,13 +6509,65 @@ Efecto: ${efecto.toUpperCase()} saldo por $${montoUsd.toFixed(2)} USD (${data.mo
   }
 }
 
-// Modal de Abonos a Cuenta por Pagar
-async function abrirModalAbonoCXP(cxpId) {
+// Abrir modal de Pagos directamente desde la fila del proveedor (Consolidado) o desde el encabezado del Estado de Cuenta
+async function abrirPagosDirectoProveedor(proveedorId) {
+  try {
+    const res = await fetch(`/api/cxp?proveedor_id=${proveedorId}`);
+    if (!res.ok) throw new Error("No se pudieron cargar las cuentas del proveedor");
+    const cuentas = await res.json();
+    const activas = cuentas.filter(c => c.estado !== 'anulada');
+    if (activas.length === 0) {
+      alert("Este proveedor no tiene cuentas activas en Cuentas por Pagar.");
+      return;
+    }
+    const pendientes = activas.filter(c => parseFloat(c.saldo_pendiente || 0) > 0.001).sort((a, b) => a.id - b.id);
+    const cuentaInicial = pendientes.length > 0 ? pendientes[0] : activas[0];
+
+    await abrirModalAbonoCXP(cuentaInicial.id, activas);
+  } catch (err) {
+    alert("Error al abrir Pagos del proveedor: " + err.message);
+  }
+}
+
+function abrirModalPagosProveedorActual() {
+  if (AppState.cxpProveedorSeleccionado) {
+    abrirPagosDirectoProveedor(AppState.cxpProveedorSeleccionado);
+  }
+}
+
+async function onCambioCuentaEnModalPagoCXP(nuevoCxpId) {
+  if (!nuevoCxpId) return;
+  await abrirModalAbonoCXP(parseInt(nuevoCxpId), AppState.abonoCxpListaProveedor || null);
+}
+
+// Modal de Pagos / Abonos a Cuenta por Pagar (Multimoneda)
+async function abrirModalAbonoCXP(cxpId, listaCuentasProveedor = null) {
   try {
     const res = await fetch(`/api/cxp/${cxpId}`);
     if (!res.ok) return;
     const c = await res.json();
     AppState.abonoCxpActual = c;
+
+    if (!listaCuentasProveedor && AppState.cxpProveedorCuentas && AppState.cxpProveedorCuentas.length > 1) {
+      listaCuentasProveedor = AppState.cxpProveedorCuentas.filter(x => x.estado !== 'anulada');
+    }
+    AppState.abonoCxpListaProveedor = listaCuentasProveedor;
+
+    const wrapperSelect = document.getElementById('abonoCxpSelectCuentaWrapper');
+    const selectCuenta = document.getElementById('abonoCxpSelectCuenta');
+    if (wrapperSelect && selectCuenta) {
+      if (listaCuentasProveedor && listaCuentasProveedor.length > 0) {
+        wrapperSelect.classList.remove('hidden');
+        selectCuenta.innerHTML = listaCuentasProveedor.map(item => {
+          const s = parseFloat(item.saldo_pendiente || 0).toFixed(2);
+          const pag = parseFloat(item.monto_pagado || 0).toFixed(2);
+          const docLabel = item.numero_factura || item.descripcion_concepto || `#${item.id}`;
+          return `<option value="${item.id}" ${item.id === c.id ? 'selected' : ''}>Doc: ${escapeHtml(docLabel)} — Saldo: $${s} (Abonado: $${pag})</option>`;
+        }).join('');
+      } else {
+        wrapperSelect.classList.add('hidden');
+      }
+    }
 
     document.getElementById('abonoCxpProveedorNombre').textContent = `${c.proveedor_nombre} (${c.proveedor_cedula || ''})`;
     document.getElementById('abonoCxpFacturaConcepto').textContent = `${c.numero_factura || 'S/N'} - ${c.descripcion_concepto || 'Compra de mercancía'}`;
@@ -6429,7 +6584,8 @@ async function abrirModalAbonoCXP(cxpId) {
         id: 1,
         moneda: 'USD',
         metodo: 'Dólar Efectivo',
-        monto: parseFloat(c.saldo_pendiente)
+        monto: parseFloat(c.saldo_pendiente),
+        referencia: ''
       }
     ];
     renderAbonoPagosCXP();
@@ -6473,7 +6629,8 @@ function addAbonoPagoCxpRow() {
     id: nextId,
     moneda: defaultMoneda,
     metodo: metodosDisponibles[0],
-    monto: montoAuto
+    monto: montoAuto,
+    referencia: ''
   });
   renderAbonoPagosCXP();
 }
@@ -6502,26 +6659,33 @@ function renderAbonoPagosCXP() {
     `).join('');
 
     return `
-      <div class="flex items-center space-x-2 bg-slate-50 p-2 rounded-xl border border-slate-200 text-xs">
-        <select onchange="updateAbonoPagoCxpMoneda(${p.id}, this.value)" class="bg-white border border-slate-200 rounded-lg py-1 px-2 font-bold text-slate-700">
-          <option value="USD" ${p.moneda === 'USD' ? 'selected' : ''}>USD ($)</option>
-          <option value="VES" ${p.moneda === 'VES' ? 'selected' : ''}>VES (Bs.)</option>
-          <option value="COP" ${p.moneda === 'COP' ? 'selected' : ''}>COP (Pesos)</option>
-        </select>
+      <div class="bg-slate-50 p-2 rounded-xl border border-slate-200 text-xs space-y-1.5">
+        <div class="flex items-center space-x-2">
+          <select onchange="updateAbonoPagoCxpMoneda(${p.id}, this.value)" class="bg-white border border-slate-200 rounded-lg py-1 px-2 font-bold text-slate-700">
+            <option value="USD" ${p.moneda === 'USD' ? 'selected' : ''}>USD ($)</option>
+            <option value="VES" ${p.moneda === 'VES' ? 'selected' : ''}>VES (Bs.)</option>
+            <option value="COP" ${p.moneda === 'COP' ? 'selected' : ''}>COP (Pesos)</option>
+          </select>
 
-        <select onchange="updateAbonoPagoCxpMetodo(${p.id}, this.value)" class="bg-white border border-slate-200 rounded-lg py-1 px-2 font-medium text-slate-700">
-          ${metodosOptions}
-        </select>
+          <select onchange="updateAbonoPagoCxpMetodo(${p.id}, this.value)" class="bg-white border border-slate-200 rounded-lg py-1 px-2 font-medium text-slate-700">
+            ${metodosOptions}
+          </select>
 
-        <div class="relative flex-1">
-          <input type="number" step="any" min="0" value="${p.monto !== undefined && p.monto !== null ? p.monto : ''}" placeholder="Monto"
-                 oninput="updateAbonoPagoCxpMonto(${p.id}, this.value)"
-                 class="w-full bg-white border border-slate-200 rounded-lg py-1 px-2 text-xs font-bold text-slate-900 text-right">
+          <div class="relative flex-1">
+            <input type="number" step="any" min="0" value="${p.monto !== undefined && p.monto !== null ? p.monto : ''}" placeholder="Monto"
+                   oninput="updateAbonoPagoCxpMonto(${p.id}, this.value)"
+                   class="w-full bg-white border border-slate-200 rounded-lg py-1 px-2 text-xs font-bold text-slate-900 text-right">
+          </div>
+
+          <button onclick="removeAbonoPagoCxpRow(${p.id})" class="text-rose-500 hover:text-rose-700 p-1">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
         </div>
-
-        <button onclick="removeAbonoPagoCxpRow(${p.id})" class="text-rose-500 hover:text-rose-700 p-1">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
+        <div class="flex items-center justify-between gap-2">
+          <input type="text" value="${escapeHtml(p.referencia || '')}" placeholder="N° Referencia / Comprobante (opcional)"
+                 oninput="updateAbonoPagoCxpReferencia(${p.id}, this.value)"
+                 class="flex-1 bg-white border border-slate-200 rounded-lg py-1 px-2 text-[11px] text-slate-700">
+        </div>
       </div>
     `;
   }).join('');
@@ -6543,6 +6707,11 @@ function updateAbonoPagoCxpMoneda(id, nuevaMoneda) {
 function updateAbonoPagoCxpMetodo(id, metodo) {
   const p = AppState.abonoCxpPagos.find(x => x.id === id);
   if (p) p.metodo = metodo;
+}
+
+function updateAbonoPagoCxpReferencia(id, ref) {
+  const p = AppState.abonoCxpPagos.find(x => x.id === id);
+  if (p) p.referencia = ref;
 }
 
 function updateAbonoPagoCxpMonto(id, monto) {
@@ -6587,7 +6756,7 @@ async function confirmarAbonoCXP() {
       metodo: p.metodo,
       monto_moneda: p.monto,
       tasa_cambio: tasa,
-      referencia: ''
+      referencia: (p.referencia || '').trim()
     };
   });
 
@@ -6598,7 +6767,7 @@ async function confirmarAbonoCXP() {
 
   const payload = {
     pagos: pagos,
-    notas: document.getElementById('abonoCxpNotas').value.trim()
+    notas: document.getElementById('abonoCxpNotas').value.trim() || 'Pago aplicado en CXP'
   };
 
   try {
@@ -6609,10 +6778,12 @@ async function confirmarAbonoCXP() {
     });
 
     if (res.ok) {
-      alert('¡Pago / Abono registrado exitosamente!');
+      const data = await res.json();
       closeModalAbonoCXP();
-      loadCxp();
-      loadDashboard();
+      alert(`¡Pago de $${data.monto_abono_usd.toFixed(2)} USD registrado exitosamente!\nNuevo saldo pendiente: $${data.nuevo_saldo_pendiente.toFixed(2)}`);
+      await loadCxp();
+      await loadDashboard();
+      await loadDatabaseStatus();
       if (AppState.currentView === 'reportes' && AppState.reportesTabActual === 'cxp') loadReporteCxp();
     } else {
       const err = await res.json();
@@ -7271,13 +7442,21 @@ function renderReporteCxcTabla() {
         <td class="py-2.5 px-4 text-right font-black text-xs text-rose-700 bg-rose-50/50">$${saldo.toFixed(2)}</td>
         <td class="py-2.5 px-4 text-right text-xs text-slate-600">${parseFloat(c.saldo_ves || 0).toLocaleString('es-VE')} Bs.</td>
         <td class="py-2.5 px-4 text-center">${badgeEstado}</td>
-        <td class="py-2.5 px-4 text-right space-x-1">
+        <td class="py-2.5 px-4 text-right space-x-1 whitespace-nowrap">
           <button onclick="enviarRecordatorioWhatsAppCXC(${c.id})" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Recordar por WhatsApp">
             <i class="fa-brands fa-whatsapp text-sm"></i>
           </button>
-          ${saldo > 0.001 ? `
-            <button onclick="abrirModalAbonoCXC(${c.id})" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold">
-              Abonar
+          ${(c.estado !== 'anulada' && saldo > 0.001) ? `
+            <button onclick="abrirModalAbonoCXC(${c.id})" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold">
+              <i class="fa-solid fa-money-bill-wave mr-1"></i>Pagos
+            </button>
+          ` : ''}
+          <button onclick="verHistorialAbonosCXC(${c.id})" class="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg text-xs font-bold" title="Ver y anular pagos">
+            <i class="fa-solid fa-rotate-left mr-0.5"></i>Anular Pago
+          </button>
+          ${c.estado !== 'anulada' ? `
+            <button onclick="anularFacturaDesdeCXC(${c.factura_id}, '${escapeHtml(c.numero_factura)}')" class="px-2 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-xs font-bold" title="Anular Factura">
+              <i class="fa-solid fa-ban mr-0.5"></i>Anular
             </button>
           ` : ''}
         </td>
@@ -7428,12 +7607,24 @@ function renderReporteCxpTable() {
         <td class="py-2.5 px-4 text-right font-black text-xs text-rose-700 bg-rose-50/50">$${sal.toFixed(2)}</td>
         <td class="py-2.5 px-4 text-right text-xs text-slate-600">${parseFloat(c.saldo_ves || 0).toLocaleString('es-VE')} Bs.</td>
         <td class="py-2.5 px-4 text-center">${badge}</td>
-        <td class="py-2.5 px-4 text-right whitespace-nowrap">
-          ${sal > 0.001 ? `
-            <button onclick="navigate('cxp'); abrirModalAbonoCXP(${c.id});" class="px-2 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-semibold">
-              Pagar
+        <td class="py-2.5 px-4 text-right space-x-1 whitespace-nowrap">
+          ${(c.estado !== 'anulada' && sal > 0.001) ? `
+            <button onclick="abrirModalAbonoCXP(${c.id})" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold">
+              <i class="fa-solid fa-money-bill-wave mr-1"></i>Pagos
             </button>
-          ` : '<span class="text-slate-400 text-xs">-</span>'}
+          ` : ''}
+          <button onclick="verHistorialAbonosCXP(${c.id})" class="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg text-xs font-bold" title="Ver y anular pagos">
+            <i class="fa-solid fa-rotate-left mr-0.5"></i>Anular Pago
+          </button>
+          ${c.estado !== 'anulada' ? (c.compra_id ? `
+            <button onclick="anularCompraDesdeCXP(${c.compra_id}, '${escapeHtml(c.numero_factura || '#'+c.id)}')" class="px-2 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-xs font-bold" title="Anular Compra">
+              <i class="fa-solid fa-ban mr-0.5"></i>Anular
+            </button>
+          ` : `
+            <button onclick="anularCuentaCXP(${c.id}, '${escapeHtml(c.numero_factura || '#'+c.id)}')" class="px-2 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-xs font-bold" title="Anular Cuenta">
+              <i class="fa-solid fa-ban mr-0.5"></i>Anular
+            </button>
+          `) : ''}
         </td>
       </tr>
     `;
@@ -11722,7 +11913,26 @@ async function anularCuentaCXP(cxpId, numDoc) {
     }
     await loadCxpConsolidado();
     await loadDashboard();
+    if (AppState.currentView === 'reportes' && AppState.reportesTabActual === 'cxp') loadReporteCxp();
   } catch (err) {
     alert("❌ Error al anular cuenta: " + err.message);
   }
+}
+
+async function anularFacturaDesdeCXC(facturaId, numFactura) {
+  await anularFactura(facturaId, numFactura);
+  if (AppState.cxcClienteSeleccionado) {
+    await verEstadoCuentaCliente(AppState.cxcClienteSeleccionado);
+  }
+  await loadCxcConsolidado();
+  if (AppState.currentView === 'reportes' && AppState.reportesTabActual === 'cxc') loadReporteCxc();
+}
+
+async function anularCompraDesdeCXP(compraId, numControl) {
+  await anularCompra(compraId, numControl);
+  if (AppState.cxpProveedorSeleccionado) {
+    await verEstadoCuentaProveedor(AppState.cxpProveedorSeleccionado);
+  }
+  await loadCxpConsolidado();
+  if (AppState.currentView === 'reportes' && AppState.reportesTabActual === 'cxp') loadReporteCxp();
 }

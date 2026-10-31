@@ -414,6 +414,96 @@ class TestFase4AnulacionesCompletas(unittest.TestCase):
         en_libro_compras = self.cursor.fetchone()[0]
         self.assertEqual(en_libro_compras, 0, "La compra anulada NO debe aparecer en el Libro de Compras")
 
+    def test_11_flujo_completo_pagos_multimoneda_y_anulacion_cxc_cxp(self):
+        """
+        Verifica el flujo de Pagos Multimoneda (USD + VES + COP) en CXC y CXP
+        y su anulación secuencial regresando exactamente al saldo y estado inmediatamente anterior.
+        """
+        # --- PARTE A: CXC (Cliente) ---
+        self.cursor.execute("""
+            INSERT INTO facturas (numero_factura, cliente_id, fecha, tipo_venta, subtotal, iva_total, total, total_usd, tasa_ves, tasa_cop, total_ves, total_cop, saldo_pendiente, estado)
+            VALUES ('FAC-MULTI-001', 1, '2026-10-31 08:00:00', 'credito', 500.0, 0.0, 500.0, 500.0, 45.0, 4000.0, 22500.0, 2000000.0, 500.0, 'pendiente')
+        """)
+        fac_id = self.cursor.lastrowid
+
+        self.cursor.execute("""
+            INSERT INTO cuentas_por_cobrar (factura_id, cliente_id, monto_total, monto_pagado, saldo_pendiente, fecha_emision, fecha_vencimiento, estado)
+            VALUES (?, 1, 500.0, 0.0, 500.0, '2026-10-31', '2026-11-15', 'pendiente')
+        """, (fac_id,))
+        cxc_id = self.cursor.lastrowid
+
+        # Pago #1 Multimoneda: $100 USD + 4,500 VES (tasa 45 = $100 USD) + 400,000 COP (tasa 4000 = $100 USD) = $300.00 USD
+        self.cursor.execute("""
+            INSERT INTO abonos_cxc (cxc_id, monto_usd, notas, estado)
+            VALUES (?, 300.0, 'Pago Multimoneda 1 (USD+VES+COP)', 'activo')
+        """, (cxc_id,))
+        ab_cxc_1 = self.cursor.lastrowid
+        self.cursor.executemany("""
+            INSERT INTO abono_cxc_pagos (abono_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, [
+            (ab_cxc_1, 'USD', 'Dólar Efectivo', 100.0, 1.0, 100.0, 'EF-001'),
+            (ab_cxc_1, 'VES', 'Pago Móvil', 4500.0, 45.0, 100.0, 'PM-9821'),
+            (ab_cxc_1, 'COP', 'Transferencia Bancolombia', 400000.0, 4000.0, 100.0, 'BC-7712'),
+        ])
+        self.cursor.execute("UPDATE cuentas_por_cobrar SET monto_pagado = 300.0, saldo_pendiente = 200.0, estado = 'parcial' WHERE id = ?", (cxc_id,))
+        self.cursor.execute("UPDATE facturas SET saldo_pendiente = 200.0, estado = 'pendiente' WHERE id = ?", (fac_id,))
+
+        # Pago #2 en VES: 9,000 VES (tasa 45 = $200.00 USD) -> Salda la factura ($0.00)
+        self.cursor.execute("""
+            INSERT INTO abonos_cxc (cxc_id, monto_usd, notas, estado)
+            VALUES (?, 200.0, 'Pago Final en VES', 'activo')
+        """, (cxc_id,))
+        ab_cxc_2 = self.cursor.lastrowid
+        self.cursor.execute("""
+            INSERT INTO abono_cxc_pagos (abono_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+            VALUES (?, 'VES', 'Transferencia Bancaria', 9000.0, 45.0, 200.0, 'TB-5544')
+        """, (ab_cxc_2,))
+        self.cursor.execute("UPDATE cuentas_por_cobrar SET monto_pagado = 500.0, saldo_pendiente = 0.0, estado = 'pagada' WHERE id = ?", (cxc_id,))
+        self.cursor.execute("UPDATE facturas SET saldo_pendiente = 0.0, estado = 'pagada' WHERE id = ?", (fac_id,))
+        self.conn.commit()
+
+        # Anular Pago #2 -> Debe volver exactamente al estado tras el Pago #1 (pagado: $300, saldo: $200, estado: 'parcial')
+        res_anu_2 = anular_abono_cxc(self.cursor, ab_cxc_2, motivo="Reversión de segundo pago")
+        self.assertAlmostEqual(res_anu_2["nuevo_monto_pagado"], 300.0, places=2)
+        self.assertAlmostEqual(res_anu_2["nuevo_saldo_pendiente"], 200.0, places=2)
+        self.assertEqual(res_anu_2["nuevo_estado_cxc"], "parcial")
+
+        # Anular Pago #1 Multimoneda -> Debe volver exactamente al estado original (pagado: $0, saldo: $500, estado: 'pendiente')
+        res_anu_1 = anular_abono_cxc(self.cursor, ab_cxc_1, motivo="Reversión de primer pago multimoneda")
+        self.assertAlmostEqual(res_anu_1["nuevo_monto_pagado"], 0.0, places=2)
+        self.assertAlmostEqual(res_anu_1["nuevo_saldo_pendiente"], 500.0, places=2)
+        self.assertEqual(res_anu_1["nuevo_estado_cxc"], "pendiente")
+
+        # --- PARTE B: CXP (Proveedor) ---
+        self.cursor.execute("""
+            INSERT INTO cuentas_por_pagar (compra_id, proveedor_id, numero_factura, tipo_registro, descripcion_concepto, monto_total, monto_pagado, saldo_pendiente, fecha_emision, fecha_vencimiento, estado)
+            VALUES (NULL, 1, 'PROV-MULTI-01', 'directo', 'Servicio logístico', 400.0, 0.0, 400.0, '2026-10-31', '2026-11-15', 'pendiente')
+        """)
+        cxp_id = self.cursor.lastrowid
+
+        # Pago Multimoneda a Proveedor: $150 USD + 4,500 VES (tasa 45 = $100 USD) = $250.00 USD -> Saldo $150.00
+        self.cursor.execute("""
+            INSERT INTO abonos_cxp (cxp_id, monto_usd, notas, estado)
+            VALUES (?, 250.0, 'Pago Multimoneda a Proveedor', 'activo')
+        """, (cxp_id,))
+        ab_cxp_1 = self.cursor.lastrowid
+        self.cursor.executemany("""
+            INSERT INTO abono_cxp_pagos (abono_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, [
+            (ab_cxp_1, 'USD', 'Zelle', 150.0, 1.0, 150.0, 'ZL-1122'),
+            (ab_cxp_1, 'VES', 'Transferencia Banesco', 4500.0, 45.0, 100.0, 'BN-3344'),
+        ])
+        self.cursor.execute("UPDATE cuentas_por_pagar SET monto_pagado = 250.0, saldo_pendiente = 150.0, estado = 'parcial' WHERE id = ?", (cxp_id,))
+        self.conn.commit()
+
+        # Anular Pago Multimoneda CXP -> Debe volver exactamente al estado original ($0 pagado, $400 saldo, 'pendiente')
+        res_cxp_anu = anular_abono_cxp(self.cursor, ab_cxp_1, motivo="Error en referencia bancaria")
+        self.assertAlmostEqual(res_cxp_anu["nuevo_monto_pagado"], 0.0, places=2)
+        self.assertAlmostEqual(res_cxp_anu["nuevo_saldo_pendiente"], 400.0, places=2)
+        self.assertEqual(res_cxp_anu["nuevo_estado_cxp"], "pendiente")
+
 
 if __name__ == "__main__":
     unittest.main()

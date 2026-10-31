@@ -582,104 +582,6 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 })
 
             # 3. Categorías
-            # --- ENDPOINTS TRANSACCIONALES DE ANULACIÓN (FASE 4) ---
-
-            # Anulación de Factura de Venta
-            elif path.startswith("/api/facturas/") and path.endswith("/anular"):
-                parts = path.split("/")
-                f_id = int(parts[3])
-                motivo = (body.get("motivo") or "Anulación de factura").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
-                res = anular_factura_venta(cursor, f_id, motivo=motivo, usuario_id=usuario_id)
-                conn.commit()
-                schedule_cloud_sync()
-                self.send_json({
-                    "success": True,
-                    "message": f"Factura #{res.get('numero_factura')} anulada exitosamente. Stock reintegrado al inventario.",
-                    "data": res
-                })
-                return
-
-            # Anulación de Devolución de Cliente
-            elif path.startswith("/api/devoluciones/") and path.endswith("/anular"):
-                parts = path.split("/")
-                d_id = int(parts[3])
-                motivo = (body.get("motivo") or "Anulación de devolución").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
-                res = anular_devolucion_cliente(cursor, d_id, motivo=motivo, usuario_id=usuario_id)
-                conn.commit()
-                schedule_cloud_sync()
-                self.send_json({
-                    "success": True,
-                    "message": f"Devolución #{res.get('numero_devolucion')} anulada exitosamente. Stock retirado del inventario.",
-                    "data": res
-                })
-                return
-
-            # Anulación de Compra de Proveedor
-            elif path.startswith("/api/compras/") and path.endswith("/anular"):
-                parts = path.split("/")
-                c_id = int(parts[3])
-                motivo = (body.get("motivo") or "Anulación de compra").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
-                res = anular_compra_proveedor(cursor, c_id, motivo=motivo, usuario_id=usuario_id)
-                conn.commit()
-                schedule_cloud_sync()
-                self.send_json({
-                    "success": True,
-                    "message": f"Compra #{res.get('numero_control')} anulada exitosamente. Stock retirado y cuenta por pagar cancelada.",
-                    "data": res
-                })
-                return
-
-            # Anulación de Cobro / Abono en CXC
-            elif path.startswith("/api/cxc/abonos/") and path.endswith("/anular"):
-                parts = path.split("/")
-                ab_id = int(parts[4])
-                motivo = (body.get("motivo") or "Anulación de cobro a cliente").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
-                res = anular_abono_cxc(cursor, ab_id, motivo=motivo, usuario_id=usuario_id)
-                conn.commit()
-                schedule_cloud_sync()
-                self.send_json({
-                    "success": True,
-                    "message": f"Abono #{ab_id} anulado exitosamente. Saldo deudor restituido a ${res['nuevo_saldo_pendiente']:.2f}.",
-                    "data": res
-                })
-                return
-
-            # Anulación de Pago / Abono en CXP
-            elif path.startswith("/api/cxp/abonos/") and path.endswith("/anular"):
-                parts = path.split("/")
-                ab_id = int(parts[4])
-                motivo = (body.get("motivo") or "Anulación de pago a proveedor").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
-                res = anular_abono_cxp(cursor, ab_id, motivo=motivo, usuario_id=usuario_id)
-                conn.commit()
-                schedule_cloud_sync()
-                self.send_json({
-                    "success": True,
-                    "message": f"Pago #{ab_id} anulado exitosamente. Deuda con proveedor restituida a ${res['nuevo_saldo_pendiente']:.2f}.",
-                    "data": res
-                })
-                return
-
-            # Anulación de Cuenta por Pagar Directa (Gasto / Factura Directa)
-            elif path.startswith("/api/cxp/") and path.endswith("/anular") and not path.startswith("/api/cxp/abonos/"):
-                parts = path.split("/")
-                cxp_id = int(parts[3])
-                motivo = (body.get("motivo") or "Anulación de cuenta por pagar").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
-                res = anular_cuenta_cxp_directa(cursor, cxp_id, motivo=motivo, usuario_id=usuario_id)
-                conn.commit()
-                schedule_cloud_sync()
-                self.send_json({
-                    "success": True,
-                    "message": f"Cuenta por pagar #{cxp_id} anulada exitosamente.",
-                    "data": res
-                })
-                return
-
             elif path == "/api/categorias":
                 tipo_filter = query.get("tipo", [None])[0]
                 if tipo_filter:
@@ -861,6 +763,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         COUNT(CASE WHEN estado = 'pagada' THEN 1 END) as pagadas_count,
                         COUNT(CASE WHEN estado IN ('pendiente', 'parcial') AND date(fecha_vencimiento) < date('now') THEN 1 END) as vencidas_count
                     FROM cuentas_por_cobrar
+                    WHERE (estado IS NULL OR estado != 'anulada')
                 """)
                 res_row = dict(cursor.fetchone())
 
@@ -910,7 +813,9 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 sql = """
                     SELECT cxc.*, f.numero_factura, f.subtotal, f.iva_total, f.total_usd,
                            c.nombre as cliente_nombre, c.cedula as cliente_cedula, c.telefono as cliente_telefono,
-                           cfg.tasa_ves, cfg.tasa_cop
+                           cfg.tasa_ves, cfg.tasa_cop,
+                           (SELECT COUNT(*) FROM abonos_cxc ab WHERE ab.cxc_id = cxc.id) as total_abonos_count,
+                           (SELECT COUNT(*) FROM abonos_cxc ab WHERE ab.cxc_id = cxc.id AND (ab.estado IS NULL OR ab.estado = 'activo')) as abonos_activos_count
                     FROM cuentas_por_cobrar cxc
                     JOIN facturas f ON cxc.factura_id = f.id
                     JOIN clientes c ON cxc.cliente_id = c.id
@@ -1070,7 +975,9 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                            cfg.tasa_ves, cfg.tasa_cop,
                            ROUND(cxp.saldo_pendiente * cfg.tasa_ves, 2) as saldo_ves,
                            ROUND(cxp.saldo_pendiente * cfg.tasa_cop, 2) as saldo_cop,
-                           CAST((julianday('now') - julianday(cxp.fecha_vencimiento)) AS INTEGER) as dias_vencido
+                           CAST((julianday('now') - julianday(cxp.fecha_vencimiento)) AS INTEGER) as dias_vencido,
+                           (SELECT COUNT(*) FROM abonos_cxp ab WHERE ab.cxp_id = cxp.id) as total_abonos_count,
+                           (SELECT COUNT(*) FROM abonos_cxp ab WHERE ab.cxp_id = cxp.id AND (ab.estado IS NULL OR ab.estado = 'activo')) as abonos_activos_count
                     FROM cuentas_por_pagar cxp
                     LEFT JOIN compras comp ON cxp.compra_id = comp.id
                     JOIN proveedores p ON cxp.proveedor_id = p.id
@@ -2861,6 +2768,9 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 cxc_dict = dict(cxc)
+                if cxc_dict.get("estado") == "anulada":
+                    self.send_error_json("No se pueden registrar pagos sobre una cuenta por cobrar anulada", 400)
+                    return
                 if cxc_dict["saldo_pendiente"] <= 0.001:
                     self.send_error_json("Esta cuenta ya se encuentra totalmente saldada", 400)
                     return
@@ -2896,13 +2806,18 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 total_abono_usd = round(total_abono_usd, 2)
                 if total_abono_usd <= 0:
                     conn.rollback()
-                    self.send_error_json("El monto del abono debe ser mayor a 0", 400)
+                    self.send_error_json("El monto del pago debe ser mayor a 0", 400)
+                    return
+
+                if total_abono_usd > cxc_dict["saldo_pendiente"] + 0.05:
+                    conn.rollback()
+                    self.send_error_json(f"El monto a pagar (${total_abono_usd:.2f}) excede el saldo pendiente (${cxc_dict['saldo_pendiente']:.2f})", 400)
                     return
 
                 # Registrar abono
                 cursor.execute("""
-                    INSERT INTO abonos_cxc (cxc_id, monto_usd, notas)
-                    VALUES (?, ?, ?)
+                    INSERT INTO abonos_cxc (cxc_id, monto_usd, notas, estado)
+                    VALUES (?, ?, ?, 'activo')
                 """, (cxc_id, total_abono_usd, notas))
                 abono_id = cursor.lastrowid
 
@@ -2933,6 +2848,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 """, (nuevo_saldo, nuevo_estado_factura, cxc_dict["factura_id"]))
 
                 conn.commit()
+                schedule_cloud_sync()
                 self.send_json({
                     "success": True,
                     "abono_id": abono_id,
@@ -3279,14 +3195,20 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json("Cuenta por pagar no encontrada", 404)
                     return
                 cxp_dict = dict(cxp)
+                if cxp_dict.get("estado") == "anulada":
+                    self.send_error_json("No se pueden registrar pagos sobre una cuenta por pagar anulada", 400)
+                    return
+                if cxp_dict["saldo_pendiente"] <= 0.001:
+                    self.send_error_json("Esta cuenta por pagar ya se encuentra totalmente saldada", 400)
+                    return
 
                 if monto_usd > cxp_dict["saldo_pendiente"] + 0.05:
-                    self.send_error_json(f"El monto a abonar (${monto_usd}) excede el saldo pendiente (${cxp_dict['saldo_pendiente']})", 400)
+                    self.send_error_json(f"El monto a pagar (${monto_usd:.2f}) excede el saldo pendiente (${cxp_dict['saldo_pendiente']:.2f})", 400)
                     return
 
                 cursor.execute("""
-                    INSERT INTO abonos_cxp (cxp_id, monto_usd, notas)
-                    VALUES (?, ?, ?)
+                    INSERT INTO abonos_cxp (cxp_id, monto_usd, notas, estado)
+                    VALUES (?, ?, ?, 'activo')
                 """, (cxp_id, monto_usd, notas))
                 abono_id = cursor.lastrowid
 
@@ -3317,6 +3239,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     """, (nuevo_saldo, cxp_dict["compra_id"]))
 
                 conn.commit()
+                schedule_cloud_sync()
                 self.send_json({
                     "success": True,
                     "abono_id": abono_id,
@@ -4377,6 +4300,104 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "detalles": detalles_procesados,
                     "message": f"Ajuste {tipo_ajuste} {numero_ajuste} procesado exitosamente"
                 }, 201)
+
+            # --- ENDPOINTS TRANSACCIONALES DE ANULACIÓN (FASE 4) ---
+
+            # Anulación de Factura de Venta
+            elif path.startswith("/api/facturas/") and path.endswith("/anular"):
+                parts = path.split("/")
+                f_id = int(parts[3])
+                motivo = (body.get("motivo") or "Anulación de factura").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_factura_venta(cursor, f_id, motivo=motivo, usuario_id=usuario_id)
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Factura #{res.get('numero_factura')} anulada exitosamente. Stock reintegrado al inventario.",
+                    "data": res
+                })
+                return
+
+            # Anulación de Devolución de Cliente
+            elif path.startswith("/api/devoluciones/") and path.endswith("/anular"):
+                parts = path.split("/")
+                d_id = int(parts[3])
+                motivo = (body.get("motivo") or "Anulación de devolución").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_devolucion_cliente(cursor, d_id, motivo=motivo, usuario_id=usuario_id)
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Devolución #{res.get('numero_devolucion')} anulada exitosamente. Stock retirado del inventario.",
+                    "data": res
+                })
+                return
+
+            # Anulación de Compra de Proveedor
+            elif path.startswith("/api/compras/") and path.endswith("/anular"):
+                parts = path.split("/")
+                c_id = int(parts[3])
+                motivo = (body.get("motivo") or "Anulación de compra").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_compra_proveedor(cursor, c_id, motivo=motivo, usuario_id=usuario_id)
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Compra #{res.get('numero_control')} anulada exitosamente. Stock retirado y cuenta por pagar cancelada.",
+                    "data": res
+                })
+                return
+
+            # Anulación de Cobro / Abono en CXC
+            elif path.startswith("/api/cxc/abonos/") and path.endswith("/anular"):
+                parts = path.split("/")
+                ab_id = int(parts[4])
+                motivo = (body.get("motivo") or "Anulación de cobro a cliente").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_abono_cxc(cursor, ab_id, motivo=motivo, usuario_id=usuario_id)
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Pago #{ab_id} anulado exitosamente. Saldo deudor restituido a ${res['nuevo_saldo_pendiente']:.2f}.",
+                    "data": res
+                })
+                return
+
+            # Anulación de Pago / Abono en CXP
+            elif path.startswith("/api/cxp/abonos/") and path.endswith("/anular"):
+                parts = path.split("/")
+                ab_id = int(parts[4])
+                motivo = (body.get("motivo") or "Anulación de pago a proveedor").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_abono_cxp(cursor, ab_id, motivo=motivo, usuario_id=usuario_id)
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Pago #{ab_id} anulado exitosamente. Deuda con proveedor restituida a ${res['nuevo_saldo_pendiente']:.2f}.",
+                    "data": res
+                })
+                return
+
+            # Anulación de Cuenta por Pagar Directa (Gasto / Factura Directa)
+            elif path.startswith("/api/cxp/") and path.endswith("/anular") and not path.startswith("/api/cxp/abonos/"):
+                parts = path.split("/")
+                cxp_id = int(parts[3])
+                motivo = (body.get("motivo") or "Anulación de cuenta por pagar").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_cuenta_cxp_directa(cursor, cxp_id, motivo=motivo, usuario_id=usuario_id)
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Cuenta por pagar #{cxp_id} anulada exitosamente.",
+                    "data": res
+                })
+                return
 
             else:
                 self.send_error_json("Endpoint no reconocido", 404)

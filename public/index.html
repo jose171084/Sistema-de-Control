@@ -1730,6 +1730,9 @@
               <span class="text-xl font-black text-rose-600 block" id="cxcDetalleSaldoUsd">$0.00</span>
               <span class="text-[11px] text-slate-500 font-medium" id="cxcDetalleSaldoBs">0.00 Bs.</span>
             </div>
+            <button onclick="abrirModalPagosClienteActual()" class="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow flex items-center gap-1.5" title="Aplicar Pago Multimoneda para rebajar saldo del cliente">
+              <i class="fa-solid fa-money-bill-wave"></i> Pagos (Rebajar Saldo)
+            </button>
             <button onclick="abrirModalNotaAjusteParaClienteActual()" class="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow flex items-center gap-1.5">
               <i class="fa-solid fa-file-invoice-dollar"></i> + Nota Débito / Crédito
             </button>
@@ -1746,6 +1749,7 @@
             <button onclick="filterCxcClienteEstado('pendiente')" id="cxcDetFilter-pendiente" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pendientes</button>
             <button onclick="filterCxcClienteEstado('vencida')" id="cxcDetFilter-vencida" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Vencidas</button>
             <button onclick="filterCxcClienteEstado('pagada')" id="cxcDetFilter-pagada" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pagadas</button>
+            <button onclick="filterCxcClienteEstado('anulada')" id="cxcDetFilter-anulada" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Anuladas</button>
           </div>
         </div>
 
@@ -1918,6 +1922,9 @@
               <span class="text-xl font-black text-rose-600 block" id="cxpDetalleSaldoUsd">$0.00</span>
               <span class="text-[11px] text-slate-500 font-medium" id="cxpDetalleSaldoBs">0.00 Bs.</span>
             </div>
+            <button onclick="abrirModalPagosProveedorActual()" class="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow flex items-center gap-1.5" title="Aplicar Pago Multimoneda para rebajar deuda con el proveedor">
+              <i class="fa-solid fa-money-bill-wave"></i> Pagos (Rebajar Saldo)
+            </button>
             <button onclick="abrirModalDirectoCXPParaProveedorActual()" class="px-3.5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow flex items-center gap-1.5">
               <i class="fa-solid fa-receipt"></i> + Registrar Gasto
             </button>
@@ -1938,6 +1945,7 @@
             <button onclick="filterCxpProveedorEstado('parcial')" id="cxpDetFilter-parcial" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Con Abonos</button>
             <button onclick="filterCxpProveedorEstado('vencida')" id="cxpDetFilter-vencida" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Vencidas</button>
             <button onclick="filterCxpProveedorEstado('pagada')" id="cxpDetFilter-pagada" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Pagadas</button>
+            <button onclick="filterCxpProveedorEstado('anulada')" id="cxpDetFilter-anulada" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Anuladas</button>
           </div>
         </div>
 
@@ -4374,10 +4382,16 @@
     <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between border-b pb-3">
         <h3 class="font-bold text-lg text-slate-800 flex items-center">
-          <i class="fa-solid fa-money-bill-transfer text-emerald-600 mr-2"></i>
-          Registrar Abono / Pago a Cuenta
+          <i class="fa-solid fa-money-bill-wave text-emerald-600 mr-2"></i>
+          Pagos — Rebajar Saldo de Cliente (Multimoneda)
         </h3>
         <button onclick="closeModalAbonoCXC()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <!-- Selector de Factura cuando el cliente tiene varias cuentas -->
+      <div id="abonoCxcSelectCuentaWrapper" class="hidden bg-slate-50 p-3 rounded-xl border border-slate-200">
+        <label class="block text-[11px] font-bold uppercase text-slate-500 mb-1">Seleccionar Factura / Cuenta a Abonar:</label>
+        <select id="abonoCxcSelectCuenta" onchange="onCambioCuentaEnModalPagoCXC(this.value)" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500"></select>
       </div>
 
       <!-- Resumen de la Deuda del Cliente -->
@@ -4406,21 +4420,21 @@
       <div class="space-y-3">
         <div class="flex items-center justify-between">
           <span class="text-xs font-bold uppercase text-slate-600 tracking-wider">
-            Forma de Pago del Abono (Multimoneda)
+            Forma de Pago (USD, VES, COP — Simple o Mixto)
           </span>
           <button type="button" onclick="addAbonoPagoRow()" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg">
             + Otra Moneda
           </button>
         </div>
 
-        <div id="abonoPagosList" class="space-y-2 max-h-40 overflow-y-auto">
+        <div id="abonoPagosList" class="space-y-2 max-h-48 overflow-y-auto">
           <!-- Dinámico -->
         </div>
 
         <!-- Resumen del Abono y Saldo Resultante -->
         <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1 text-xs">
           <div class="flex justify-between text-slate-700">
-            <span>Total a Abonar (USD):</span>
+            <span>Total Pago Aplicado (Equiv. USD):</span>
             <strong class="font-bold text-emerald-700 text-sm" id="abonoTotalUsd">$0.00</strong>
           </div>
           <div class="flex justify-between text-slate-600">
@@ -4431,16 +4445,21 @@
 
         <!-- Notas -->
         <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1">Observación / Referencia de Pago</label>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Observación / Referencia General de Pago</label>
           <input type="text" id="abonoNotas" placeholder="Ej: Pago Móvil ref #9872 / Efectivo entregado" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-xs">
         </div>
 
         <!-- Botones -->
-        <div class="flex justify-end space-x-2 pt-2 border-t">
-          <button type="button" onclick="closeModalAbonoCXC()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs font-medium">Cancelar</button>
-          <button type="button" onclick="confirmarAbonoCXC()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow">
-            <i class="fa-solid fa-check mr-1.5"></i>Registrar Abono
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
+          <button type="button" onclick="verHistorialAbonosCXC(document.getElementById('abonoCxcId').value)" class="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold flex items-center gap-1">
+            <i class="fa-solid fa-rotate-left"></i> Ver / Anular Pagos Anteriores
           </button>
+          <div class="flex items-center space-x-2 ml-auto">
+            <button type="button" onclick="closeModalAbonoCXC()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs font-medium">Cancelar</button>
+            <button type="button" onclick="confirmarAbonoCXC()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow">
+              <i class="fa-solid fa-check mr-1.5"></i>Aplicar Pago
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -4604,12 +4623,18 @@
     <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between border-b pb-3">
         <h3 class="font-bold text-lg text-slate-800 flex items-center">
-          <i class="fa-solid fa-money-bill-transfer text-rose-600 mr-2"></i>
-          Registrar Pago / Abono a Proveedor
+          <i class="fa-solid fa-money-bill-wave text-rose-600 mr-2"></i>
+          Pagos — Rebajar Saldo a Proveedor (Multimoneda)
         </h3>
         <button onclick="closeModalAbonoCXP()" class="text-slate-400 hover:text-slate-600">
           <i class="fa-solid fa-xmark text-lg"></i>
         </button>
+      </div>
+
+      <!-- Selector de Cuenta cuando el proveedor tiene varias facturas/gastos -->
+      <div id="abonoCxpSelectCuentaWrapper" class="hidden bg-slate-50 p-3 rounded-xl border border-slate-200">
+        <label class="block text-[11px] font-bold uppercase text-slate-500 mb-1">Seleccionar Factura / Gasto a Pagar:</label>
+        <select id="abonoCxpSelectCuenta" onchange="onCambioCuentaEnModalPagoCXP(this.value)" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-rose-500"></select>
       </div>
 
       <!-- Resumen de la Deuda con el Proveedor -->
@@ -4639,20 +4664,20 @@
       <!-- Métodos de Pago Multimoneda -->
       <div class="space-y-3">
         <div class="flex items-center justify-between">
-          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Formas de Pago Aplicadas</label>
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Formas de Pago (USD, VES, COP — Simple o Mixto)</label>
           <button type="button" onclick="addAbonoPagoCxpRow()" class="text-xs bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold px-2.5 py-1 rounded-lg transition flex items-center">
-            <i class="fa-solid fa-plus mr-1"></i>Añadir Pago
+            <i class="fa-solid fa-plus mr-1"></i>+ Otra Moneda
           </button>
         </div>
 
-        <div id="abonoCxpPagosContainer" class="space-y-2.5">
+        <div id="abonoCxpPagosContainer" class="space-y-2.5 max-h-48 overflow-y-auto">
           <!-- Filas de pago dinámicas -->
         </div>
 
         <!-- Resumen del Abono y Saldo Resultante -->
         <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1 text-xs">
           <div class="flex justify-between text-slate-700">
-            <span>Total a Pagar / Abonar (USD):</span>
+            <span>Total Pago Aplicado (Equiv. USD):</span>
             <strong class="font-bold text-rose-700 text-sm" id="abonoCxpTotalUsd">$0.00</strong>
           </div>
           <div class="flex justify-between text-slate-600">
@@ -4663,16 +4688,21 @@
 
         <!-- Notas -->
         <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1">Observación / Referencia de Pago</label>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Observación / Referencia General de Pago</label>
           <input type="text" id="abonoCxpNotas" placeholder="Ej: Transferencia Banesco ref #5821 / Pago en efectivo" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-xs">
         </div>
 
         <!-- Botones -->
-        <div class="flex justify-end space-x-2 pt-2 border-t">
-          <button type="button" onclick="closeModalAbonoCXP()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs font-medium">Cancelar</button>
-          <button type="button" onclick="confirmarAbonoCXP()" class="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow">
-            <i class="fa-solid fa-check mr-1.5"></i>Registrar Pago al Proveedor
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t">
+          <button type="button" onclick="if(AppState.abonoCxpActual) verHistorialAbonosCXP(AppState.abonoCxpActual.id)" class="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1">
+            <i class="fa-solid fa-rotate-left"></i> Ver / Anular Pagos Anteriores
           </button>
+          <div class="flex items-center space-x-2 ml-auto">
+            <button type="button" onclick="closeModalAbonoCXP()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs font-medium">Cancelar</button>
+            <button type="button" onclick="confirmarAbonoCXP()" class="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow">
+              <i class="fa-solid fa-check mr-1.5"></i>Aplicar Pago al Proveedor
+            </button>
+          </div>
         </div>
       </div>
     </div>
