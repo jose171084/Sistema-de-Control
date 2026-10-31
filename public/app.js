@@ -2972,21 +2972,31 @@ async function loadFacturas() {
       return;
     }
 
-    tbody.innerHTML = facturas.map(f => `
-      <tr class="hover:bg-slate-50 transition">
-        <td class="py-2.5 px-3 font-mono font-bold text-slate-800">${escapeHtml(f.numero_factura)}</td>
+    tbody.innerHTML = facturas.map(f => {
+      const esAnulada = f.estado === 'anulada';
+      return `
+      <tr class="hover:bg-slate-50 transition ${esAnulada ? 'opacity-60 bg-rose-50/30' : ''}">
+        <td class="py-2.5 px-3 font-mono font-bold ${esAnulada ? 'line-through text-rose-700' : 'text-slate-800'}">
+          ${escapeHtml(f.numero_factura)}
+          ${esAnulada ? '<span class="ml-1.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold no-underline inline-block">ANULADA</span>' : ''}
+        </td>
         <td class="py-2.5 px-3 text-xs text-slate-500">${formatFecha(f.fecha)}</td>
         <td class="py-2.5 px-3 font-medium text-slate-700">${escapeHtml(f.cliente_nombre)}</td>
-        <td class="py-2.5 px-3 font-bold text-indigo-700">$${parseFloat(f.total_usd).toFixed(2)}</td>
+        <td class="py-2.5 px-3 font-bold ${esAnulada ? 'line-through text-slate-400' : 'text-indigo-700'}">$${parseFloat(f.total_usd).toFixed(2)}</td>
         <td class="py-2.5 px-3 text-xs text-slate-600">${parseFloat(f.total_ves).toFixed(2)} Bs.</td>
         <td class="py-2.5 px-3 text-xs text-slate-600">${Math.round(f.total_cop).toLocaleString('es-CO')} COP</td>
-        <td class="py-2.5 px-3 text-right">
+        <td class="py-2.5 px-3 text-right space-x-1 whitespace-nowrap">
           <button onclick="verFacturaEmitida(${f.id})" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold">
             <i class="fa-solid fa-receipt mr-1"></i>Ver
           </button>
+          ${!esAnulada ? `
+          <button onclick="anularFactura(${f.id}, '${escapeHtml(f.numero_factura)}')" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-semibold" title="Anular factura y reintegrar stock">
+            <i class="fa-solid fa-ban mr-1"></i>Anular
+          </button>
+          ` : ''}
         </td>
       </tr>
-    `).join('');
+    `}).join('');
   } catch (err) {
     console.error("Error al cargar historial de facturas:", err);
   }
@@ -4291,9 +4301,14 @@ function renderDevolucionesHistorial() {
     return;
   }
 
-  tbody.innerHTML = list.map(d => `
-    <tr class="hover:bg-slate-50 transition border-b border-slate-100">
-      <td class="py-3 px-4 font-mono font-bold text-cyan-700">${escapeHtml(d.numero_devolucion)}</td>
+  tbody.innerHTML = list.map(d => {
+    const esAnulada = d.estado === 'anulada';
+    return `
+    <tr class="hover:bg-slate-50 transition border-b border-slate-100 ${esAnulada ? 'opacity-60 bg-rose-50/30' : ''}">
+      <td class="py-3 px-4 font-mono font-bold ${esAnulada ? 'line-through text-rose-700' : 'text-cyan-700'}">
+        ${escapeHtml(d.numero_devolucion)}
+        ${esAnulada ? '<span class="ml-1 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold no-underline inline-block">ANULADA</span>' : ''}
+      </td>
       <td class="py-3 px-4 font-mono text-xs text-slate-600 font-semibold">${escapeHtml(d.numero_factura || 'Manual (Sin Factura)')}</td>
       <td class="py-3 px-4">
         <p class="font-bold text-slate-900">${escapeHtml(d.cliente_nombre || 'Consumidor Final')}</p>
@@ -4301,15 +4316,20 @@ function renderDevolucionesHistorial() {
       </td>
       <td class="py-3 px-4 text-xs text-slate-500">${formatFecha(d.fecha_emision)}</td>
       <td class="py-3 px-4 text-xs text-slate-700 max-w-xs truncate">${escapeHtml(d.motivo)}</td>
-      <td class="py-3 px-4 text-right font-black text-rose-600 font-mono">$${parseFloat(d.total_usd).toFixed(2)}</td>
+      <td class="py-3 px-4 text-right font-black ${esAnulada ? 'line-through text-slate-400' : 'text-rose-600'} font-mono">$${parseFloat(d.total_usd).toFixed(2)}</td>
       <td class="py-3 px-4 text-right font-mono text-xs text-slate-600">${parseFloat(d.total_ves || 0).toFixed(2)} Bs.</td>
-      <td class="py-3 px-4 text-center">
+      <td class="py-3 px-4 text-center space-x-1 whitespace-nowrap">
         <button onclick="abrirTicketDevolucion(${d.id})" class="px-2.5 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 rounded-lg text-xs font-semibold shadow-sm transition">
-          <i class="fa-solid fa-receipt mr-1"></i>Ver Ticket
+          <i class="fa-solid fa-receipt mr-1"></i>Ver
         </button>
+        ${!esAnulada ? `
+        <button onclick="anularDevolucion(${d.id}, '${escapeHtml(d.numero_devolucion)}')" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-semibold shadow-sm transition" title="Anular devolución y descontar stock">
+          <i class="fa-solid fa-ban mr-1"></i>Anular
+        </button>
+        ` : ''}
       </td>
     </tr>
-  `).join('');
+  `}).join('');
 }
 
 // Modal Comprobante / Ticket Oficial de Devolución
@@ -4920,12 +4940,16 @@ async function loadCompras() {
 
     tbody.innerHTML = compras.map(c => {
       const tieneFoto = Boolean(c.foto_factura);
+      const esAnulada = c.estado === 'anulada';
       return `
-        <tr class="hover:bg-slate-50 transition">
-          <td class="py-2.5 px-3 font-mono font-bold text-slate-800">${escapeHtml(c.numero_control)}</td>
+        <tr class="hover:bg-slate-50 transition ${esAnulada ? 'opacity-60 bg-rose-50/30' : ''}">
+          <td class="py-2.5 px-3 font-mono font-bold ${esAnulada ? 'line-through text-rose-700' : 'text-slate-800'}">
+            ${escapeHtml(c.numero_control)}
+            ${esAnulada ? '<span class="ml-1.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold no-underline inline-block">ANULADA</span>' : ''}
+          </td>
           <td class="py-2.5 px-3 text-xs text-slate-500">${formatFecha(c.fecha)}</td>
           <td class="py-2.5 px-3 font-medium text-slate-700">${escapeHtml(c.proveedor_nombre)}</td>
-          <td class="py-2.5 px-3 font-bold text-blue-700">$${parseFloat(c.total).toFixed(2)}</td>
+          <td class="py-2.5 px-3 font-bold ${esAnulada ? 'line-through text-slate-400' : 'text-blue-700'}">$${parseFloat(c.total).toFixed(2)}</td>
           <td class="py-2.5 px-3">
             ${tieneFoto ? `
               <button onclick="verFotoFacturaGuardada('${c.foto_factura}')" class="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-lg font-semibold hover:bg-indigo-100">
@@ -4933,8 +4957,15 @@ async function loadCompras() {
               </button>
             ` : `<span class="text-xs text-slate-400">Sin foto</span>`}
           </td>
-          <td class="py-2.5 px-3 text-right">
-            <span class="text-xs text-emerald-600 font-semibold"><i class="fa-solid fa-check mr-1"></i>Stock cargado</span>
+          <td class="py-2.5 px-3 text-right space-x-1.5 whitespace-nowrap">
+            ${esAnulada ? `
+              <span class="text-xs text-rose-600 font-bold"><i class="fa-solid fa-ban mr-1"></i>Compra Anulada</span>
+            ` : `
+              <span class="text-xs text-emerald-600 font-semibold mr-2"><i class="fa-solid fa-check mr-1"></i>Stock cargado</span>
+              <button onclick="anularCompra(${c.id}, '${escapeHtml(c.numero_control)}')" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-semibold" title="Anular compra y retirar stock">
+                <i class="fa-solid fa-ban mr-1"></i>Anular
+              </button>
+            `}
           </td>
         </tr>
       `;
@@ -5622,11 +5653,23 @@ async function verHistorialAbonosCXC(cxcId) {
     if (!c.abonos || c.abonos.length === 0) {
       html += `<p class="text-center py-6 text-slate-400 text-xs">No se han registrado abonos a esta cuenta.</p>`;
     } else {
-      html += c.abonos.map((ab, idx) => `
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1.5">
+      html += c.abonos.map((ab, idx) => {
+        const esAnulado = ab.estado === 'anulado';
+        return `
+        <div class="p-3 ${esAnulado ? 'bg-rose-50/40 border-rose-200 opacity-65' : 'bg-slate-50 border-slate-200'} border rounded-xl text-xs space-y-1.5">
           <div class="flex justify-between items-center">
-            <span class="font-bold text-slate-800">Abono #${c.abonos.length - idx} &bull; ${formatFecha(ab.fecha)}</span>
-            <strong class="text-emerald-700 font-extrabold text-sm">+$${parseFloat(ab.monto_usd).toFixed(2)}</strong>
+            <span class="font-bold text-slate-800">
+              Abono #${c.abonos.length - idx} &bull; ${formatFecha(ab.fecha)}
+              ${esAnulado ? '<span class="ml-1.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">ANULADO</span>' : ''}
+            </span>
+            <div class="flex items-center gap-2">
+              <strong class="${esAnulado ? 'line-through text-slate-400' : 'text-emerald-700'} font-extrabold text-sm">+$${parseFloat(ab.monto_usd).toFixed(2)}</strong>
+              ${(!esAnulado && ab.id > 0) ? `
+                <button onclick="anularAbonoCXC(${ab.id}, ${c.id})" class="px-2 py-0.5 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded text-[10px] font-bold transition" title="Anular este cobro y restituir saldo">
+                  <i class="fa-solid fa-ban mr-0.5"></i>Anular
+                </button>
+              ` : ''}
+            </div>
           </div>
           <p class="text-[11px] text-slate-500">${escapeHtml(ab.notas || '')}</p>
           <div class="space-y-0.5 pt-1 border-t border-slate-100 text-[11px] text-slate-600">
@@ -5638,7 +5681,7 @@ async function verHistorialAbonosCXC(cxcId) {
             `).join('')}
           </div>
         </div>
-      `).join('');
+      `}).join('');
     }
 
     content.innerHTML = html;
@@ -5974,6 +6017,11 @@ function renderCxpProveedorCuentasTable() {
           <button onclick="verHistorialAbonosCXP(${c.id})" class="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg text-xs" title="Historial de Pagos">
             <i class="fa-solid fa-clock-rotate-left"></i>
           </button>
+          ${(c.estado !== 'anulada' && !c.compra_id) ? `
+            <button onclick="anularCuentaCXP(${c.id}, '${escapeHtml(c.numero_factura || '')}')" class="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg text-xs" title="Anular Cuenta Directa">
+              <i class="fa-solid fa-ban"></i>
+            </button>
+          ` : ''}
         </td>
       </tr>
     `;
@@ -6594,11 +6642,23 @@ async function verHistorialAbonosCXP(cxpId) {
     if (!c.abonos || c.abonos.length === 0) {
       html += `<p class="text-center py-6 text-slate-400 text-xs">No se han registrado pagos para esta cuenta.</p>`;
     } else {
-      html += c.abonos.map((ab, idx) => `
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1.5">
+      html += c.abonos.map((ab, idx) => {
+        const esAnulado = ab.estado === 'anulado';
+        return `
+        <div class="p-3 ${esAnulado ? 'bg-rose-50/40 border-rose-200 opacity-65' : 'bg-slate-50 border-slate-200'} border rounded-xl text-xs space-y-1.5">
           <div class="flex justify-between items-center">
-            <span class="font-bold text-slate-800">Pago #${c.abonos.length - idx} &bull; ${formatFecha(ab.fecha)}</span>
-            <strong class="text-rose-700 font-extrabold text-sm">-$${parseFloat(ab.monto_usd).toFixed(2)}</strong>
+            <span class="font-bold text-slate-800">
+              Pago #${c.abonos.length - idx} &bull; ${formatFecha(ab.fecha)}
+              ${esAnulado ? '<span class="ml-1.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">ANULADO</span>' : ''}
+            </span>
+            <div class="flex items-center gap-2">
+              <strong class="${esAnulado ? 'line-through text-slate-400' : 'text-rose-700'} font-extrabold text-sm">-$${parseFloat(ab.monto_usd).toFixed(2)}</strong>
+              ${(!esAnulado && ab.id > 0) ? `
+                <button onclick="anularAbonoCXP(${ab.id}, ${c.id})" class="px-2 py-0.5 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded text-[10px] font-bold transition" title="Anular este pago y restituir deuda">
+                  <i class="fa-solid fa-ban mr-0.5"></i>Anular
+                </button>
+              ` : ''}
+            </div>
           </div>
           <p class="text-[11px] text-slate-500">${escapeHtml(ab.notas || '')}</p>
           <div class="space-y-0.5 pt-1 border-t border-slate-100 text-[11px] text-slate-600">
@@ -6610,7 +6670,7 @@ async function verHistorialAbonosCXP(cxpId) {
             `).join('')}
           </div>
         </div>
-      `).join('');
+      `}).join('');
     }
 
     content.innerHTML = html;
@@ -11488,3 +11548,181 @@ window.abrirComprobanteDesdeKardex = abrirComprobanteDesdeKardex;
 window.getTituloMovimientoInventario = getTituloMovimientoInventario;
 window.verDetalleMovimientoKardex = verDetalleMovimientoKardex;
 window.cerrarModalDetalleMovimiento = cerrarModalDetalleMovimiento;
+
+
+// ========================================================
+// FUNCIONES DE ANULACIÓN TRANSACCIONAL (FASE 4)
+// ========================================================
+
+async function anularFactura(facturaId, numFactura) {
+  const motivo = prompt(`⚠️ ATENCIÓN: Vas a ANULAR la Factura #${numFactura}.\n\nEfectos inmediatos:\n• El stock vendido regresará (+) al inventario.\n• Si era a crédito, la cuenta por cobrar quedará anulada.\n• En el Libro de Ventas SENIAT aparecerá como ANULADA con monto 0,00 Bs.\n\nIngresa el motivo de la anulación:`, "Anulación por error en emisión");
+  if (motivo === null) return;
+  if (!motivo.trim()) {
+    alert("Debes indicar un motivo válido para anular el documento.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/facturas/${facturaId}/anular`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: motivo.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || "Error al anular factura");
+    }
+    alert(`✅ ${data.message}`);
+    await loadFacturas();
+    await loadProductos();
+    await loadDashboard();
+    if (typeof loadCxcConsolidado === 'function') loadCxcConsolidado();
+  } catch (err) {
+    alert("❌ No se pudo anular la factura: " + err.message);
+  }
+}
+
+async function anularDevolucion(devId, numDev) {
+  const motivo = prompt(`⚠️ ATENCIÓN: Vas a ANULAR la Nota de Devolución #${numDev}.\n\nEfectos inmediatos:\n• El stock devuelto se descontará (-) del inventario.\n• Si aplicaba a una factura a crédito, el saldo deudor del cliente se restituirá.\n\nIngresa el motivo de la anulación:`, "Reversión de nota de devolución");
+  if (motivo === null) return;
+  if (!motivo.trim()) {
+    alert("Debes indicar un motivo válido para anular la devolución.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/devoluciones/${devId}/anular`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: motivo.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || "Error al anular devolución");
+    }
+    alert(`✅ ${data.message}`);
+    await loadDevoluciones();
+    await loadProductos();
+    await loadDashboard();
+    if (typeof loadCxcConsolidado === 'function') loadCxcConsolidado();
+  } catch (err) {
+    alert("❌ No se pudo anular la devolución: " + err.message);
+  }
+}
+
+async function anularCompra(compraId, numControl) {
+  const motivo = prompt(`⚠️ ATENCIÓN: Vas a ANULAR la Compra #${numControl}.\n\nEfectos inmediatos:\n• Las unidades ingresadas se descontarán (-) del inventario.\n• La cuenta por pagar al proveedor quedará anulada.\n• Se excluirá del Libro de Compras.\n\nIngresa el motivo de la anulación:`, "Error en carga de factura de proveedor");
+  if (motivo === null) return;
+  if (!motivo.trim()) {
+    alert("Debes indicar un motivo válido para anular la compra.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/compras/${compraId}/anular`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: motivo.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || "Error al anular compra");
+    }
+    alert(`✅ ${data.message}`);
+    await loadCompras();
+    await loadProductos();
+    await loadDashboard();
+    if (typeof loadCxpConsolidado === 'function') loadCxpConsolidado();
+  } catch (err) {
+    alert("❌ No se pudo anular la compra: " + err.message);
+  }
+}
+
+async function anularAbonoCXC(abonoId, cxcId) {
+  const motivo = prompt(`⚠️ ¿Deseas ANULAR este cobro/abono?\n\nEl saldo pendiente de la factura volverá a incrementarse al estado inmediatamente anterior.\n\nIngresa el motivo de la anulación:`, "Reversión de cobro registrado por error");
+  if (motivo === null) return;
+  if (!motivo.trim()) {
+    alert("Debes ingresar un motivo válido.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/cxc/abonos/${abonoId}/anular`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: motivo.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || "Error al anular abono");
+    }
+    alert(`✅ ${data.message}`);
+    await verHistorialAbonosCXC(cxcId);
+    if (AppState.cxcClienteSeleccionado) {
+      await verEstadoCuentaCliente(AppState.cxcClienteSeleccionado);
+    }
+    await loadCxcConsolidado();
+    await loadDashboard();
+  } catch (err) {
+    alert("❌ Error al anular abono: " + err.message);
+  }
+}
+
+async function anularAbonoCXP(abonoId, cxpId) {
+  const motivo = prompt(`⚠️ ¿Deseas ANULAR este pago al proveedor?\n\nEl saldo adeudado al proveedor volverá a incrementarse al estado inmediatamente anterior.\n\nIngresa el motivo de la anulación:`, "Reversión de pago registrado por error");
+  if (motivo === null) return;
+  if (!motivo.trim()) {
+    alert("Debes ingresar un motivo válido.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/cxp/abonos/${abonoId}/anular`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: motivo.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || "Error al anular pago");
+    }
+    alert(`✅ ${data.message}`);
+    await verHistorialAbonosCXP(cxpId);
+    if (AppState.cxpProveedorSeleccionado) {
+      await verEstadoCuentaProveedor(AppState.cxpProveedorSeleccionado);
+    }
+    await loadCxpConsolidado();
+    await loadDashboard();
+  } catch (err) {
+    alert("❌ Error al anular pago: " + err.message);
+  }
+}
+
+async function anularCuentaCXP(cxpId, numDoc) {
+  const motivo = prompt(`⚠️ ¿Deseas ANULAR la cuenta por pagar directa ${numDoc ? '#' + numDoc : '#' + cxpId}?\n\nEl saldo pendiente pasará a $0.00 y dejará de figurar como deuda activa.\n\nIngresa el motivo de la anulación:`, "Anulación de cargo administrativo");
+  if (motivo === null) return;
+  if (!motivo.trim()) {
+    alert("Debes ingresar un motivo válido.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/cxp/${cxpId}/anular`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: motivo.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || "Error al anular cuenta por pagar");
+    }
+    alert(`✅ ${data.message}`);
+    if (AppState.cxpProveedorSeleccionado) {
+      await verEstadoCuentaProveedor(AppState.cxpProveedorSeleccionado);
+    }
+    await loadCxpConsolidado();
+    await loadDashboard();
+  } catch (err) {
+    alert("❌ Error al anular cuenta: " + err.message);
+  }
+}

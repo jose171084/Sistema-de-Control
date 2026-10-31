@@ -20,6 +20,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import database
 from database import (
+    anular_factura_venta, anular_devolucion_cliente, anular_compra_proveedor,
+    anular_abono_cxc, anular_abono_cxp, anular_cuenta_cxp_directa,
     get_connection, init_db, DB_PATH, 
     limpiar_transacciones_db, restablecer_fabrica_db, 
     schedule_cloud_sync, get_supabase_config,
@@ -580,6 +582,104 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 })
 
             # 3. Categorías
+            # --- ENDPOINTS TRANSACCIONALES DE ANULACIÓN (FASE 4) ---
+
+            # Anulación de Factura de Venta
+            elif path.startswith("/api/facturas/") and path.endswith("/anular"):
+                parts = path.split("/")
+                f_id = int(parts[3])
+                motivo = (body.get("motivo") or "Anulación de factura").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_factura_venta(cursor, f_id, motivo=motivo, usuario_id=usuario_id)
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Factura #{res.get('numero_factura')} anulada exitosamente. Stock reintegrado al inventario.",
+                    "data": res
+                })
+                return
+
+            # Anulación de Devolución de Cliente
+            elif path.startswith("/api/devoluciones/") and path.endswith("/anular"):
+                parts = path.split("/")
+                d_id = int(parts[3])
+                motivo = (body.get("motivo") or "Anulación de devolución").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_devolucion_cliente(cursor, d_id, motivo=motivo, usuario_id=usuario_id)
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Devolución #{res.get('numero_devolucion')} anulada exitosamente. Stock retirado del inventario.",
+                    "data": res
+                })
+                return
+
+            # Anulación de Compra de Proveedor
+            elif path.startswith("/api/compras/") and path.endswith("/anular"):
+                parts = path.split("/")
+                c_id = int(parts[3])
+                motivo = (body.get("motivo") or "Anulación de compra").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_compra_proveedor(cursor, c_id, motivo=motivo, usuario_id=usuario_id)
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Compra #{res.get('numero_control')} anulada exitosamente. Stock retirado y cuenta por pagar cancelada.",
+                    "data": res
+                })
+                return
+
+            # Anulación de Cobro / Abono en CXC
+            elif path.startswith("/api/cxc/abonos/") and path.endswith("/anular"):
+                parts = path.split("/")
+                ab_id = int(parts[4])
+                motivo = (body.get("motivo") or "Anulación de cobro a cliente").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_abono_cxc(cursor, ab_id, motivo=motivo, usuario_id=usuario_id)
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Abono #{ab_id} anulado exitosamente. Saldo deudor restituido a ${res['nuevo_saldo_pendiente']:.2f}.",
+                    "data": res
+                })
+                return
+
+            # Anulación de Pago / Abono en CXP
+            elif path.startswith("/api/cxp/abonos/") and path.endswith("/anular"):
+                parts = path.split("/")
+                ab_id = int(parts[4])
+                motivo = (body.get("motivo") or "Anulación de pago a proveedor").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_abono_cxp(cursor, ab_id, motivo=motivo, usuario_id=usuario_id)
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Pago #{ab_id} anulado exitosamente. Deuda con proveedor restituida a ${res['nuevo_saldo_pendiente']:.2f}.",
+                    "data": res
+                })
+                return
+
+            # Anulación de Cuenta por Pagar Directa (Gasto / Factura Directa)
+            elif path.startswith("/api/cxp/") and path.endswith("/anular") and not path.startswith("/api/cxp/abonos/"):
+                parts = path.split("/")
+                cxp_id = int(parts[3])
+                motivo = (body.get("motivo") or "Anulación de cuenta por pagar").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_cuenta_cxp_directa(cursor, cxp_id, motivo=motivo, usuario_id=usuario_id)
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Cuenta por pagar #{cxp_id} anulada exitosamente.",
+                    "data": res
+                })
+                return
+
             elif path == "/api/categorias":
                 tipo_filter = query.get("tipo", [None])[0]
                 if tipo_filter:
@@ -790,7 +890,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     FROM clientes c
                     JOIN cuentas_por_cobrar cxc ON cxc.cliente_id = c.id
                     CROSS JOIN configuracion cfg ON cfg.id = 1
-                    WHERE 1=1
+                    WHERE (cxc.estado IS NULL OR cxc.estado != 'anulada')
                 """
                 params = []
                 if search:
@@ -895,6 +995,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         COUNT(CASE WHEN estado = 'pagada' THEN 1 END) as pagadas_count,
                         COUNT(CASE WHEN estado IN ('pendiente', 'parcial') AND date(fecha_vencimiento) < date('now') THEN 1 END) as vencidas_count
                     FROM cuentas_por_pagar
+                    WHERE (estado IS NULL OR estado != 'anulada')
                 """)
                 res_row = dict(cursor.fetchone())
 
@@ -925,7 +1026,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     FROM proveedores p
                     JOIN cuentas_por_pagar cxp ON cxp.proveedor_id = p.id
                     CROSS JOIN configuracion cfg ON cfg.id = 1
-                    WHERE 1=1
+                    WHERE (cxp.estado IS NULL OR cxp.estado != 'anulada')
                 """
                 params = []
                 if search:
@@ -1774,7 +1875,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     SELECT f.*, cl.nombre as cliente_nombre, cl.cedula as cliente_cedula
                     FROM facturas f
                     JOIN clientes cl ON f.cliente_id = cl.id
-                    WHERE f.estado != 'anulada'
+                    WHERE 1=1
                 """
                 params_fac = []
                 if desde and hasta:
@@ -1791,7 +1892,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 sql_dev = """
                     SELECT d.*
                     FROM devoluciones d
-                    WHERE 1=1
+                    WHERE (d.estado IS NULL OR d.estado != 'anulada')
                 """
                 params_dev = []
                 if desde and hasta:
@@ -1809,6 +1910,34 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 num_op = 1
 
                 for f in facturas_raw:
+                    es_anulada = (f.get("estado") == "anulada")
+                    if es_anulada:
+                        registros.append({
+                            "operacion_num": num_op,
+                            "fecha": str(f.get("fecha") or "")[:10],
+                            "cliente_rif": "-",
+                            "cliente_nombre": "*** ANULADA ***",
+                            "numero_factura": f.get("numero_factura"),
+                            "numero_control": f.get("numero_factura"),
+                            "nota_debito": "",
+                            "nota_credito": "",
+                            "factura_afectada": "",
+                            "tipo_transaccion": "01-Reg",
+                            "total_ventas_usd": 0.0,
+                            "ventas_exentas_usd": 0.0,
+                            "base_imponible_usd": 0.0,
+                            "alicuota": 0.0,
+                            "iva_causado_usd": 0.0,
+                            "total_ventas_ves": 0.0,
+                            "ventas_exentas_ves": 0.0,
+                            "base_imponible_ves": 0.0,
+                            "iva_causado_ves": 0.0,
+                            "iva_retenido_ves": 0.0,
+                            "estado": "ANULADA"
+                        })
+                        num_op += 1
+                        continue
+
                     cursor.execute("""
                         SELECT 
                             SUM(CASE WHEN impuesto_tipo = 'exento' THEN total ELSE 0 END) as exento,
@@ -1965,7 +2094,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     SELECT c.*, p.nombre as proveedor_nombre, p.cedula as proveedor_cedula
                     FROM compras c
                     JOIN proveedores p ON c.proveedor_id = p.id
-                    WHERE 1=1
+                    WHERE (c.estado IS NULL OR c.estado != 'anulada')
                 """
                 params_com = []
                 if desde and hasta:

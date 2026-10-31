@@ -444,9 +444,26 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     except Exception as e:
         print(f"[MIGRACIÓN AVISO] Error sincronizando facturas: {e}")
 
+    # 1.1 AUDITORIA DE ANULACION EN FACTURAS
+    add_col_if_missing("facturas", "motivo_anulacion", "TEXT")
+    add_col_if_missing("facturas", "fecha_anulacion", "TEXT")
+    add_col_if_missing("facturas", "usuario_anulacion_id", "INTEGER DEFAULT 1")
+
+    # 1.2 DEVOLUCIONES
+    add_col_if_missing("devoluciones", "estado", "TEXT DEFAULT 'activa'")
+    add_col_if_missing("devoluciones", "motivo_anulacion", "TEXT")
+    add_col_if_missing("devoluciones", "fecha_anulacion", "TEXT")
+    add_col_if_missing("devoluciones", "usuario_anulacion_id", "INTEGER DEFAULT 1")
+
     # 2. CUENTAS POR COBRAR (CXC)
     add_col_if_missing("cuentas_por_cobrar", "fecha_emision", "TEXT")
     add_col_if_missing("cuentas_por_cobrar", "notas", "TEXT")
+    add_col_if_missing("cuentas_por_cobrar", "motivo_anulacion", "TEXT")
+    add_col_if_missing("cuentas_por_cobrar", "fecha_anulacion", "TEXT")
+    add_col_if_missing("cuentas_por_cobrar", "usuario_anulacion_id", "INTEGER DEFAULT 1")
+    add_col_if_missing("abonos_cxc", "estado", "TEXT DEFAULT 'activo'")
+    add_col_if_missing("abonos_cxc", "motivo_anulacion", "TEXT")
+    add_col_if_missing("abonos_cxc", "fecha_anulacion", "TEXT")
     try:
         cursor.execute("UPDATE cuentas_por_cobrar SET fecha_emision = created_at WHERE fecha_emision IS NULL")
     except Exception:
@@ -457,6 +474,11 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     add_col_if_missing("compras", "fecha_vencimiento", "TEXT")
     add_col_if_missing("compras", "saldo_pendiente", "REAL DEFAULT 0.0")
     add_col_if_missing("compras", "numero_factura", "TEXT")
+
+    add_col_if_missing("compras", "estado", "TEXT DEFAULT 'activa'")
+    add_col_if_missing("compras", "motivo_anulacion", "TEXT")
+    add_col_if_missing("compras", "fecha_anulacion", "TEXT")
+    add_col_if_missing("compras", "usuario_anulacion_id", "INTEGER DEFAULT 1")
 
     # 4. CUENTAS POR PAGAR (CXP)
     add_col_if_missing("cuentas_por_pagar", "tipo_registro", "TEXT DEFAULT 'compra'")
@@ -469,6 +491,43 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     add_col_if_missing("cuentas_por_pagar", "iva_ves", "REAL DEFAULT 0.0")
     add_col_if_missing("cuentas_por_pagar", "total_ves", "REAL DEFAULT 0.0")
     add_col_if_missing("cuentas_por_pagar", "afecta_libro_compras", "INTEGER DEFAULT 0")
+
+    add_col_if_missing("cuentas_por_pagar", "motivo_anulacion", "TEXT")
+    add_col_if_missing("cuentas_por_pagar", "fecha_anulacion", "TEXT")
+    add_col_if_missing("cuentas_por_pagar", "usuario_anulacion_id", "INTEGER DEFAULT 1")
+    add_col_if_missing("abonos_cxp", "estado", "TEXT DEFAULT 'activo'")
+    add_col_if_missing("abonos_cxp", "motivo_anulacion", "TEXT")
+    add_col_if_missing("abonos_cxp", "fecha_anulacion", "TEXT")
+
+    # 4.0.1 Ampliar CHECK constraint de estado en cuentas_por_cobrar y cuentas_por_pagar para admitir 'anulada'
+    for tbl_chk in ("cuentas_por_cobrar", "cuentas_por_pagar"):
+        try:
+            cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (tbl_chk,))
+            row_sql = cursor.fetchone()
+            if row_sql and row_sql[0] and "'anulada'" not in row_sql[0] and "CHECK(estado IN ('pendiente', 'parcial', 'pagada'))" in row_sql[0]:
+                old_sql = row_sql[0]
+                tmp_tbl = f"{tbl_chk}_mig_fase4"
+                new_sql = old_sql.replace(
+                    f"CREATE TABLE {tbl_chk}", f"CREATE TABLE {tmp_tbl}", 1
+                ).replace(
+                    f'CREATE TABLE "{tbl_chk}"', f'CREATE TABLE "{tmp_tbl}"', 1
+                ).replace(
+                    "CHECK(estado IN ('pendiente', 'parcial', 'pagada'))",
+                    "CHECK(estado IN ('pendiente', 'parcial', 'pagada', 'anulada'))"
+                )
+                cursor.execute(f"PRAGMA table_info({tbl_chk})")
+                cols_mig = [r[1] for r in cursor.fetchall()]
+                cols_csv = ", ".join(cols_mig)
+                cursor.execute("PRAGMA foreign_keys = OFF")
+                cursor.execute(f"DROP TABLE IF EXISTS {tmp_tbl}")
+                cursor.execute(new_sql)
+                cursor.execute(f"INSERT INTO {tmp_tbl} ({cols_csv}) SELECT {cols_csv} FROM {tbl_chk}")
+                cursor.execute(f"DROP TABLE {tbl_chk}")
+                cursor.execute(f"ALTER TABLE {tmp_tbl} RENAME TO {tbl_chk}")
+                cursor.execute("PRAGMA foreign_keys = ON")
+                reporte.setdefault("columnas_reparadas", []).append(f"{tbl_chk}.estado(CHECK+anulada)")
+        except Exception as e_chk:
+            print(f"[MIGRACIÓN AVISO] Error actualizando CHECK de {tbl_chk}: {e_chk}")
 
     # 4.1 NOTAS DE AJUSTE COMERCIAL (CXC Y CXP)
     try:
@@ -777,7 +836,7 @@ def init_db():
         saldo_pendiente REAL NOT NULL,
         fecha_emision TEXT NOT NULL,
         fecha_vencimiento TEXT NOT NULL,
-        estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente', 'parcial', 'pagada')),
+        estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente', 'parcial', 'pagada', 'anulada')),
         notas TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (factura_id) REFERENCES facturas(id) ON DELETE CASCADE,
@@ -914,7 +973,7 @@ def init_db():
         saldo_pendiente REAL NOT NULL,
         fecha_emision TEXT NOT NULL,
         fecha_vencimiento TEXT NOT NULL,
-        estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente', 'parcial', 'pagada')),
+        estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente', 'parcial', 'pagada', 'anulada')),
         tipo_registro TEXT NOT NULL DEFAULT 'compra' CHECK(tipo_registro IN ('compra', 'directo')),
         notas TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1304,7 +1363,7 @@ def registrar_movimiento_inventario(
         'sobrante_conteo', 'hallazgo_mercancia', 'tasacion_manual',
         'descargo', 'descargo_ajuste',
         'descargo_merma', 'descargo_vencimiento', 
-        'descargo_rotura', 'descargo_uso_interno', 'APERTURA_MIGRACION'
+        'descargo_rotura', 'descargo_uso_interno', 'APERTURA_MIGRACION', 'anulacion_venta', 'anulacion_devolucion', 'anulacion_compra'
     )
     if tipo_movimiento not in tipos_validos:
         raise ValueError(f"Tipo de movimiento inválido: {tipo_movimiento}")
@@ -2134,6 +2193,564 @@ def reconstruir_cpp_desde_apertura(cursor, producto_id, fecha_corte="2026-10-23 
         "movimientos_procesados": procesados
     }
 
+
+
+# ========================================================
+# FUNCIONES TRANSACCIONALES DE ANULACIÓN (FASE 4 - SENIOR)
+# ========================================================
+
+def anular_factura_venta(cursor, factura_id, motivo="Anulación de factura", usuario_id=1):
+    """
+    Anula atómicamente una factura de venta:
+    1. Valida que exista y no esté anulada previamente.
+    2. Para cada producto inventariable, reingresa el stock (+) al costo histórico original congelado.
+    3. Recalcula el costo CPP con precisión matemática.
+    4. Registra en inventario_movimientos: tipo 'anulacion_venta', sentido 'ENTRADA'.
+    5. Anula la cuenta por cobrar asociada (si existe crédito) y anula sus abonos.
+    6. Marca la factura como 'anulada'.
+    """
+    cursor.execute("SELECT * FROM facturas WHERE id = ?", (factura_id,))
+    fac_row = cursor.fetchone()
+    if not fac_row:
+        raise ValueError(f"Factura ID {factura_id} no encontrada")
+    
+    fac = dict(fac_row)
+    if fac.get("estado") == "anulada":
+        raise ValueError(f"La factura #{fac.get('numero_factura')} ya se encuentra anulada.")
+
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    num_fac = fac.get("numero_factura", f"FAC-{factura_id}")
+
+    # 1. Recuperar detalles de la factura
+    cursor.execute("""
+        SELECT fd.*, p.tipo as prod_tipo_cat, p.stock as stock_actual, p.costo_cpp as cpp_actual, p.costo as costo_actual, p.nombre as prod_nombre
+        FROM factura_detalles fd
+        LEFT JOIN productos p ON fd.producto_id = p.id
+        WHERE fd.factura_id = ?
+    """, (factura_id,))
+    detalles = [dict(r) for r in cursor.fetchall()]
+
+    productos_afectados = []
+
+    for d in detalles:
+        p_id = d.get("producto_id")
+        if not p_id or d.get("tipo") == "servicio" or d.get("prod_tipo_cat") == "servicio":
+            continue
+
+        cant = float(d.get("cantidad") or 0.0)
+        if cant <= 0:
+            continue
+
+        stock_ant = float(d.get("stock_actual") or 0.0)
+        cpp_ant = float(d.get("cpp_actual") or d.get("costo_actual") or 0.0)
+        
+        # Costo unitario histórico documentado y congelado al momento de la venta
+        costo_hist = float(d.get("costo_unitario") if d.get("costo_unitario") is not None else cpp_ant)
+        costo_tot_hist = round(cant * costo_hist, 4)
+
+        stock_nuevo = round(stock_ant + cant, 4)
+
+        # Recálculo de CPP considerando reingreso al costo histórico
+        if stock_ant <= 0:
+            cpp_nuevo = round(costo_hist, 4)
+        else:
+            val_ant = Decimal(str(stock_ant)) * Decimal(str(cpp_ant))
+            val_reingreso = Decimal(str(cant)) * Decimal(str(costo_hist))
+            cpp_nuevo = float(((val_ant + val_reingreso) / Decimal(str(stock_nuevo))).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
+
+        # Actualizar producto
+        cursor.execute("""
+            UPDATE productos 
+            SET stock = ?, costo_cpp = ? 
+            WHERE id = ?
+        """, (stock_nuevo, cpp_nuevo, p_id))
+
+        # Registrar movimiento en libro mayor
+        registrar_movimiento_inventario(
+            cursor=cursor,
+            producto_id=p_id,
+            fecha=fecha_hoy,
+            tipo_movimiento="devolucion_cliente",
+            sentido="ENTRADA",
+            cantidad=cant,
+            costo_unitario=costo_hist,
+            costo_total=costo_tot_hist,
+            stock_anterior=stock_ant,
+            stock_nuevo=stock_nuevo,
+            documento_tipo="factura",
+            documento_id=factura_id,
+            documento_numero=num_fac,
+            motivo=f"Anulación de Factura #{num_fac}: {motivo}",
+            usuario_id=usuario_id,
+            documento_linea_id=d.get("id")
+        )
+
+        productos_afectados.append({
+            "producto_id": p_id,
+            "nombre": d.get("prod_nombre"),
+            "cantidad_reingresada": cant,
+            "stock_anterior": stock_ant,
+            "stock_nuevo": stock_nuevo,
+            "cpp_anterior": cpp_ant,
+            "cpp_nuevo": cpp_nuevo
+        })
+
+    # 2. Cuentas por Cobrar (CxC): Si era a crédito, anular la cuenta y sus abonos
+    cursor.execute("SELECT id FROM cuentas_por_cobrar WHERE factura_id = ?", (factura_id,))
+    cxc_rows = cursor.fetchall()
+    for cxc_r in cxc_rows:
+        cxc_id = cxc_r[0]
+        # Anular abonos vinculados
+        cursor.execute("""
+            UPDATE abonos_cxc 
+            SET estado = 'anulado', motivo_anulacion = ?, fecha_anulacion = ? 
+            WHERE cxc_id = ? AND (estado IS NULL OR estado != 'anulado')
+        """, (f"Anulación de factura raíz #{num_fac}", fecha_hoy, cxc_id))
+
+        # Anular cuenta por cobrar
+        cursor.execute("""
+            UPDATE cuentas_por_cobrar 
+            SET estado = 'anulada', saldo_pendiente = 0.0, motivo_anulacion = ?, fecha_anulacion = ? 
+            WHERE id = ?
+        """, (motivo, fecha_hoy, cxc_id))
+
+    # 3. Marcar factura como anulada
+    cursor.execute("""
+        UPDATE facturas 
+        SET estado = 'anulada', saldo_pendiente = 0.0, motivo_anulacion = ?, fecha_anulacion = ? 
+        WHERE id = ?
+    """, (motivo, fecha_hoy, factura_id))
+
+    return {
+        "success": True,
+        "factura_id": factura_id,
+        "numero_factura": num_fac,
+        "productos_reingresados": productos_afectados,
+        "estado": "anulada",
+        "fecha_anulacion": fecha_hoy
+    }
+
+
+def anular_devolucion_cliente(cursor, devolucion_id, motivo="Anulación de devolución", usuario_id=1):
+    """
+    Anula atómicamente una devolución de cliente (nota de crédito):
+    1. Valida que exista y no esté previamente anulada.
+    2. Valida que haya stock suficiente para retirar la mercancía devuelta (no permitir stock negativo).
+    3. Descuenta el stock físico (-).
+    4. Registra en inventario_movimientos: tipo 'anulacion_devolucion', sentido 'SALIDA'.
+    5. Si amortizaba una factura a crédito original, reincrementa el saldo deudor de la CxC.
+    6. Marca devolución como 'anulada'.
+    """
+    cursor.execute("SELECT * FROM devoluciones WHERE id = ?", (devolucion_id,))
+    dev_row = cursor.fetchone()
+    if not dev_row:
+        raise ValueError(f"Devolución ID {devolucion_id} no encontrada")
+    
+    dev = dict(dev_row)
+    if dev.get("estado") == "anulada":
+        raise ValueError(f"La devolución #{dev.get('numero_devolucion')} ya se encuentra anulada.")
+
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    num_dev = dev.get("numero_devolucion", f"DEV-{devolucion_id}")
+    fac_id_orig = dev.get("factura_id")
+
+    # 1. Detalles de la devolución
+    cursor.execute("""
+        SELECT dd.*, p.stock as stock_actual, p.costo_cpp as cpp_actual, p.costo as costo_actual, p.nombre as prod_nombre
+        FROM devolucion_detalles dd
+        LEFT JOIN productos p ON dd.producto_id = p.id
+        WHERE dd.devolucion_id = ?
+    """, (devolucion_id,))
+    detalles = [dict(r) for r in cursor.fetchall()]
+
+    productos_afectados = []
+
+    # Validar existencias antes de tocar nada (Principio de Atomicidad)
+    for d in detalles:
+        p_id = d.get("producto_id")
+        if not p_id or d.get("tipo") == "servicio":
+            continue
+        cant = float(d.get("cantidad") or 0.0)
+        stock_ant = float(d.get("stock_actual") or 0.0)
+        if stock_ant < cant - 0.0001:
+            raise ValueError(f"Stock insuficiente para anular devolución de '{d.get('prod_nombre')}'. Stock actual: {stock_ant}, requerido retirar: {cant}.")
+
+    # Ejecutar retiro de inventario
+    for d in detalles:
+        p_id = d.get("producto_id")
+        if not p_id or d.get("tipo") == "servicio":
+            continue
+
+        cant = float(d.get("cantidad") or 0.0)
+        stock_ant = float(d.get("stock_actual") or 0.0)
+        stock_nuevo = round(max(0.0, stock_ant - cant), 4)
+        c_u = float(d.get("cpp_actual") or d.get("costo_actual") or 0.0)
+        c_tot = round(cant * c_u, 4)
+
+        cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (stock_nuevo, p_id))
+
+        registrar_movimiento_inventario(
+            cursor=cursor,
+            producto_id=p_id,
+            fecha=fecha_hoy,
+            tipo_movimiento="venta",
+            sentido="SALIDA",
+            cantidad=cant,
+            costo_unitario=c_u,
+            costo_total=c_tot,
+            stock_anterior=stock_ant,
+            stock_nuevo=stock_nuevo,
+            documento_tipo="devolucion",
+            documento_id=devolucion_id,
+            documento_numero=num_dev,
+            motivo=f"Anulación de Devolución #{num_dev}: {motivo}",
+            usuario_id=usuario_id,
+            documento_linea_id=d.get("id")
+        )
+
+        productos_afectados.append({
+            "producto_id": p_id,
+            "nombre": d.get("prod_nombre"),
+            "cantidad_retirada": cant,
+            "stock_anterior": stock_ant,
+            "stock_nuevo": stock_nuevo
+        })
+
+    # 2. Si la devolución afectó una factura a crédito activa, reincrementar saldo deudor
+    if fac_id_orig:
+        monto_reintegrar_usd = float(dev.get("total_usd") or 0.0)
+        cursor.execute("SELECT id, monto_total, monto_pagado, saldo_pendiente, estado FROM cuentas_por_cobrar WHERE factura_id = ? AND estado != 'anulada'", (fac_id_orig,))
+        cxc_row = cursor.fetchone()
+        if cxc_row:
+            cxc_d = dict(cxc_row)
+            nuevo_saldo = round(float(cxc_d["saldo_pendiente"]) + monto_reintegrar_usd, 2)
+            nuevo_estado = "pendiente" if nuevo_saldo >= float(cxc_d["monto_total"]) - 0.001 else "parcial"
+            cursor.execute("""
+                UPDATE cuentas_por_cobrar 
+                SET saldo_pendiente = ?, estado = ? 
+                WHERE id = ?
+            """, (nuevo_saldo, nuevo_estado, cxc_d["id"]))
+
+            cursor.execute("""
+                UPDATE facturas 
+                SET saldo_pendiente = round(saldo_pendiente + ?, 2) 
+                WHERE id = ? AND estado != 'anulada'
+            """, (monto_reintegrar_usd, fac_id_orig))
+
+    # 3. Marcar devolución como anulada
+    cursor.execute("""
+        UPDATE devoluciones 
+        SET estado = 'anulada', motivo_anulacion = ?, fecha_anulacion = ? 
+        WHERE id = ?
+    """, (motivo, fecha_hoy, devolucion_id))
+
+    return {
+        "success": True,
+        "devolucion_id": devolucion_id,
+        "numero_devolucion": num_dev,
+        "productos_retirados": productos_afectados,
+        "estado": "anulada",
+        "fecha_anulacion": fecha_hoy
+    }
+
+
+def anular_compra_proveedor(cursor, compra_id, motivo="Anulación de compra", usuario_id=1):
+    """
+    Anula atómicamente una compra a proveedor:
+    1. Valida existencia y que no esté previamente anulada.
+    2. Valida stock suficiente disponible para retirar (evita stock negativo si ya se vendió mercancía).
+    3. Descuenta existencias físicas del almacén (-).
+    4. Registra en inventario_movimientos: tipo 'anulacion_compra', sentido 'SALIDA'.
+    5. Anula la cuenta por pagar vinculada (saldo=0, estado='anulada') y sus abonos.
+    6. Marca la compra como 'anulada'.
+    """
+    cursor.execute("SELECT * FROM compras WHERE id = ?", (compra_id,))
+    comp_row = cursor.fetchone()
+    if not comp_row:
+        raise ValueError(f"Compra ID {compra_id} no encontrada")
+    
+    comp = dict(comp_row)
+    if comp.get("estado") == "anulada":
+        raise ValueError(f"La compra #{comp.get('numero_control') or compra_id} ya se encuentra anulada.")
+
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    num_comp = comp.get("numero_control") or comp.get("numero_factura") or f"COM-{compra_id}"
+
+    # 1. Obtener detalles de la compra
+    cursor.execute("""
+        SELECT cd.*, p.stock as stock_actual, p.costo_cpp as cpp_actual, p.costo as costo_actual, p.nombre as prod_nombre
+        FROM compra_detalles cd
+        LEFT JOIN productos p ON cd.producto_id = p.id
+        WHERE cd.compra_id = ?
+    """, (compra_id,))
+    detalles = [dict(r) for r in cursor.fetchall()]
+
+    productos_afectados = []
+
+    # Validar existencias físicas disponibles
+    for d in detalles:
+        p_id = d.get("producto_id")
+        if not p_id:
+            continue
+        cant = float(d.get("cantidad") or 0.0)
+        stock_ant = float(d.get("stock_actual") or 0.0)
+        if stock_ant < cant - 0.0001:
+            raise ValueError(
+                f"No es posible anular la compra: Stock insuficiente para '{d.get('prod_nombre')}'. "
+                f"Stock actual: {stock_ant}, comprado: {cant}. Ya se ha vendido parte de esta mercancía."
+            )
+
+    # Ejecutar retiro de inventario
+    for d in detalles:
+        p_id = d.get("producto_id")
+        if not p_id:
+            continue
+
+        cant = float(d.get("cantidad") or 0.0)
+        stock_ant = float(d.get("stock_actual") or 0.0)
+        stock_nuevo = round(max(0.0, stock_ant - cant), 4)
+        c_u = float(d.get("costo_unitario") or d.get("costo_actual") or 0.0)
+        c_tot = round(cant * c_u, 4)
+
+        cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (stock_nuevo, p_id))
+
+        registrar_movimiento_inventario(
+            cursor=cursor,
+            producto_id=p_id,
+            fecha=fecha_hoy,
+            tipo_movimiento="devolucion_proveedor",
+            sentido="SALIDA",
+            cantidad=cant,
+            costo_unitario=c_u,
+            costo_total=c_tot,
+            stock_anterior=stock_ant,
+            stock_nuevo=stock_nuevo,
+            documento_tipo="compra",
+            documento_id=compra_id,
+            documento_numero=num_comp,
+            motivo=f"Anulación de Compra #{num_comp}: {motivo}",
+            usuario_id=usuario_id,
+            documento_linea_id=d.get("id")
+        )
+
+        productos_afectados.append({
+            "producto_id": p_id,
+            "nombre": d.get("prod_nombre"),
+            "cantidad_retirada": cant,
+            "stock_anterior": stock_ant,
+            "stock_nuevo": stock_nuevo
+        })
+
+    # 2. Cuentas por Pagar (CxP): Anular la deuda vinculada y sus abonos
+    cursor.execute("SELECT id FROM cuentas_por_pagar WHERE compra_id = ?", (compra_id,))
+    cxp_rows = cursor.fetchall()
+    for cxp_r in cxp_rows:
+        cxp_id = cxp_r[0]
+        cursor.execute("""
+            UPDATE abonos_cxp 
+            SET estado = 'anulado', motivo_anulacion = ?, fecha_anulacion = ? 
+            WHERE cxp_id = ? AND (estado IS NULL OR estado != 'anulado')
+        """, (f"Anulación de compra raíz #{num_comp}", fecha_hoy, cxp_id))
+
+        cursor.execute("""
+            UPDATE cuentas_por_pagar 
+            SET estado = 'anulada', saldo_pendiente = 0.0, motivo_anulacion = ?, fecha_anulacion = ? 
+            WHERE id = ?
+        """, (motivo, fecha_hoy, cxp_id))
+
+    # 3. Marcar compra como anulada
+    cursor.execute("""
+        UPDATE compras 
+        SET estado = 'anulada', saldo_pendiente = 0.0, motivo_anulacion = ?, fecha_anulacion = ? 
+        WHERE id = ?
+    """, (motivo, fecha_hoy, compra_id))
+
+    return {
+        "success": True,
+        "compra_id": compra_id,
+        "numero_control": num_comp,
+        "productos_retirados": productos_afectados,
+        "estado": "anulada",
+        "fecha_anulacion": fecha_hoy
+    }
+
+
+def anular_abono_cxc(cursor, abono_id, motivo="Anulación de cobro", usuario_id=1):
+    """
+    Anula atómicamente un pago/abono de cliente en CxC:
+    1. Reincrementa saldo_pendiente de la cuenta por cobrar (+).
+    2. Reduce monto_pagado (-).
+    3. Recalcula estado de la cuenta por cobrar ('pendiente' o 'parcial').
+    4. Reincrementa saldo_pendiente en la factura vinculada.
+    5. Marca abonos_cxc: estado = 'anulado'.
+    """
+    cursor.execute("SELECT * FROM abonos_cxc WHERE id = ?", (abono_id,))
+    ab_row = cursor.fetchone()
+    if not ab_row:
+        raise ValueError(f"Abono CxC ID {abono_id} no encontrado")
+    
+    ab = dict(ab_row)
+    if ab.get("estado") == "anulado":
+        raise ValueError(f"El abono #{abono_id} ya se encuentra anulado.")
+
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cxc_id = ab.get("cxc_id")
+    monto_abono = float(ab.get("monto_usd") or 0.0)
+
+    cursor.execute("SELECT * FROM cuentas_por_cobrar WHERE id = ?", (cxc_id,))
+    cxc_row = cursor.fetchone()
+    if not cxc_row:
+        raise ValueError(f"Cuenta por cobrar ID {cxc_id} asociada al abono no encontrada")
+
+    cxc = dict(cxc_row)
+    nuevo_saldo = round(float(cxc.get("saldo_pendiente") or 0.0) + monto_abono, 2)
+    nuevo_pagado = round(max(0.0, float(cxc.get("monto_pagado") or 0.0) - monto_abono), 2)
+    tot_cxc = float(cxc.get("monto_total") or 0.0)
+    nuevo_estado = "pendiente" if nuevo_saldo >= tot_cxc - 0.001 else "parcial"
+
+    # Actualizar CxC
+    cursor.execute("""
+        UPDATE cuentas_por_cobrar 
+        SET saldo_pendiente = ?, monto_pagado = ?, estado = ? 
+        WHERE id = ?
+    """, (nuevo_saldo, nuevo_pagado, nuevo_estado, cxc_id))
+
+    # Actualizar factura vinculada si existe
+    fac_id = cxc.get("factura_id")
+    if fac_id:
+        cursor.execute("""
+            UPDATE facturas 
+            SET saldo_pendiente = round(saldo_pendiente + ?, 2) 
+            WHERE id = ? AND estado != 'anulada'
+        """, (monto_abono, fac_id))
+
+    # Marcar abono como anulado
+    cursor.execute("""
+        UPDATE abonos_cxc 
+        SET estado = 'anulado', motivo_anulacion = ?, fecha_anulacion = ? 
+        WHERE id = ?
+    """, (motivo, fecha_hoy, abono_id))
+
+    return {
+        "success": True,
+        "abono_id": abono_id,
+        "cxc_id": cxc_id,
+        "monto_reintegrado_usd": monto_abono,
+        "nuevo_saldo_pendiente": nuevo_saldo,
+        "nuevo_estado_cxc": nuevo_estado,
+        "fecha_anulacion": fecha_hoy
+    }
+
+
+def anular_abono_cxp(cursor, abono_id, motivo="Anulación de pago a proveedor", usuario_id=1):
+    """
+    Anula atómicamente un pago/abono a proveedor en CxP:
+    1. Reincrementa saldo_pendiente de la cuenta por pagar (+).
+    2. Reduce monto_pagado (-).
+    3. Recalcula estado de la cuenta por pagar ('pendiente' o 'parcial').
+    4. Reincrementa saldo_pendiente en la compra vinculada si aplica.
+    5. Marca abonos_cxp: estado = 'anulado'.
+    """
+    cursor.execute("SELECT * FROM abonos_cxp WHERE id = ?", (abono_id,))
+    ab_row = cursor.fetchone()
+    if not ab_row:
+        raise ValueError(f"Abono CxP ID {abono_id} no encontrado")
+    
+    ab = dict(ab_row)
+    if ab.get("estado") == "anulado":
+        raise ValueError(f"El pago CxP #{abono_id} ya se encuentra anulado.")
+
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cxp_id = ab.get("cxp_id")
+    monto_abono = float(ab.get("monto_usd") or 0.0)
+
+    cursor.execute("SELECT * FROM cuentas_por_pagar WHERE id = ?", (cxp_id,))
+    cxp_row = cursor.fetchone()
+    if not cxp_row:
+        raise ValueError(f"Cuenta por pagar ID {cxp_id} asociada al abono no encontrada")
+
+    cxp = dict(cxp_row)
+    nuevo_saldo = round(float(cxp.get("saldo_pendiente") or 0.0) + monto_abono, 2)
+    nuevo_pagado = round(max(0.0, float(cxp.get("monto_pagado") or 0.0) - monto_abono), 2)
+    tot_cxp = float(cxp.get("monto_total") or 0.0)
+    nuevo_estado = "pendiente" if nuevo_saldo >= tot_cxp - 0.001 else "parcial"
+
+    # Actualizar CxP
+    cursor.execute("""
+        UPDATE cuentas_por_pagar 
+        SET saldo_pendiente = ?, monto_pagado = ?, estado = ? 
+        WHERE id = ?
+    """, (nuevo_saldo, nuevo_pagado, nuevo_estado, cxp_id))
+
+    # Actualizar compra vinculada si existe
+    comp_id = cxp.get("compra_id")
+    if comp_id:
+        cursor.execute("""
+            UPDATE compras 
+            SET saldo_pendiente = round(saldo_pendiente + ?, 2) 
+            WHERE id = ? AND estado != 'anulada'
+        """, (monto_abono, comp_id))
+
+    # Marcar abono como anulado
+    cursor.execute("""
+        UPDATE abonos_cxp 
+        SET estado = 'anulado', motivo_anulacion = ?, fecha_anulacion = ? 
+        WHERE id = ?
+    """, (motivo, fecha_hoy, abono_id))
+
+    return {
+        "success": True,
+        "abono_id": abono_id,
+        "cxp_id": cxp_id,
+        "monto_reintegrado_usd": monto_abono,
+        "nuevo_saldo_pendiente": nuevo_saldo,
+        "nuevo_estado_cxp": nuevo_estado,
+        "fecha_anulacion": fecha_hoy
+    }
+
+
+def anular_cuenta_cxp_directa(cursor, cxp_id, motivo="Anulación de cuenta por pagar", usuario_id=1):
+    """
+    Anula una cuenta por pagar directa (gasto administrativo, factura de servicio sin inventario):
+    1. Valida que exista y no esté previamente anulada.
+    2. Si está vinculada a una compra de inventario, rechaza para que se anule desde Compras.
+    3. Anula los abonos que tuviera registrados.
+    4. Establece estado = 'anulada', saldo_pendiente = 0.0.
+    """
+    cursor.execute("SELECT * FROM cuentas_por_pagar WHERE id = ?", (cxp_id,))
+    cxp_row = cursor.fetchone()
+    if not cxp_row:
+        raise ValueError(f"Cuenta por pagar ID {cxp_id} no encontrada")
+    
+    cxp = dict(cxp_row)
+    if cxp.get("estado") == "anulada":
+        raise ValueError(f"La cuenta por pagar #{cxp_id} ya se encuentra anulada.")
+
+    if cxp.get("compra_id"):
+        raise ValueError("Esta cuenta proviene de una compra de inventario. Debe anular la compra desde el módulo de Compras para devolver el stock correspondiente.")
+
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Anular abonos
+    cursor.execute("""
+        UPDATE abonos_cxp 
+        SET estado = 'anulado', motivo_anulacion = ?, fecha_anulacion = ? 
+        WHERE cxp_id = ? AND (estado IS NULL OR estado != 'anulado')
+    """, (f"Anulación de cuenta raíz CxP #{cxp_id}", fecha_hoy, cxp_id))
+
+    # Anular cuenta
+    cursor.execute("""
+        UPDATE cuentas_por_pagar 
+        SET estado = 'anulada', saldo_pendiente = 0.0, motivo_anulacion = ?, fecha_anulacion = ? 
+        WHERE id = ?
+    """, (motivo, fecha_hoy, cxp_id))
+
+    return {
+        "success": True,
+        "cxp_id": cxp_id,
+        "estado": "anulada",
+        "fecha_anulacion": fecha_hoy
+    }
 if __name__ == "__main__":
     init_db()
     print("Base de datos inicializada correctamente.")
