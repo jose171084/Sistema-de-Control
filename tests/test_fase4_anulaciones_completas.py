@@ -24,6 +24,8 @@ from database import (
     anular_abono_cxc,
     anular_abono_cxp,
     anular_cuenta_cxp_directa,
+    obtener_estado_cuenta_cliente_cxc,
+    obtener_estado_cuenta_proveedor_cxp,
     auditar_y_migrar_db,
     conciliar_inventario
 )
@@ -503,6 +505,277 @@ class TestFase4AnulacionesCompletas(unittest.TestCase):
         self.assertAlmostEqual(res_cxp_anu["nuevo_monto_pagado"], 0.0, places=2)
         self.assertAlmostEqual(res_cxp_anu["nuevo_saldo_pendiente"], 400.0, places=2)
         self.assertEqual(res_cxp_anu["nuevo_estado_cxp"], "pendiente")
+
+    def test_12_anulacion_anticipo_inicial_legacy_cxc_y_cxp(self):
+        """
+        Verifica la anulación quirúrgica de un anticipo/pago inicial (abono_id = 0)
+        aplicado al momento de emitir una factura o compra a crédito, restituyendo
+        el saldo pendiente total tanto en CXC/Facturas como en CXP/Compras.
+        """
+        # 1. Factura a crédito de $600 con anticipo inicial de $150 (sin fila previa en abonos_cxc, solo en factura_pagos)
+        self.cursor.execute("""
+            INSERT INTO facturas (numero_factura, cliente_id, fecha, tipo_venta, subtotal, iva_total, total, total_usd, tasa_ves, tasa_cop, total_ves, total_cop, saldo_pendiente, estado)
+            VALUES ('FAC-ANT-01', 1, '2026-10-31 11:00:00', 'credito', 600.0, 0.0, 600.0, 600.0, 45.0, 4000.0, 27000.0, 2400000.0, 450.0, 'pendiente')
+        """)
+        fac_id = self.cursor.lastrowid
+        self.cursor.execute("""
+            INSERT INTO factura_pagos (factura_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+            VALUES (?, 'USD', 'Efectivo USD', 150.0, 1.0, 150.0, 'ANT-01')
+        """, (fac_id,))
+        self.cursor.execute("""
+            INSERT INTO cuentas_por_cobrar (factura_id, cliente_id, monto_total, monto_pagado, saldo_pendiente, fecha_emision, fecha_vencimiento, estado)
+            VALUES (?, 1, 600.0, 150.0, 450.0, '2026-10-31', '2026-11-30', 'parcial')
+        """, (fac_id,))
+        cxc_id = self.cursor.lastrowid
+        self.conn.commit()
+
+        # Anular el anticipo inicial (abono_id = 0, cxc_id_explicit = cxc_id)
+        res_ant_cxc = anular_abono_cxc(self.cursor, 0, motivo="Reversión de anticipo inicial en factura", cxc_id_explicit=cxc_id)
+        self.assertTrue(res_ant_cxc["success"])
+        self.assertAlmostEqual(res_ant_cxc["monto_reintegrado_usd"], 150.0, places=2)
+        self.assertAlmostEqual(res_ant_cxc["nuevo_monto_pagado"], 0.0, places=2)
+        self.assertAlmostEqual(res_ant_cxc["nuevo_saldo_pendiente"], 600.0, places=2)
+        self.assertEqual(res_ant_cxc["nuevo_estado_cxc"], "pendiente")
+
+        # Verificar en tabla facturas que el saldo_pendiente regresó a $600.00
+        self.cursor.execute("SELECT saldo_pendiente, estado FROM facturas WHERE id = ?", (fac_id,))
+        fac_row = self.cursor.fetchone()
+        self.assertAlmostEqual(float(fac_row["saldo_pendiente"]), 600.0, places=2)
+        self.assertEqual(fac_row["estado"], "pendiente")
+
+        # 2. Compra a crédito de $800 con anticipo inicial de $200 (en compra_pagos)
+        self.cursor.execute("""
+            INSERT INTO compras (numero_control, proveedor_id, fecha, subtotal, iva_total, total, tipo_compra, saldo_pendiente, numero_factura, estado)
+            VALUES ('COM-ANT-01', 1, '2026-10-31 11:30:00', 800.0, 0.0, 800.0, 'credito', 600.0, 'FPROV-ANT-01', 'activa')
+        """)
+        comp_id = self.cursor.lastrowid
+        self.cursor.execute("""
+            INSERT INTO compra_pagos (compra_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+            VALUES (?, 'USD', 'Zelle', 200.0, 1.0, 200.0, 'ANT-COMP-01')
+        """, (comp_id,))
+        self.cursor.execute("""
+            INSERT INTO cuentas_por_pagar (compra_id, proveedor_id, numero_factura, tipo_registro, descripcion_concepto, monto_total, monto_pagado, saldo_pendiente, fecha_emision, fecha_vencimiento, estado)
+            VALUES (?, 1, 'FPROV-ANT-01', 'compra', 'Compra a crédito con inicial', 800.0, 200.0, 600.0, '2026-10-31', '2026-11-30', 'parcial')
+        """, (comp_id,))
+        cxp_id = self.cursor.lastrowid
+        self.conn.commit()
+
+        # Anular el anticipo inicial de CXP (abono_id = 0, cxp_id_explicit = cxp_id)
+        res_ant_cxp = anular_abono_cxp(self.cursor, 0, motivo="Reversión de anticipo inicial a proveedor", cxp_id_explicit=cxp_id)
+        self.assertTrue(res_ant_cxp["success"])
+        self.assertAlmostEqual(res_ant_cxp["monto_reintegrado_usd"], 200.0, places=2)
+        self.assertAlmostEqual(res_ant_cxp["nuevo_monto_pagado"], 0.0, places=2)
+        self.assertAlmostEqual(res_ant_cxp["nuevo_saldo_pendiente"], 800.0, places=2)
+        self.assertEqual(res_ant_cxp["nuevo_estado_cxp"], "pendiente")
+
+        # Verificar en tabla compras que el saldo_pendiente regresó a $800.00
+        self.cursor.execute("SELECT saldo_pendiente FROM compras WHERE id = ?", (comp_id,))
+        comp_row = self.cursor.fetchone()
+        self.assertAlmostEqual(float(comp_row["saldo_pendiente"]), 800.0, places=2)
+
+    def test_13_estado_cuenta_cronologico_desglosado_y_filtros_cxc_cxp(self):
+        """
+        Verifica el Libro Mayor Auxiliar Cronológico Desglosado en CXC y CXP:
+        - Orden cronológico estricto de Facturas, Pagos, Abonos, Notas de Crédito y Notas de Débito.
+        - Evolución matemática exacta del Saldo Anterior y Saldo Acumulado en cada movimiento.
+        - Filtros por tipo de movimiento, búsqueda instantánea (q), rango de fechas y orden ascendente/descendente.
+        """
+        # --- 1. PRUEBA INTEGRAL EN CXC (CLIENTE NUEVO DE PRUEBA) ---
+        self.cursor.execute("""
+            INSERT INTO clientes (cedula, nombre, telefono, direccion)
+            VALUES ('J-99999999-9', 'Corporación Ledger Cronológico C.A.', '0414-0000000', 'Caracas')
+        """)
+        cli_id = self.cursor.lastrowid
+
+        # Emitir Factura a crédito original por $1,000.00; luego tendrá una ND de +$50.00 (monto_total en CxC = $1,050.00)
+        self.cursor.execute("""
+            INSERT INTO facturas (numero_factura, cliente_id, fecha, tipo_venta, subtotal, iva_total, total, total_usd, tasa_ves, tasa_cop, total_ves, total_cop, saldo_pendiente, estado)
+            VALUES ('FAC-LEDGER-01', ?, '2026-10-31 08:00:00', 'credito', 1000.0, 0.0, 1000.0, 1000.0, 45.0, 4000.0, 45000.0, 4000000.0, 0.0, 'pagada')
+        """, (cli_id,))
+        fac_id = self.cursor.lastrowid
+
+        self.cursor.execute("""
+            INSERT INTO cuentas_por_cobrar (factura_id, cliente_id, monto_total, monto_pagado, saldo_pendiente, fecha_emision, fecha_vencimiento, estado)
+            VALUES (?, ?, 1050.0, 1050.0, 0.0, '2026-10-31 08:00:00', '2026-11-30', 'pagada')
+        """, (fac_id, cli_id))
+        cxc_id = self.cursor.lastrowid
+
+        # Movimiento 2 (09:00): Abono Parcial de $300.00 -> Saldo pasa de $1,000.00 a $700.00
+        self.cursor.execute("""
+            INSERT INTO abonos_cxc (cxc_id, monto_usd, fecha, notas, estado)
+            VALUES (?, 300.0, '2026-10-31 09:00:00', 'Primer abono parcial en divisa', 'activo')
+        """, (cxc_id,))
+        ab1_id = self.cursor.lastrowid
+        self.cursor.execute("""
+            INSERT INTO abono_cxc_pagos (abono_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+            VALUES (?, 'USD', 'Zelle', 300.0, 1.0, 300.0, 'ZELLE-300')
+        """, (ab1_id,))
+
+        # Movimiento 3 (10:00): Nota de Débito por +$50.00 -> Saldo pasa de $700.00 a $750.00
+        self.cursor.execute("""
+            INSERT INTO notas_ajuste_comercial (modulo, tercero_id, cuenta_id, tipo_nota, numero_nota, fecha, monto_usd, tasa_bcv, monto_ves, efecto, motivo, numero_control)
+            VALUES ('cxc', ?, ?, 'debito', 'ND-CXC-9001', '2026-10-31 10:00:00', 50.0, 45.0, 2250.0, 'incrementa', 'Interés mora acordado', 'CTRL-ND-01')
+        """, (cli_id, cxc_id))
+
+        # Movimiento 4 (11:00): Nota de Crédito Comercial por -$100.00 -> Saldo pasa de $750.00 a $650.00
+        self.cursor.execute("""
+            INSERT INTO notas_ajuste_comercial (modulo, tercero_id, cuenta_id, tipo_nota, numero_nota, fecha, monto_usd, tasa_bcv, monto_ves, efecto, motivo, numero_control)
+            VALUES ('cxc', ?, ?, 'credito', 'NC-CXC-9001', '2026-10-31 11:00:00', 100.0, 45.0, 4500.0, 'disminuye', 'Descuento pronto pago', 'CTRL-NC-01')
+        """, (cli_id, cxc_id))
+
+        # Movimiento 5 (12:00): Devolución / Nota de Crédito Fiscal por -$150.00 -> Saldo pasa de $650.00 a $500.00
+        self.cursor.execute("""
+            INSERT INTO devoluciones (numero_devolucion, factura_id, numero_factura, cliente_id, cliente_nombre, fecha_emision, tipo_devolucion, motivo, subtotal_usd, iva_usd, total_usd, tasa_ves, tasa_cop, total_ves, total_cop, estado)
+            VALUES ('DEV-LEDGER-01', ?, 'FAC-LEDGER-01', ?, 'Corporación Ledger Cronológico C.A.', '2026-10-31 12:00:00', 'parcial', 'Devolución de mercancía', 150.0, 0.0, 150.0, 45.0, 4000.0, 6750.0, 600000.0, 'activa')
+        """, (fac_id, cli_id))
+
+        # Movimiento 6 (13:00): Pago Final de $500.00 -> Saldo pasa de $500.00 a $0.00
+        self.cursor.execute("""
+            INSERT INTO abonos_cxc (cxc_id, monto_usd, fecha, notas, estado)
+            VALUES (?, 500.0, '2026-10-31 13:00:00', 'Pago liquidación total de factura', 'activo')
+        """, (cxc_id,))
+        ab2_id = self.cursor.lastrowid
+        self.cursor.execute("""
+            INSERT INTO abono_cxc_pagos (abono_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+            VALUES (?, 'VES', 'Transferencia Banesco', 22500.0, 45.0, 500.0, 'BAN-500')
+        """, (ab2_id,))
+        self.conn.commit()
+
+        # Consultar Estado de Cuenta Cronológico CXC completo (ascendente)
+        ec_cxc = obtener_estado_cuenta_cliente_cxc(self.cursor, cli_id, tipo_filtro="todos", orden="asc")
+        self.assertEqual(ec_cxc["total_movimientos"], 6)
+
+        movs = ec_cxc["movimientos"]
+        # Verificar secuencia cronológica y evolución exacta del saldo acumulado
+        self.assertEqual(movs[0]["tipo_movimiento"], "factura")
+        self.assertAlmostEqual(movs[0]["cargo_usd"], 1000.0, places=2)
+        self.assertAlmostEqual(movs[0]["saldo_acumulado_usd"], 1000.0, places=2)
+
+        self.assertEqual(movs[1]["tipo_movimiento"], "abono")
+        self.assertAlmostEqual(movs[1]["abono_usd"], 300.0, places=2)
+        self.assertAlmostEqual(movs[1]["saldo_acumulado_usd"], 700.0, places=2)
+
+        self.assertEqual(movs[2]["tipo_movimiento"], "nota_debito")
+        self.assertAlmostEqual(movs[2]["cargo_usd"], 50.0, places=2)
+        self.assertAlmostEqual(movs[2]["saldo_acumulado_usd"], 750.0, places=2)
+
+        self.assertEqual(movs[3]["tipo_movimiento"], "nota_credito")
+        self.assertAlmostEqual(movs[3]["abono_usd"], 100.0, places=2)
+        self.assertAlmostEqual(movs[3]["saldo_acumulado_usd"], 650.0, places=2)
+
+        self.assertEqual(movs[4]["tipo_movimiento"], "nota_credito")
+        self.assertAlmostEqual(movs[4]["abono_usd"], 150.0, places=2)
+        self.assertAlmostEqual(movs[4]["saldo_acumulado_usd"], 500.0, places=2)
+
+        self.assertEqual(movs[5]["tipo_movimiento"], "pago")
+        self.assertAlmostEqual(movs[5]["abono_usd"], 500.0, places=2)
+        self.assertAlmostEqual(movs[5]["saldo_acumulado_usd"], 0.0, places=2)
+
+        # Verificar resumen financiero CXC
+        res_cxc = ec_cxc["resumen"]
+        self.assertAlmostEqual(res_cxc["total_facturas_usd"], 1000.0, places=2)
+        self.assertAlmostEqual(res_cxc["total_notas_debito_usd"], 50.0, places=2)
+        self.assertAlmostEqual(res_cxc["total_abonos_parciales_usd"], 300.0, places=2)
+        self.assertAlmostEqual(res_cxc["total_pagos_usd"], 500.0, places=2)
+        self.assertAlmostEqual(res_cxc["total_notas_credito_usd"], 250.0, places=2)
+        self.assertAlmostEqual(res_cxc["saldo_pendiente_usd"], 0.0, places=2)
+
+        # Verificar filtros por tipo de movimiento en CXC
+        self.assertEqual(len(obtener_estado_cuenta_cliente_cxc(self.cursor, cli_id, tipo_filtro="factura")["movimientos"]), 1)
+        self.assertEqual(len(obtener_estado_cuenta_cliente_cxc(self.cursor, cli_id, tipo_filtro="abono")["movimientos"]), 1)
+        self.assertEqual(len(obtener_estado_cuenta_cliente_cxc(self.cursor, cli_id, tipo_filtro="pago")["movimientos"]), 1)
+        self.assertEqual(len(obtener_estado_cuenta_cliente_cxc(self.cursor, cli_id, tipo_filtro="pago_abono")["movimientos"]), 2)
+        self.assertEqual(len(obtener_estado_cuenta_cliente_cxc(self.cursor, cli_id, tipo_filtro="nota_credito")["movimientos"]), 2)
+        self.assertEqual(len(obtener_estado_cuenta_cliente_cxc(self.cursor, cli_id, tipo_filtro="nota_debito")["movimientos"]), 1)
+        self.assertEqual(len(obtener_estado_cuenta_cliente_cxc(self.cursor, cli_id, q="ZELLE-300")["movimientos"]), 1)
+
+        # --- 2. PRUEBA INTEGRAL EN CXP (PROVEEDOR NUEVO DE PRUEBA) ---
+        self.cursor.execute("""
+            INSERT INTO proveedores (cedula, nombre, telefono, direccion)
+            VALUES ('J-88888888-8', 'Distribuidora Mayorista CXP C.A.', '0212-0000000', 'Valencia')
+        """)
+        prov_id = self.cursor.lastrowid
+
+        # Factura de Compra original por $800.00 + ND posterior de $40.00 (monto_total en CxP = $840.00)
+        self.cursor.execute("""
+            INSERT INTO compras (numero_control, proveedor_id, fecha, subtotal, iva_total, total, tipo_compra, saldo_pendiente, numero_factura, estado)
+            VALUES ('COM-LEDGER-01', ?, '2026-10-31 08:00:00', 800.0, 0.0, 800.0, 'credito', 0.0, 'FPROV-LEDGER-01', 'activa')
+        """, (prov_id,))
+        comp_id = self.cursor.lastrowid
+
+        self.cursor.execute("""
+            INSERT INTO cuentas_por_pagar (compra_id, proveedor_id, numero_factura, tipo_registro, descripcion_concepto, monto_total, monto_pagado, saldo_pendiente, fecha_emision, fecha_vencimiento, estado)
+            VALUES (?, ?, 'FPROV-LEDGER-01', 'compra', 'Compra de inventario mayorista', 840.0, 840.0, 0.0, '2026-10-31 08:00:00', '2026-11-30', 'pagada')
+        """, (comp_id, prov_id))
+        cxp_id = self.cursor.lastrowid
+
+        # Abono parcial a proveedor ($200.00) -> Saldo $600.00
+        self.cursor.execute("""
+            INSERT INTO abonos_cxp (cxp_id, monto_usd, fecha, notas, estado)
+            VALUES (?, 200.0, '2026-10-31 09:00:00', 'Abono inicial a proveedor', 'activo')
+        """, (cxp_id,))
+        ab_cxp_1 = self.cursor.lastrowid
+        self.cursor.execute("""
+            INSERT INTO abono_cxp_pagos (abono_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+            VALUES (?, 'USD', 'Efectivo USD', 200.0, 1.0, 200.0, 'EF-PROV-200')
+        """, (ab_cxp_1,))
+
+        # Nota de Débito de proveedor (+$40.00) -> Saldo $640.00
+        self.cursor.execute("""
+            INSERT INTO notas_ajuste_comercial (modulo, tercero_id, cuenta_id, tipo_nota, numero_nota, fecha, monto_usd, tasa_bcv, monto_ves, efecto, motivo, numero_control)
+            VALUES ('cxp', ?, ?, 'debito', 'ND-CXP-9001', '2026-10-31 10:00:00', 40.0, 45.0, 1800.0, 'incrementa', 'Flete adicional en compra', 'CTRL-ND-P01')
+        """, (prov_id, cxp_id))
+
+        # Nota de Crédito de proveedor (-$140.00) -> Saldo $500.00
+        self.cursor.execute("""
+            INSERT INTO notas_ajuste_comercial (modulo, tercero_id, cuenta_id, tipo_nota, numero_nota, fecha, monto_usd, tasa_bcv, monto_ves, efecto, motivo, numero_control)
+            VALUES ('cxp', ?, ?, 'credito', 'NC-CXP-9001', '2026-10-31 11:00:00', 140.0, 45.0, 6300.0, 'disminuye', 'Descuento por volumen proveedor', 'CTRL-NC-P01')
+        """, (prov_id, cxp_id))
+
+        # Pago final a proveedor ($500.00) -> Saldo $0.00
+        self.cursor.execute("""
+            INSERT INTO abonos_cxp (cxp_id, monto_usd, fecha, notas, estado)
+            VALUES (?, 500.0, '2026-10-31 12:00:00', 'Pago liquidación total proveedor', 'activo')
+        """, (cxp_id,))
+        ab_cxp_2 = self.cursor.lastrowid
+        self.cursor.execute("""
+            INSERT INTO abono_cxp_pagos (abono_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+            VALUES (?, 'USD', 'Zelle', 500.0, 1.0, 500.0, 'ZL-PROV-500')
+        """, (ab_cxp_2,))
+        self.conn.commit()
+
+        # Consultar Estado de Cuenta Cronológico CXP
+        ec_cxp = obtener_estado_cuenta_proveedor_cxp(self.cursor, prov_id, tipo_filtro="todos", orden="asc")
+        self.assertEqual(ec_cxp["total_movimientos"], 5)
+
+        movs_p = ec_cxp["movimientos"]
+        self.assertEqual(movs_p[0]["tipo_movimiento"], "factura")
+        self.assertAlmostEqual(movs_p[0]["cargo_usd"], 800.0, places=2)
+        self.assertAlmostEqual(movs_p[0]["saldo_acumulado_usd"], 800.0, places=2)
+
+        self.assertEqual(movs_p[1]["tipo_movimiento"], "abono")
+        self.assertAlmostEqual(movs_p[1]["abono_usd"], 200.0, places=2)
+        self.assertAlmostEqual(movs_p[1]["saldo_acumulado_usd"], 600.0, places=2)
+
+        self.assertEqual(movs_p[2]["tipo_movimiento"], "nota_debito")
+        self.assertAlmostEqual(movs_p[2]["cargo_usd"], 40.0, places=2)
+        self.assertAlmostEqual(movs_p[2]["saldo_acumulado_usd"], 640.0, places=2)
+
+        self.assertEqual(movs_p[3]["tipo_movimiento"], "nota_credito")
+        self.assertAlmostEqual(movs_p[3]["abono_usd"], 140.0, places=2)
+        self.assertAlmostEqual(movs_p[3]["saldo_acumulado_usd"], 500.0, places=2)
+
+        self.assertEqual(movs_p[4]["tipo_movimiento"], "pago")
+        self.assertAlmostEqual(movs_p[4]["abono_usd"], 500.0, places=2)
+        self.assertAlmostEqual(movs_p[4]["saldo_acumulado_usd"], 0.0, places=2)
+
+        # Verificar filtros por tipo en CXP
+        self.assertEqual(len(obtener_estado_cuenta_proveedor_cxp(self.cursor, prov_id, tipo_filtro="factura")["movimientos"]), 1)
+        self.assertEqual(len(obtener_estado_cuenta_proveedor_cxp(self.cursor, prov_id, tipo_filtro="abono")["movimientos"]), 1)
+        self.assertEqual(len(obtener_estado_cuenta_proveedor_cxp(self.cursor, prov_id, tipo_filtro="pago")["movimientos"]), 1)
+        self.assertEqual(len(obtener_estado_cuenta_proveedor_cxp(self.cursor, prov_id, tipo_filtro="nota_credito")["movimientos"]), 1)
+        self.assertEqual(len(obtener_estado_cuenta_proveedor_cxp(self.cursor, prov_id, tipo_filtro="nota_debito")["movimientos"]), 1)
+        self.assertEqual(len(obtener_estado_cuenta_proveedor_cxp(self.cursor, prov_id, q="ZL-PROV-500")["movimientos"]), 1)
 
 
 if __name__ == "__main__":

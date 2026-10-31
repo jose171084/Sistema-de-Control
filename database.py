@@ -2575,38 +2575,76 @@ def anular_compra_proveedor(cursor, compra_id, motivo="Anulación de compra", us
     }
 
 
-def anular_abono_cxc(cursor, abono_id, motivo="Anulación de cobro", usuario_id=1):
+def anular_abono_cxc(cursor, abono_id, motivo="Anulación de cobro", usuario_id=1, cxc_id_explicit=None):
     """
-    Anula atómicamente un pago/abono de cliente en CxC:
+    Anula atómicamente un pago/abono de cliente en CxC (incluyendo anticipos iniciales si abono_id == 0):
     1. Reincrementa saldo_pendiente de la cuenta por cobrar (+).
     2. Reduce monto_pagado (-).
     3. Recalcula estado de la cuenta por cobrar ('pendiente' o 'parcial').
     4. Reincrementa saldo_pendiente en la factura vinculada.
     5. Marca abonos_cxc: estado = 'anulado'.
     """
-    cursor.execute("SELECT * FROM abonos_cxc WHERE id = ?", (abono_id,))
-    ab_row = cursor.fetchone()
-    if not ab_row:
-        raise ValueError(f"Abono CxC ID {abono_id} no encontrado")
-    
-    ab = dict(ab_row)
-    if ab.get("estado") == "anulado":
-        raise ValueError(f"El abono #{abono_id} ya se encuentra anulado.")
-
     fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cxc_id = ab.get("cxc_id")
-    monto_abono = float(ab.get("monto_usd") or 0.0)
 
-    cursor.execute("SELECT * FROM cuentas_por_cobrar WHERE id = ?", (cxc_id,))
-    cxc_row = cursor.fetchone()
-    if not cxc_row:
-        raise ValueError(f"Cuenta por cobrar ID {cxc_id} asociada al abono no encontrada")
+    if int(abono_id) == 0:
+        if not cxc_id_explicit:
+            raise ValueError("Se requiere el ID de la cuenta por cobrar (cxc_id) para anular un anticipo inicial.")
+        cxc_id = int(cxc_id_explicit)
+        cursor.execute("SELECT * FROM cuentas_por_cobrar WHERE id = ?", (cxc_id,))
+        cxc_row = cursor.fetchone()
+        if not cxc_row:
+            raise ValueError(f"Cuenta por cobrar ID {cxc_id} no encontrada")
+        cxc = dict(cxc_row)
+        fac_id = cxc.get("factura_id")
+        cursor.execute("SELECT * FROM factura_pagos WHERE factura_id = ?", (fac_id,))
+        f_pagos = [dict(p) for p in cursor.fetchall()]
+        if not f_pagos:
+            raise ValueError("No se encontró anticipo inicial activo para anular en esta factura.")
+        monto_abono = round(sum(float(p.get("equivalente_usd") or 0.0) for p in f_pagos), 2)
+        if monto_abono <= 0:
+            raise ValueError("El monto del anticipo inicial es 0.00")
 
-    cxc = dict(cxc_row)
-    nuevo_saldo = round(float(cxc.get("saldo_pendiente") or 0.0) + monto_abono, 2)
-    nuevo_pagado = round(max(0.0, float(cxc.get("monto_pagado") or 0.0) - monto_abono), 2)
+        cursor.execute("""
+            INSERT INTO abonos_cxc (cxc_id, monto_usd, fecha, notas, estado, motivo_anulacion, fecha_anulacion)
+            VALUES (?, ?, ?, 'Anticipo / Pago inicial al momento de facturar (Anulado)', 'anulado', ?, ?)
+        """, (cxc_id, monto_abono, cxc.get("fecha_emision") or fecha_hoy, motivo, fecha_hoy))
+        abono_id = cursor.lastrowid
+        for fp in f_pagos:
+            cursor.execute("""
+                INSERT INTO abono_cxc_pagos (abono_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (abono_id, fp["moneda"], fp["metodo"], fp["monto_moneda"], fp["tasa_cambio"], fp["equivalente_usd"], fp.get("referencia", "")))
+        cursor.execute("DELETE FROM factura_pagos WHERE factura_id = ?", (fac_id,))
+    else:
+        cursor.execute("SELECT * FROM abonos_cxc WHERE id = ?", (abono_id,))
+        ab_row = cursor.fetchone()
+        if not ab_row:
+            raise ValueError(f"Abono CxC ID {abono_id} no encontrado")
+        
+        ab = dict(ab_row)
+        if ab.get("estado") == "anulado":
+            raise ValueError(f"El abono #{abono_id} ya se encuentra anulado.")
+
+        cxc_id = ab.get("cxc_id")
+        monto_abono = float(ab.get("monto_usd") or 0.0)
+
+        cursor.execute("SELECT * FROM cuentas_por_cobrar WHERE id = ?", (cxc_id,))
+        cxc_row = cursor.fetchone()
+        if not cxc_row:
+            raise ValueError(f"Cuenta por cobrar ID {cxc_id} asociada al abono no encontrada")
+        cxc = dict(cxc_row)
+
+        # Marcar abono como anulado
+        cursor.execute("""
+            UPDATE abonos_cxc 
+            SET estado = 'anulado', motivo_anulacion = ?, fecha_anulacion = ? 
+            WHERE id = ?
+        """, (motivo, fecha_hoy, abono_id))
+
     tot_cxc = float(cxc.get("monto_total") or 0.0)
-    nuevo_estado = "pendiente" if nuevo_saldo >= tot_cxc - 0.001 else "parcial"
+    nuevo_saldo = min(tot_cxc, round(float(cxc.get("saldo_pendiente") or 0.0) + monto_abono, 2))
+    nuevo_pagado = round(max(0.0, float(cxc.get("monto_pagado") or 0.0) - monto_abono), 2)
+    nuevo_estado = "pendiente" if nuevo_saldo >= tot_cxc - 0.001 else ("pagada" if nuevo_saldo <= 0.001 else "parcial")
 
     # Actualizar CxC
     cursor.execute("""
@@ -2625,13 +2663,6 @@ def anular_abono_cxc(cursor, abono_id, motivo="Anulación de cobro", usuario_id=
             WHERE id = ? AND estado != 'anulada'
         """, (nuevo_saldo, nuevo_estado_fac, fac_id))
 
-    # Marcar abono como anulado
-    cursor.execute("""
-        UPDATE abonos_cxc 
-        SET estado = 'anulado', motivo_anulacion = ?, fecha_anulacion = ? 
-        WHERE id = ?
-    """, (motivo, fecha_hoy, abono_id))
-
     return {
         "success": True,
         "abono_id": abono_id,
@@ -2644,38 +2675,76 @@ def anular_abono_cxc(cursor, abono_id, motivo="Anulación de cobro", usuario_id=
     }
 
 
-def anular_abono_cxp(cursor, abono_id, motivo="Anulación de pago a proveedor", usuario_id=1):
+def anular_abono_cxp(cursor, abono_id, motivo="Anulación de pago a proveedor", usuario_id=1, cxp_id_explicit=None):
     """
-    Anula atómicamente un pago/abono a proveedor en CxP:
+    Anula atómicamente un pago/abono a proveedor en CxP (incluyendo anticipos iniciales si abono_id == 0):
     1. Reincrementa saldo_pendiente de la cuenta por pagar (+).
     2. Reduce monto_pagado (-).
     3. Recalcula estado de la cuenta por pagar ('pendiente' o 'parcial').
     4. Reincrementa saldo_pendiente en la compra vinculada si aplica.
     5. Marca abonos_cxp: estado = 'anulado'.
     """
-    cursor.execute("SELECT * FROM abonos_cxp WHERE id = ?", (abono_id,))
-    ab_row = cursor.fetchone()
-    if not ab_row:
-        raise ValueError(f"Abono CxP ID {abono_id} no encontrado")
-    
-    ab = dict(ab_row)
-    if ab.get("estado") == "anulado":
-        raise ValueError(f"El pago CxP #{abono_id} ya se encuentra anulado.")
-
     fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cxp_id = ab.get("cxp_id")
-    monto_abono = float(ab.get("monto_usd") or 0.0)
 
-    cursor.execute("SELECT * FROM cuentas_por_pagar WHERE id = ?", (cxp_id,))
-    cxp_row = cursor.fetchone()
-    if not cxp_row:
-        raise ValueError(f"Cuenta por pagar ID {cxp_id} asociada al abono no encontrada")
+    if int(abono_id) == 0:
+        if not cxp_id_explicit:
+            raise ValueError("Se requiere el ID de la cuenta por pagar (cxp_id) para anular un anticipo inicial.")
+        cxp_id = int(cxp_id_explicit)
+        cursor.execute("SELECT * FROM cuentas_por_pagar WHERE id = ?", (cxp_id,))
+        cxp_row = cursor.fetchone()
+        if not cxp_row:
+            raise ValueError(f"Cuenta por pagar ID {cxp_id} no encontrada")
+        cxp = dict(cxp_row)
+        comp_id = cxp.get("compra_id")
+        cursor.execute("SELECT * FROM compra_pagos WHERE compra_id = ?", (comp_id,))
+        c_pagos = [dict(p) for p in cursor.fetchall()]
+        if not c_pagos:
+            raise ValueError("No se encontró anticipo inicial activo para anular en esta compra.")
+        monto_abono = round(sum(float(p.get("equivalente_usd") or 0.0) for p in c_pagos), 2)
+        if monto_abono <= 0:
+            raise ValueError("El monto del anticipo inicial es 0.00")
 
-    cxp = dict(cxp_row)
-    nuevo_saldo = round(float(cxp.get("saldo_pendiente") or 0.0) + monto_abono, 2)
-    nuevo_pagado = round(max(0.0, float(cxp.get("monto_pagado") or 0.0) - monto_abono), 2)
+        cursor.execute("""
+            INSERT INTO abonos_cxp (cxp_id, monto_usd, fecha, notas, estado, motivo_anulacion, fecha_anulacion)
+            VALUES (?, ?, ?, 'Anticipo / Pago inicial en compra (Anulado)', 'anulado', ?, ?)
+        """, (cxp_id, monto_abono, cxp.get("fecha_emision") or fecha_hoy, motivo, fecha_hoy))
+        abono_id = cursor.lastrowid
+        for cp in c_pagos:
+            cursor.execute("""
+                INSERT INTO abono_cxp_pagos (abono_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (abono_id, cp["moneda"], cp["metodo"], cp["monto_moneda"], cp["tasa_cambio"], cp["equivalente_usd"], cp.get("referencia", "")))
+        cursor.execute("DELETE FROM compra_pagos WHERE compra_id = ?", (comp_id,))
+    else:
+        cursor.execute("SELECT * FROM abonos_cxp WHERE id = ?", (abono_id,))
+        ab_row = cursor.fetchone()
+        if not ab_row:
+            raise ValueError(f"Abono CxP ID {abono_id} no encontrado")
+        
+        ab = dict(ab_row)
+        if ab.get("estado") == "anulado":
+            raise ValueError(f"El pago CxP #{abono_id} ya se encuentra anulado.")
+
+        cxp_id = ab.get("cxp_id")
+        monto_abono = float(ab.get("monto_usd") or 0.0)
+
+        cursor.execute("SELECT * FROM cuentas_por_pagar WHERE id = ?", (cxp_id,))
+        cxp_row = cursor.fetchone()
+        if not cxp_row:
+            raise ValueError(f"Cuenta por pagar ID {cxp_id} asociada al abono no encontrada")
+        cxp = dict(cxp_row)
+
+        # Marcar abono como anulado
+        cursor.execute("""
+            UPDATE abonos_cxp 
+            SET estado = 'anulado', motivo_anulacion = ?, fecha_anulacion = ? 
+            WHERE id = ?
+        """, (motivo, fecha_hoy, abono_id))
+
     tot_cxp = float(cxp.get("monto_total") or 0.0)
-    nuevo_estado = "pendiente" if nuevo_saldo >= tot_cxp - 0.001 else "parcial"
+    nuevo_saldo = min(tot_cxp, round(float(cxp.get("saldo_pendiente") or 0.0) + monto_abono, 2))
+    nuevo_pagado = round(max(0.0, float(cxp.get("monto_pagado") or 0.0) - monto_abono), 2)
+    nuevo_estado = "pendiente" if nuevo_saldo >= tot_cxp - 0.001 else ("pagada" if nuevo_saldo <= 0.001 else "parcial")
 
     # Actualizar CxP
     cursor.execute("""
@@ -2689,16 +2758,9 @@ def anular_abono_cxp(cursor, abono_id, motivo="Anulación de pago a proveedor", 
     if comp_id:
         cursor.execute("""
             UPDATE compras 
-            SET saldo_pendiente = round(saldo_pendiente + ?, 2) 
+            SET saldo_pendiente = ? 
             WHERE id = ? AND estado != 'anulada'
-        """, (monto_abono, comp_id))
-
-    # Marcar abono como anulado
-    cursor.execute("""
-        UPDATE abonos_cxp 
-        SET estado = 'anulado', motivo_anulacion = ?, fecha_anulacion = ? 
-        WHERE id = ?
-    """, (motivo, fecha_hoy, abono_id))
+        """, (nuevo_saldo, comp_id))
 
     return {
         "success": True,
@@ -2754,6 +2816,891 @@ def anular_cuenta_cxp_directa(cursor, cxp_id, motivo="Anulación de cuenta por p
         "estado": "anulada",
         "fecha_anulacion": fecha_hoy
     }
+
+
+def _normalizar_fecha_sort(fecha_str):
+    """Normaliza una fecha 'YYYY-MM-DD' o 'YYYY-MM-DD HH:MM:SS' para ordenamiento cronológico estable."""
+    if not fecha_str:
+        return "0000-00-00 00:00:00"
+    s = str(fecha_str).strip()
+    if len(s) == 10:
+        return s + " 00:00:00"
+    return s[:19]
+
+
+def obtener_estado_cuenta_cliente_cxc(cursor, cliente_id, tipo_filtro=None, q=None, fecha_desde=None, fecha_hasta=None, orden="asc"):
+    """
+    Construye el Estado de Cuenta Cronológico Desglosado (Libro Mayor Auxiliar) de un Cliente en CXC.
+    Incluye todos los movimientos reales sin alterar registros:
+      - Facturas a crédito ('factura')
+      - Pagos aplicados ('pago') y Abonos parciales ('abono') con su desglose multimoneda (USD, VES, COP)
+      - Notas de Crédito comerciales y por devolución ('nota_credito')
+      - Notas de Débito comerciales ('nota_debito')
+    Calcula paso a paso el saldo anterior y el saldo acumulado determinístico y permite filtrar por tipo, texto y fechas.
+    """
+    cliente_id = int(cliente_id)
+    cursor.execute("SELECT * FROM clientes WHERE id = ?", (cliente_id,))
+    cli_row = cursor.fetchone()
+    cliente_info = dict(cli_row) if cli_row else {"id": cliente_id, "nombre": f"Cliente #{cliente_id}", "cedula": "-", "telefono": ""}
+
+    cursor.execute("SELECT tasa_ves, tasa_cop FROM configuracion WHERE id = 1")
+    cfg_row = cursor.fetchone()
+    tasa_ves = float(cfg_row["tasa_ves"]) if cfg_row and cfg_row["tasa_ves"] else 45.0
+    tasa_cop = float(cfg_row["tasa_cop"]) if cfg_row and cfg_row["tasa_cop"] else 4000.0
+
+    # 1. Cuentas por cobrar y facturas del cliente
+    cursor.execute("""
+        SELECT cxc.*, f.numero_factura, f.fecha as factura_fecha, f.subtotal, f.iva_total,
+               f.total_usd as factura_total_usd, f.estado as factura_estado,
+               f.motivo_anulacion as factura_motivo_anulacion, f.fecha_anulacion as factura_fecha_anulacion,
+               (SELECT COUNT(*) FROM abonos_cxc ab WHERE ab.cxc_id = cxc.id) as total_abonos_count,
+               (SELECT COUNT(*) FROM abonos_cxc ab WHERE ab.cxc_id = cxc.id AND (ab.estado IS NULL OR ab.estado = 'activo')) as abonos_activos_count
+        FROM cuentas_por_cobrar cxc
+        JOIN facturas f ON cxc.factura_id = f.id
+        WHERE cxc.cliente_id = ?
+        ORDER BY cxc.id ASC
+    """, (cliente_id,))
+    cuentas = [dict(r) for r in cursor.fetchall()]
+    cxc_map = {c["id"]: c for c in cuentas}
+    fac_to_cxc = {c["factura_id"]: c for c in cuentas if c.get("factura_id")}
+
+    # 2. Notas de ajuste comercial (Crédito y Débito) del cliente en CXC
+    cursor.execute("""
+        SELECT * FROM notas_ajuste_comercial
+        WHERE modulo = 'cxc' AND tercero_id = ?
+        ORDER BY id ASC
+    """, (cliente_id,))
+    notas_ajuste = [dict(r) for r in cursor.fetchall()]
+
+    nd_incrementa_por_cuenta = {}
+    nc_disminuye_por_cuenta = {}
+    for n in notas_ajuste:
+        cid = n.get("cuenta_id")
+        m_usd = round(float(n.get("monto_usd") or 0.0), 2)
+        if cid:
+            if n.get("efecto") == "incrementa":
+                nd_incrementa_por_cuenta[cid] = round(nd_incrementa_por_cuenta.get(cid, 0.0) + m_usd, 2)
+            else:
+                nc_disminuye_por_cuenta[cid] = round(nc_disminuye_por_cuenta.get(cid, 0.0) + m_usd, 2)
+
+    # 3. Devoluciones asociadas a facturas a crédito de este cliente
+    cursor.execute("""
+        SELECT * FROM devoluciones
+        WHERE cliente_id = ?
+        ORDER BY id ASC
+    """, (cliente_id,))
+    todas_devs = [dict(r) for r in cursor.fetchall()]
+    devoluciones_credito = [
+        d for d in todas_devs
+        if (d.get("factura_id") in fac_to_cxc) or (str(d.get("tipo_venta_original") or "").lower() == "credito")
+    ]
+    dev_por_cuenta = {}
+    for d in devoluciones_credito:
+        if str(d.get("estado") or "activa").lower() != "anulada":
+            c_asoc = fac_to_cxc.get(d.get("factura_id"))
+            if c_asoc:
+                cid_d = c_asoc["id"]
+                dev_por_cuenta[cid_d] = round(dev_por_cuenta.get(cid_d, 0.0) + float(d.get("total_usd") or 0.0), 2)
+
+    movimientos = []
+
+    # 4. Construir movimientos por cada cuenta (Factura + sus Pagos/Abonos)
+    for c in cuentas:
+        cid = c["id"]
+        fid = c.get("factura_id")
+        num_fac = c.get("numero_factura") or f"FAC-{fid or cid}"
+        es_anulada_cxc = (c.get("estado") == "anulada") or (c.get("factura_estado") == "anulada")
+        fecha_fac = c.get("factura_fecha") or c.get("fecha_emision") or c.get("created_at") or ""
+
+        # Monto original de emisión de la factura antes de Notas de Débito que incrementaron monto_total
+        inc_nd = nd_incrementa_por_cuenta.get(cid, 0.0)
+        monto_emision = max(0.0, round(float(c.get("monto_total") or 0.0) - inc_nd, 2))
+
+        motivo_anu_fac = c.get("motivo_anulacion") or c.get("factura_motivo_anulacion") or ""
+        fecha_anu_fac = c.get("fecha_anulacion") or c.get("factura_fecha_anulacion") or ""
+
+        movimientos.append({
+            "uid": f"FAC-{cid}",
+            "id_origen": cid,
+            "cxc_id": cid,
+            "factura_id": fid,
+            "abono_id": None,
+            "nota_id": None,
+            "devolucion_id": None,
+            "fecha": fecha_fac,
+            "fecha_vencimiento": c.get("fecha_vencimiento") or "",
+            "orden_interno": 1,
+            "tipo_movimiento": "factura",
+            "categoria_movimiento": "factura",
+            "etiqueta_tipo": "Factura a Crédito",
+            "documento_numero": num_fac,
+            "documento_afectado": num_fac,
+            "concepto": f"Emisión de Factura a Crédito {num_fac} (Vence: {c.get('fecha_vencimiento') or 'N/A'})" + (f" — [ANULADA: {motivo_anu_fac}]" if es_anulada_cxc and motivo_anu_fac else ""),
+            "resumen_pagos": "",
+            "pagos_detalle": [],
+            "cargo_usd": monto_emision,
+            "abono_usd": 0.0,
+            "monto_usd": monto_emision,
+            "estado": "anulada" if es_anulada_cxc else (c.get("estado") or "pendiente"),
+            "es_anulado": es_anulada_cxc,
+            "motivo_anulacion": motivo_anu_fac,
+            "fecha_anulacion": fecha_anu_fac,
+            "puede_anular_pago": False,
+            "puede_anular_documento": not es_anulada_cxc,
+            "puede_pagar": (not es_anulada_cxc) and float(c.get("saldo_pendiente") or 0.0) > 0.001
+        })
+
+        # Obtener abonos registrados en abonos_cxc para esta cuenta
+        cursor.execute("SELECT * FROM abonos_cxc WHERE cxc_id = ? ORDER BY id ASC", (cid,))
+        abonos_rows = [dict(r) for r in cursor.fetchall()]
+        abonos_cuenta = []
+        suma_abonos_activos = 0.0
+
+        for ab in abonos_rows:
+            cursor.execute("SELECT * FROM abono_cxc_pagos WHERE abono_id = ? ORDER BY id ASC", (ab["id"],))
+            ab["pagos"] = [dict(p) for p in cursor.fetchall()]
+            abonos_cuenta.append(ab)
+            if ab.get("estado") != "anulado":
+                suma_abonos_activos = round(suma_abonos_activos + float(ab.get("monto_usd") or 0.0), 2)
+
+        # Verificar si existe un anticipo/pago inicial en factura_pagos que no esté aún en abonos_cxc
+        ya_tiene_inicial = any("inicial" in (a.get("notas") or "").lower() for a in abonos_cuenta)
+        if fid and float(c.get("monto_pagado") or 0.0) > 0 and not ya_tiene_inicial:
+            cursor.execute("SELECT * FROM factura_pagos WHERE factura_id = ? ORDER BY id ASC", (fid,))
+            f_pagos = [dict(p) for p in cursor.fetchall()]
+            if f_pagos:
+                monto_ini = round(sum(float(p.get("equivalente_usd") or 0.0) for p in f_pagos), 2)
+                if monto_ini > 0:
+                    abonos_cuenta.insert(0, {
+                        "id": 0,
+                        "cxc_id": cid,
+                        "monto_usd": monto_ini,
+                        "fecha": fecha_fac,
+                        "notas": "Anticipo / Pago inicial al momento de facturar",
+                        "estado": "anulado" if es_anulada_cxc else "activo",
+                        "pagos": f_pagos,
+                        "es_inicial": True
+                    })
+                    if not es_anulada_cxc:
+                        suma_abonos_activos = round(suma_abonos_activos + monto_ini, 2)
+
+        # Si aún hay diferencia en monto_pagado no cubierta por abonos_cxc ni notas (ej. carga inicial directa), reflejarla sin inventar datos
+        pagado_explicado = round(suma_abonos_activos + nc_disminuye_por_cuenta.get(cid, 0.0) + dev_por_cuenta.get(cid, 0.0), 2)
+        diff_pagado = round(float(c.get("monto_pagado") or 0.0) - pagado_explicado, 2)
+        if diff_pagado > 0.009 and not es_anulada_cxc and not any(a.get("id") == 0 for a in abonos_cuenta):
+            abonos_cuenta.insert(0, {
+                "id": 0,
+                "cxc_id": cid,
+                "monto_usd": diff_pagado,
+                "fecha": fecha_fac,
+                "notas": "Anticipo / Abono inicial registrado en cuenta",
+                "estado": "activo",
+                "pagos": [{"moneda": "USD", "metodo": "Pago Inicial", "monto_moneda": diff_pagado, "tasa_cambio": 1.0, "equivalente_usd": diff_pagado, "referencia": ""}],
+                "es_inicial": True
+            })
+
+        # Convertir cada abono/pago en movimiento cronológico
+        saldo_temp_fac = monto_emision
+        for idx_ab, ab in enumerate(abonos_cuenta):
+            m_ab = round(float(ab.get("monto_usd") or 0.0), 2)
+            es_anu_ab = (ab.get("estado") == "anulado") or es_anulada_cxc
+            pagos_det = ab.get("pagos") or []
+            partes_pago = []
+            for p in pagos_det:
+                mon = p.get("moneda") or "USD"
+                met = p.get("metodo") or "Pago"
+                mm = float(p.get("monto_moneda") or 0.0)
+                ref = (p.get("referencia") or "").strip()
+                ref_txt = f" [Ref: {ref}]" if ref else ""
+                if mon == "USD":
+                    partes_pago.append(f"{met}: ${mm:,.2f} USD{ref_txt}")
+                else:
+                    eq_u = float(p.get("equivalente_usd") or 0.0)
+                    partes_pago.append(f"{met}: {mm:,.2f} {mon} (≈ ${eq_u:,.2f}){ref_txt}")
+            resumen_pagos_str = " | ".join(partes_pago) if partes_pago else "Pago en USD"
+
+            # Determinar si el cobro liquidó el saldo de la factura ('pago') o fue un abono parcial ('abono')
+            liquida_total = (m_ab >= saldo_temp_fac - 0.01) and (saldo_temp_fac > 0)
+            if not es_anu_ab:
+                saldo_temp_fac = max(0.0, round(saldo_temp_fac - m_ab, 2))
+
+            if ab.get("id") == 0:
+                doc_num_ab = f"INI-{num_fac}"
+                tipo_mov = "abono" if not liquida_total else "pago"
+                etiqueta = "Anticipo / Pago Inicial"
+                orden_int = 2
+            else:
+                doc_num_ab = f"PAG-{ab['id']:04d}" if liquida_total else f"ABO-{ab['id']:04d}"
+                tipo_mov = "pago" if liquida_total else "abono"
+                etiqueta = "Pago Aplicado (Total)" if liquida_total else "Abono Parcial"
+                orden_int = 4
+
+            notas_ab = (ab.get("notas") or "Cobro aplicado").strip()
+            motivo_anu_ab = (ab.get("motivo_anulacion") or "").strip()
+            concepto_ab = f"{notas_ab} ({resumen_pagos_str})" if resumen_pagos_str else notas_ab
+            if es_anu_ab and motivo_anu_ab:
+                concepto_ab += f" — [ANULADO: {motivo_anu_ab}]"
+
+            movimientos.append({
+                "uid": f"ABO-{cid}-{ab['id']}-{idx_ab}",
+                "id_origen": int(ab["id"]) if ab.get("id") else idx_ab,
+                "cxc_id": cid,
+                "factura_id": fid,
+                "abono_id": int(ab["id"]),
+                "nota_id": None,
+                "devolucion_id": None,
+                "fecha": ab.get("fecha") or fecha_fac,
+                "fecha_vencimiento": "",
+                "orden_interno": orden_int,
+                "tipo_movimiento": tipo_mov,
+                "categoria_movimiento": "pago_abono",
+                "etiqueta_tipo": etiqueta,
+                "documento_numero": doc_num_ab,
+                "documento_afectado": num_fac,
+                "concepto": concepto_ab,
+                "resumen_pagos": resumen_pagos_str,
+                "pagos_detalle": pagos_det,
+                "cargo_usd": 0.0,
+                "abono_usd": m_ab,
+                "monto_usd": m_ab,
+                "estado": "anulado" if es_anu_ab else "activo",
+                "es_anulado": es_anu_ab,
+                "motivo_anulacion": motivo_anu_ab,
+                "fecha_anulacion": ab.get("fecha_anulacion") or "",
+                "puede_anular_pago": (not es_anu_ab) and (not es_anulada_cxc),
+                "puede_anular_documento": False,
+                "puede_pagar": False
+            })
+
+    # 5. Agregar Notas de Crédito y Notas de Débito de notas_ajuste_comercial
+    for n in notas_ajuste:
+        nid = n["id"]
+        cid = n.get("cuenta_id")
+        c_asoc = cxc_map.get(cid)
+        num_fac_afectada = c_asoc.get("numero_factura") if c_asoc else (f"Cuenta #{cid}" if cid else "General")
+        es_credito = (str(n.get("tipo_nota") or "").lower() == "credito")
+        efecto = str(n.get("efecto") or ("disminuye" if es_credito else "incrementa")).lower()
+        m_usd = round(float(n.get("monto_usd") or 0.0), 2)
+        es_anu_cuenta = bool(c_asoc and c_asoc.get("estado") == "anulada")
+
+        movimientos.append({
+            "uid": f"NOTA-{nid}",
+            "id_origen": nid,
+            "cxc_id": cid,
+            "factura_id": c_asoc.get("factura_id") if c_asoc else None,
+            "abono_id": None,
+            "nota_id": nid,
+            "devolucion_id": None,
+            "fecha": n.get("fecha") or n.get("created_at") or "",
+            "fecha_vencimiento": "",
+            "orden_interno": 3,
+            "tipo_movimiento": "nota_credito" if es_credito else "nota_debito",
+            "categoria_movimiento": "nota_credito" if es_credito else "nota_debito",
+            "etiqueta_tipo": "Nota de Crédito" if es_credito else "Nota de Débito",
+            "documento_numero": n.get("numero_nota") or f"{'NC' if es_credito else 'ND'}-{nid:06d}",
+            "documento_afectado": num_fac_afectada,
+            "concepto": f"{n.get('motivo') or 'Ajuste comercial'}" + (f" (Control: {n.get('numero_control')})" if n.get("numero_control") else ""),
+            "resumen_pagos": "",
+            "pagos_detalle": [],
+            "cargo_usd": m_usd if efecto == "incrementa" else 0.0,
+            "abono_usd": m_usd if efecto == "disminuye" else 0.0,
+            "monto_usd": m_usd,
+            "estado": "anulado" if es_anu_cuenta else "activo",
+            "es_anulado": es_anu_cuenta,
+            "motivo_anulacion": "",
+            "fecha_anulacion": "",
+            "puede_anular_pago": False,
+            "puede_anular_documento": False,
+            "puede_pagar": False
+        })
+
+    # 6. Agregar Notas de Crédito por Devolución de Mercancía sobre Facturas a Crédito
+    for d in devoluciones_credito:
+        did = d["id"]
+        fid = d.get("factura_id")
+        c_asoc = fac_to_cxc.get(fid)
+        cid = c_asoc["id"] if c_asoc else None
+        num_fac_afectada = d.get("numero_factura") or (c_asoc.get("numero_factura") if c_asoc else f"FAC-{fid}")
+        m_usd = round(float(d.get("total_usd") or 0.0), 2)
+        es_anu_dev = (str(d.get("estado") or "activa").lower() == "anulada")
+
+        movimientos.append({
+            "uid": f"DEV-{did}",
+            "id_origen": did,
+            "cxc_id": cid,
+            "factura_id": fid,
+            "abono_id": None,
+            "nota_id": None,
+            "devolucion_id": did,
+            "fecha": d.get("fecha_emision") or d.get("created_at") or "",
+            "fecha_vencimiento": "",
+            "orden_interno": 3,
+            "tipo_movimiento": "nota_credito",
+            "categoria_movimiento": "nota_credito",
+            "etiqueta_tipo": "Nota de Crédito (Devolución)",
+            "documento_numero": d.get("numero_devolucion") or f"DEV-{did:06d}",
+            "documento_afectado": num_fac_afectada,
+            "concepto": f"Devolución de mercancía ({d.get('tipo_devolucion') or 'parcial'}): {d.get('motivo') or ''}",
+            "resumen_pagos": "",
+            "pagos_detalle": [],
+            "cargo_usd": 0.0,
+            "abono_usd": m_usd,
+            "monto_usd": m_usd,
+            "estado": "anulada" if es_anu_dev else "activa",
+            "es_anulado": es_anu_dev,
+            "motivo_anulacion": d.get("motivo_anulacion") or "",
+            "fecha_anulacion": d.get("fecha_anulacion") or "",
+            "puede_anular_pago": False,
+            "puede_anular_documento": False,
+            "puede_pagar": False
+        })
+
+    # 7. Ordenar cronológicamente (ASC) y calcular saldo acumulado paso a paso
+    movimientos.sort(key=lambda m: (_normalizar_fecha_sort(m["fecha"]), m["orden_interno"], m["id_origen"]))
+
+    saldo_acum = 0.0
+    saldos_por_cuenta = {}
+    total_facturas_usd = 0.0
+    total_nd_usd = 0.0
+    total_pagos_abonos_usd = 0.0
+    total_pagos_usd = 0.0
+    total_abonos_usd = 0.0
+    total_nc_usd = 0.0
+
+    conteos = {
+        "todos": len(movimientos),
+        "factura": 0,
+        "pago_abono": 0,
+        "pago": 0,
+        "abono": 0,
+        "nota_credito": 0,
+        "nota_debito": 0,
+        "anulado": 0
+    }
+
+    for idx, m in enumerate(movimientos):
+        m["nro_operacion"] = idx + 1
+        m["saldo_anterior_usd"] = round(saldo_acum, 2)
+        cid_m = m.get("cxc_id")
+        saldo_cta_prev = saldos_por_cuenta.get(cid_m, 0.0) if cid_m else saldo_acum
+
+        if not m["es_anulado"]:
+            nuevo_saldo_cta = round(max(0.0, saldo_cta_prev + float(m["cargo_usd"]) - float(m["abono_usd"])), 2)
+            if cid_m:
+                saldos_por_cuenta[cid_m] = nuevo_saldo_cta
+            saldo_acum = round(max(0.0, saldo_acum + float(m["cargo_usd"]) - float(m["abono_usd"])), 2)
+
+            if m["categoria_movimiento"] == "pago_abono":
+                liquida_cta = (nuevo_saldo_cta <= 0.01) and (saldo_cta_prev > 0.01)
+                m["tipo_movimiento"] = "pago" if liquida_cta else "abono"
+                if m.get("abono_id") and int(m["abono_id"]) > 0:
+                    m["etiqueta_tipo"] = "Pago Aplicado (Total)" if liquida_cta else "Abono Parcial"
+                    m["documento_numero"] = f"PAG-{int(m['abono_id']):04d}" if liquida_cta else f"ABO-{int(m['abono_id']):04d}"
+
+        t_mov = m["tipo_movimiento"]
+        if t_mov in conteos:
+            conteos[t_mov] += 1
+        if m["categoria_movimiento"] == "pago_abono":
+            conteos["pago_abono"] += 1
+        if m["es_anulado"]:
+            conteos["anulado"] += 1
+
+        if not m["es_anulado"]:
+            if t_mov == "factura":
+                total_facturas_usd = round(total_facturas_usd + float(m["cargo_usd"]), 2)
+            elif t_mov == "nota_debito":
+                total_nd_usd = round(total_nd_usd + float(m["cargo_usd"]) - float(m["abono_usd"]), 2)
+            elif t_mov == "pago":
+                total_pagos_usd = round(total_pagos_usd + float(m["abono_usd"]), 2)
+                total_pagos_abonos_usd = round(total_pagos_abonos_usd + float(m["abono_usd"]), 2)
+            elif t_mov == "abono":
+                total_abonos_usd = round(total_abonos_usd + float(m["abono_usd"]), 2)
+                total_pagos_abonos_usd = round(total_pagos_abonos_usd + float(m["abono_usd"]), 2)
+            elif t_mov == "nota_credito":
+                total_nc_usd = round(total_nc_usd + float(m["abono_usd"]) - float(m["cargo_usd"]), 2)
+
+        m["saldo_acumulado_usd"] = saldo_acum
+        m["saldo_acumulado_ves"] = round(saldo_acum * tasa_ves, 2)
+        m["saldo_acumulado_cop"] = round(saldo_acum * tasa_cop, 2)
+
+    # 8. Aplicar filtros solicitados sin perder los saldos históricos reales de cada fila
+    movs_filtrados = list(movimientos)
+    tf = (tipo_filtro or "").strip().lower()
+    if tf and tf != "todos":
+        if tf == "factura":
+            movs_filtrados = [m for m in movs_filtrados if m["tipo_movimiento"] == "factura"]
+        elif tf == "pago_abono":
+            movs_filtrados = [m for m in movs_filtrados if m["categoria_movimiento"] == "pago_abono"]
+        elif tf == "pago":
+            estrictos = [m for m in movs_filtrados if m["tipo_movimiento"] == "pago"]
+            movs_filtrados = estrictos if estrictos else [m for m in movs_filtrados if m["categoria_movimiento"] == "pago_abono"]
+        elif tf == "abono":
+            estrictos = [m for m in movs_filtrados if m["tipo_movimiento"] == "abono"]
+            movs_filtrados = estrictos if estrictos else [m for m in movs_filtrados if m["categoria_movimiento"] == "pago_abono"]
+        elif tf == "nota_credito":
+            movs_filtrados = [m for m in movs_filtrados if m["tipo_movimiento"] == "nota_credito"]
+        elif tf == "nota_debito":
+            movs_filtrados = [m for m in movs_filtrados if m["tipo_movimiento"] == "nota_debito"]
+        elif tf in ("anulado", "anulados", "anulada"):
+            movs_filtrados = [m for m in movs_filtrados if m["es_anulado"]]
+
+    if fecha_desde and str(fecha_desde).strip():
+        fd_str = str(fecha_desde).strip()[:10]
+        movs_filtrados = [m for m in movs_filtrados if str(m["fecha"] or "")[:10] >= fd_str]
+
+    if fecha_hasta and str(fecha_hasta).strip():
+        fh_str = str(fecha_hasta).strip()[:10]
+        movs_filtrados = [m for m in movs_filtrados if str(m["fecha"] or "")[:10] <= fh_str]
+
+    if q and str(q).strip():
+        q_low = str(q).strip().lower()
+        movs_filtrados = [
+            m for m in movs_filtrados
+            if q_low in str(m.get("documento_numero") or "").lower()
+            or q_low in str(m.get("documento_afectado") or "").lower()
+            or q_low in str(m.get("concepto") or "").lower()
+            or q_low in str(m.get("etiqueta_tipo") or "").lower()
+            or q_low in str(m.get("resumen_pagos") or "").lower()
+        ]
+
+    if str(orden or "asc").strip().lower() == "desc":
+        movs_filtrados.reverse()
+
+    saldo_real_cuentas = round(sum(float(c.get("saldo_pendiente") or 0.0) for c in cuentas if c.get("estado") != "anulada"), 2)
+
+    return {
+        "cliente": cliente_info,
+        "tasa_ves": tasa_ves,
+        "tasa_cop": tasa_cop,
+        "resumen": {
+            "total_facturas_usd": total_facturas_usd,
+            "total_notas_debito_usd": total_nd_usd,
+            "total_pagos_abonos_usd": total_pagos_abonos_usd,
+            "total_pagos_usd": total_pagos_usd,
+            "total_abonos_usd": total_abonos_usd,
+            "total_abonos_parciales_usd": total_abonos_usd,
+            "total_notas_credito_usd": total_nc_usd,
+            "saldo_pendiente_usd": saldo_real_cuentas,
+            "saldo_pendiente_ves": round(saldo_real_cuentas * tasa_ves, 2),
+            "saldo_pendiente_cop": round(saldo_real_cuentas * tasa_cop, 2),
+            "saldo_acumulado_cronologico_usd": saldo_acum
+        },
+        "conteos": conteos,
+        "movimientos": movs_filtrados,
+        "total_movimientos": len(movs_filtrados),
+        "total_movimientos_global": len(movimientos),
+        "total_movimientos_filtrados": len(movs_filtrados),
+        "facturas": cuentas
+    }
+
+
+def obtener_estado_cuenta_proveedor_cxp(cursor, proveedor_id, tipo_filtro=None, q=None, fecha_desde=None, fecha_hasta=None, orden="asc"):
+    """
+    Construye el Estado de Cuenta Cronológico Desglosado (Libro Mayor Auxiliar) de un Proveedor en CXP.
+    Incluye todos los movimientos reales sin alterar registros:
+      - Facturas de Compra a Crédito y Cargos/Gastos Directos ('factura')
+      - Pagos aplicados ('pago') y Abonos parciales ('abono') con su desglose multimoneda (USD, VES, COP)
+      - Notas de Crédito de proveedor ('nota_credito')
+      - Notas de Débito de proveedor ('nota_debito')
+    Calcula paso a paso el saldo anterior y el saldo acumulado determinístico y permite filtrar por tipo, texto y fechas.
+    """
+    proveedor_id = int(proveedor_id)
+    cursor.execute("SELECT * FROM proveedores WHERE id = ?", (proveedor_id,))
+    prov_row = cursor.fetchone()
+    proveedor_info = dict(prov_row) if prov_row else {"id": proveedor_id, "nombre": f"Proveedor #{proveedor_id}", "cedula": "-", "telefono": ""}
+
+    cursor.execute("SELECT tasa_ves, tasa_cop FROM configuracion WHERE id = 1")
+    cfg_row = cursor.fetchone()
+    tasa_ves = float(cfg_row["tasa_ves"]) if cfg_row and cfg_row["tasa_ves"] else 45.0
+    tasa_cop = float(cfg_row["tasa_cop"]) if cfg_row and cfg_row["tasa_cop"] else 4000.0
+
+    # 1. Cuentas por pagar del proveedor
+    cursor.execute("""
+        SELECT cxp.*,
+               comp.numero_control as compra_numero_control,
+               comp.fecha as compra_fecha,
+               comp.estado as compra_estado,
+               comp.motivo_anulacion as compra_motivo_anulacion,
+               comp.fecha_anulacion as compra_fecha_anulacion,
+               ROUND(cxp.saldo_pendiente * ?, 2) as saldo_ves,
+               ROUND(cxp.saldo_pendiente * ?, 2) as saldo_cop,
+               CAST((julianday('now') - julianday(cxp.fecha_vencimiento)) AS INTEGER) as dias_vencido,
+               (SELECT COUNT(*) FROM abonos_cxp ab WHERE ab.cxp_id = cxp.id) as total_abonos_count,
+               (SELECT COUNT(*) FROM abonos_cxp ab WHERE ab.cxp_id = cxp.id AND (ab.estado IS NULL OR ab.estado = 'activo')) as abonos_activos_count
+        FROM cuentas_por_pagar cxp
+        LEFT JOIN compras comp ON cxp.compra_id = comp.id
+        WHERE cxp.proveedor_id = ?
+        ORDER BY cxp.id ASC
+    """, (tasa_ves, tasa_cop, proveedor_id))
+    cuentas = [dict(r) for r in cursor.fetchall()]
+    cxp_map = {c["id"]: c for c in cuentas}
+
+    # 2. Notas de ajuste comercial (Crédito y Débito) del proveedor en CXP
+    cursor.execute("""
+        SELECT * FROM notas_ajuste_comercial
+        WHERE modulo = 'cxp' AND tercero_id = ?
+        ORDER BY id ASC
+    """, (proveedor_id,))
+    notas_ajuste = [dict(r) for r in cursor.fetchall()]
+
+    nd_incrementa_por_cuenta = {}
+    nc_disminuye_por_cuenta = {}
+    for n in notas_ajuste:
+        cid = n.get("cuenta_id")
+        m_usd = round(float(n.get("monto_usd") or 0.0), 2)
+        if cid:
+            if n.get("efecto") == "incrementa":
+                nd_incrementa_por_cuenta[cid] = round(nd_incrementa_por_cuenta.get(cid, 0.0) + m_usd, 2)
+            else:
+                nc_disminuye_por_cuenta[cid] = round(nc_disminuye_por_cuenta.get(cid, 0.0) + m_usd, 2)
+
+    movimientos = []
+
+    # 3. Construir movimientos por cada cuenta (Factura/Compra/Gasto + sus Pagos/Abonos)
+    for c in cuentas:
+        cid = c["id"]
+        comp_id = c.get("compra_id")
+        num_doc = c.get("numero_factura") or c.get("compra_numero_control") or f"CXP-{cid:04d}"
+        es_anulada_cxp = (c.get("estado") == "anulada") or (c.get("compra_estado") == "anulada")
+        fecha_doc = c.get("compra_fecha") or c.get("fecha_emision") or c.get("created_at") or ""
+
+        inc_nd = nd_incrementa_por_cuenta.get(cid, 0.0)
+        monto_emision = max(0.0, round(float(c.get("monto_total") or 0.0) - inc_nd, 2))
+
+        es_directo = (str(c.get("tipo_registro") or "compra").lower() == "directo") or (not comp_id)
+        etiqueta_doc = "Factura / Gasto Directo" if es_directo else "Factura de Compra"
+        concepto_base = c.get("descripcion_concepto") or ("Gasto directo de proveedor" if es_directo else f"Compra de mercancía #{num_doc}")
+        motivo_anu_doc = c.get("motivo_anulacion") or c.get("compra_motivo_anulacion") or ""
+        fecha_anu_doc = c.get("fecha_anulacion") or c.get("compra_fecha_anulacion") or ""
+
+        movimientos.append({
+            "uid": f"CXP-DOC-{cid}",
+            "id_origen": cid,
+            "cxp_id": cid,
+            "compra_id": comp_id,
+            "abono_id": None,
+            "nota_id": None,
+            "fecha": fecha_doc,
+            "fecha_vencimiento": c.get("fecha_vencimiento") or "",
+            "orden_interno": 1,
+            "tipo_movimiento": "factura",
+            "subtipo_documento": "directo" if es_directo else "compra",
+            "categoria_movimiento": "factura",
+            "etiqueta_tipo": etiqueta_doc,
+            "documento_numero": num_doc,
+            "documento_afectado": num_doc,
+            "concepto": f"{concepto_base} (Vence: {c.get('fecha_vencimiento') or 'N/A'})" + (f" — [ANULADA: {motivo_anu_doc}]" if es_anulada_cxp and motivo_anu_doc else ""),
+            "resumen_pagos": "",
+            "pagos_detalle": [],
+            "cargo_usd": monto_emision,
+            "abono_usd": 0.0,
+            "monto_usd": monto_emision,
+            "estado": "anulada" if es_anulada_cxp else (c.get("estado") or "pendiente"),
+            "es_anulado": es_anulada_cxp,
+            "motivo_anulacion": motivo_anu_doc,
+            "fecha_anulacion": fecha_anu_doc,
+            "puede_anular_pago": False,
+            "puede_anular_documento": not es_anulada_cxp,
+            "puede_pagar": (not es_anulada_cxp) and float(c.get("saldo_pendiente") or 0.0) > 0.001
+        })
+
+        # Obtener abonos registrados en abonos_cxp para esta cuenta
+        cursor.execute("SELECT * FROM abonos_cxp WHERE cxp_id = ? ORDER BY id ASC", (cid,))
+        abonos_rows = [dict(r) for r in cursor.fetchall()]
+        abonos_cuenta = []
+        suma_abonos_activos = 0.0
+
+        for ab in abonos_rows:
+            cursor.execute("SELECT * FROM abono_cxp_pagos WHERE abono_id = ? ORDER BY id ASC", (ab["id"],))
+            ab["pagos"] = [dict(p) for p in cursor.fetchall()]
+            abonos_cuenta.append(ab)
+            if ab.get("estado") != "anulado":
+                suma_abonos_activos = round(suma_abonos_activos + float(ab.get("monto_usd") or 0.0), 2)
+
+        # Verificar si hubo anticipo inicial en compra_pagos que no esté aún en abonos_cxp
+        ya_tiene_inicial = any("inicial" in (a.get("notas") or "").lower() for a in abonos_cuenta)
+        if comp_id and float(c.get("monto_pagado") or 0.0) > 0 and not ya_tiene_inicial:
+            cursor.execute("SELECT * FROM compra_pagos WHERE compra_id = ? ORDER BY id ASC", (comp_id,))
+            c_pagos = [dict(p) for p in cursor.fetchall()]
+            if c_pagos:
+                monto_ini = round(sum(float(p.get("equivalente_usd") or 0.0) for p in c_pagos), 2)
+                if monto_ini > 0:
+                    abonos_cuenta.insert(0, {
+                        "id": 0,
+                        "cxp_id": cid,
+                        "monto_usd": monto_ini,
+                        "fecha": fecha_doc,
+                        "notas": "Anticipo / Pago inicial en compra",
+                        "estado": "anulado" if es_anulada_cxp else "activo",
+                        "pagos": c_pagos,
+                        "es_inicial": True
+                    })
+                    if not es_anulada_cxp:
+                        suma_abonos_activos = round(suma_abonos_activos + monto_ini, 2)
+
+        pagado_explicado = round(suma_abonos_activos + nc_disminuye_por_cuenta.get(cid, 0.0), 2)
+        diff_pagado = round(float(c.get("monto_pagado") or 0.0) - pagado_explicado, 2)
+        if diff_pagado > 0.009 and not es_anulada_cxp and not any(a.get("id") == 0 for a in abonos_cuenta):
+            abonos_cuenta.insert(0, {
+                "id": 0,
+                "cxp_id": cid,
+                "monto_usd": diff_pagado,
+                "fecha": fecha_doc,
+                "notas": "Anticipo / Pago inicial registrado en cuenta",
+                "estado": "activo",
+                "pagos": [{"moneda": "USD", "metodo": "Pago Inicial", "monto_moneda": diff_pagado, "tasa_cambio": 1.0, "equivalente_usd": diff_pagado, "referencia": ""}],
+                "es_inicial": True
+            })
+
+        saldo_temp_doc = monto_emision
+        for idx_ab, ab in enumerate(abonos_cuenta):
+            m_ab = round(float(ab.get("monto_usd") or 0.0), 2)
+            es_anu_ab = (ab.get("estado") == "anulado") or es_anulada_cxp
+            pagos_det = ab.get("pagos") or []
+            partes_pago = []
+            for p in pagos_det:
+                mon = p.get("moneda") or "USD"
+                met = p.get("metodo") or "Pago"
+                mm = float(p.get("monto_moneda") or 0.0)
+                ref = (p.get("referencia") or "").strip()
+                ref_txt = f" [Ref: {ref}]" if ref else ""
+                if mon == "USD":
+                    partes_pago.append(f"{met}: ${mm:,.2f} USD{ref_txt}")
+                else:
+                    eq_u = float(p.get("equivalente_usd") or 0.0)
+                    partes_pago.append(f"{met}: {mm:,.2f} {mon} (≈ ${eq_u:,.2f}){ref_txt}")
+            resumen_pagos_str = " | ".join(partes_pago) if partes_pago else "Pago en USD"
+
+            liquida_total = (m_ab >= saldo_temp_doc - 0.01) and (saldo_temp_doc > 0)
+            if not es_anu_ab:
+                saldo_temp_doc = max(0.0, round(saldo_temp_doc - m_ab, 2))
+
+            if ab.get("id") == 0:
+                doc_num_ab = f"INI-{num_doc}"
+                tipo_mov = "abono" if not liquida_total else "pago"
+                etiqueta = "Anticipo / Pago Inicial"
+                orden_int = 2
+            else:
+                doc_num_ab = f"PAG-{ab['id']:04d}" if liquida_total else f"ABO-{ab['id']:04d}"
+                tipo_mov = "pago" if liquida_total else "abono"
+                etiqueta = "Pago a Proveedor (Total)" if liquida_total else "Abono a Proveedor"
+                orden_int = 4
+
+            notas_ab = (ab.get("notas") or "Pago a proveedor").strip()
+            motivo_anu_ab = (ab.get("motivo_anulacion") or "").strip()
+            concepto_ab = f"{notas_ab} ({resumen_pagos_str})" if resumen_pagos_str else notas_ab
+            if es_anu_ab and motivo_anu_ab:
+                concepto_ab += f" — [ANULADO: {motivo_anu_ab}]"
+
+            movimientos.append({
+                "uid": f"ABO-CXP-{cid}-{ab['id']}-{idx_ab}",
+                "id_origen": int(ab["id"]) if ab.get("id") else idx_ab,
+                "cxp_id": cid,
+                "compra_id": comp_id,
+                "abono_id": int(ab["id"]),
+                "nota_id": None,
+                "fecha": ab.get("fecha") or fecha_doc,
+                "fecha_vencimiento": "",
+                "orden_interno": orden_int,
+                "tipo_movimiento": tipo_mov,
+                "categoria_movimiento": "pago_abono",
+                "etiqueta_tipo": etiqueta,
+                "documento_numero": doc_num_ab,
+                "documento_afectado": num_doc,
+                "concepto": concepto_ab,
+                "resumen_pagos": resumen_pagos_str,
+                "pagos_detalle": pagos_det,
+                "cargo_usd": 0.0,
+                "abono_usd": m_ab,
+                "monto_usd": m_ab,
+                "estado": "anulado" if es_anu_ab else "activo",
+                "es_anulado": es_anu_ab,
+                "motivo_anulacion": motivo_anu_ab,
+                "fecha_anulacion": ab.get("fecha_anulacion") or "",
+                "puede_anular_pago": (not es_anu_ab) and (not es_anulada_cxp),
+                "puede_anular_documento": False,
+                "puede_pagar": False
+            })
+
+    # 4. Agregar Notas de Crédito y Notas de Débito de proveedor (notas_ajuste_comercial)
+    for n in notas_ajuste:
+        nid = n["id"]
+        cid = n.get("cuenta_id")
+        c_asoc = cxp_map.get(cid)
+        num_doc_afectado = (c_asoc.get("numero_factura") or c_asoc.get("compra_numero_control") or f"CXP-{cid}") if c_asoc else "General"
+        es_credito = (str(n.get("tipo_nota") or "").lower() == "credito")
+        efecto = str(n.get("efecto") or ("disminuye" if es_credito else "incrementa")).lower()
+        m_usd = round(float(n.get("monto_usd") or 0.0), 2)
+        es_anu_cuenta = bool(c_asoc and c_asoc.get("estado") == "anulada")
+
+        movimientos.append({
+            "uid": f"NOTA-CXP-{nid}",
+            "id_origen": nid,
+            "cxp_id": cid,
+            "compra_id": c_asoc.get("compra_id") if c_asoc else None,
+            "abono_id": None,
+            "nota_id": nid,
+            "fecha": n.get("fecha") or n.get("created_at") or "",
+            "fecha_vencimiento": "",
+            "orden_interno": 3,
+            "tipo_movimiento": "nota_credito" if es_credito else "nota_debito",
+            "categoria_movimiento": "nota_credito" if es_credito else "nota_debito",
+            "etiqueta_tipo": "Nota de Crédito" if es_credito else "Nota de Débito",
+            "documento_numero": n.get("numero_nota") or f"{'NC' if es_credito else 'ND'}-{nid:06d}",
+            "documento_afectado": num_doc_afectado,
+            "concepto": f"{n.get('motivo') or 'Ajuste comercial con proveedor'}" + (f" (Control: {n.get('numero_control')})" if n.get("numero_control") else ""),
+            "resumen_pagos": "",
+            "pagos_detalle": [],
+            "cargo_usd": m_usd if efecto == "incrementa" else 0.0,
+            "abono_usd": m_usd if efecto == "disminuye" else 0.0,
+            "monto_usd": m_usd,
+            "estado": "anulado" if es_anu_cuenta else "activo",
+            "es_anulado": es_anu_cuenta,
+            "motivo_anulacion": "",
+            "fecha_anulacion": "",
+            "puede_anular_pago": False,
+            "puede_anular_documento": False,
+            "puede_pagar": False
+        })
+
+    # 5. Ordenar cronológicamente (ASC) y calcular saldo acumulado paso a paso
+    movimientos.sort(key=lambda m: (_normalizar_fecha_sort(m["fecha"]), m["orden_interno"], m["id_origen"]))
+
+    saldo_acum = 0.0
+    saldos_por_cuenta = {}
+    total_facturas_usd = 0.0
+    total_nd_usd = 0.0
+    total_pagos_abonos_usd = 0.0
+    total_pagos_usd = 0.0
+    total_abonos_usd = 0.0
+    total_nc_usd = 0.0
+
+    conteos = {
+        "todos": len(movimientos),
+        "factura": 0,
+        "pago_abono": 0,
+        "pago": 0,
+        "abono": 0,
+        "nota_credito": 0,
+        "nota_debito": 0,
+        "anulado": 0
+    }
+
+    for idx, m in enumerate(movimientos):
+        m["nro_operacion"] = idx + 1
+        m["saldo_anterior_usd"] = round(saldo_acum, 2)
+        cid_m = m.get("cxp_id")
+        saldo_cta_prev = saldos_por_cuenta.get(cid_m, 0.0) if cid_m else saldo_acum
+
+        if not m["es_anulado"]:
+            nuevo_saldo_cta = round(max(0.0, saldo_cta_prev + float(m["cargo_usd"]) - float(m["abono_usd"])), 2)
+            if cid_m:
+                saldos_por_cuenta[cid_m] = nuevo_saldo_cta
+            saldo_acum = round(max(0.0, saldo_acum + float(m["cargo_usd"]) - float(m["abono_usd"])), 2)
+
+            if m["categoria_movimiento"] == "pago_abono":
+                liquida_cta = (nuevo_saldo_cta <= 0.01) and (saldo_cta_prev > 0.01)
+                m["tipo_movimiento"] = "pago" if liquida_cta else "abono"
+                if m.get("abono_id") and int(m["abono_id"]) > 0:
+                    m["etiqueta_tipo"] = "Pago Aplicado (Total)" if liquida_cta else "Abono Parcial"
+                    m["documento_numero"] = f"PAG-{int(m['abono_id']):04d}" if liquida_cta else f"ABO-{int(m['abono_id']):04d}"
+
+        t_mov = m["tipo_movimiento"]
+        if t_mov in conteos:
+            conteos[t_mov] += 1
+        if m["categoria_movimiento"] == "pago_abono":
+            conteos["pago_abono"] += 1
+        if m["es_anulado"]:
+            conteos["anulado"] += 1
+
+        if not m["es_anulado"]:
+            if t_mov == "factura":
+                total_facturas_usd = round(total_facturas_usd + float(m["cargo_usd"]), 2)
+            elif t_mov == "nota_debito":
+                total_nd_usd = round(total_nd_usd + float(m["cargo_usd"]) - float(m["abono_usd"]), 2)
+            elif t_mov == "pago":
+                total_pagos_usd = round(total_pagos_usd + float(m["abono_usd"]), 2)
+                total_pagos_abonos_usd = round(total_pagos_abonos_usd + float(m["abono_usd"]), 2)
+            elif t_mov == "abono":
+                total_abonos_usd = round(total_abonos_usd + float(m["abono_usd"]), 2)
+                total_pagos_abonos_usd = round(total_pagos_abonos_usd + float(m["abono_usd"]), 2)
+            elif t_mov == "nota_credito":
+                total_nc_usd = round(total_nc_usd + float(m["abono_usd"]) - float(m["cargo_usd"]), 2)
+
+        m["saldo_acumulado_usd"] = saldo_acum
+        m["saldo_acumulado_ves"] = round(saldo_acum * tasa_ves, 2)
+        m["saldo_acumulado_cop"] = round(saldo_acum * tasa_cop, 2)
+
+    # 6. Aplicar filtros solicitados
+    movs_filtrados = list(movimientos)
+    tf = (tipo_filtro or "").strip().lower()
+    if tf and tf != "todos":
+        if tf == "factura":
+            movs_filtrados = [m for m in movs_filtrados if m["tipo_movimiento"] == "factura"]
+        elif tf == "pago_abono":
+            movs_filtrados = [m for m in movs_filtrados if m["categoria_movimiento"] == "pago_abono"]
+        elif tf == "pago":
+            estrictos = [m for m in movs_filtrados if m["tipo_movimiento"] == "pago"]
+            movs_filtrados = estrictos if estrictos else [m for m in movs_filtrados if m["categoria_movimiento"] == "pago_abono"]
+        elif tf == "abono":
+            estrictos = [m for m in movs_filtrados if m["tipo_movimiento"] == "abono"]
+            movs_filtrados = estrictos if estrictos else [m for m in movs_filtrados if m["categoria_movimiento"] == "pago_abono"]
+        elif tf == "nota_credito":
+            movs_filtrados = [m for m in movs_filtrados if m["tipo_movimiento"] == "nota_credito"]
+        elif tf == "nota_debito":
+            movs_filtrados = [m for m in movs_filtrados if m["tipo_movimiento"] == "nota_debito"]
+        elif tf in ("anulado", "anulados", "anulada"):
+            movs_filtrados = [m for m in movs_filtrados if m["es_anulado"]]
+
+    if fecha_desde and str(fecha_desde).strip():
+        fd_str = str(fecha_desde).strip()[:10]
+        movs_filtrados = [m for m in movs_filtrados if str(m["fecha"] or "")[:10] >= fd_str]
+
+    if fecha_hasta and str(fecha_hasta).strip():
+        fh_str = str(fecha_hasta).strip()[:10]
+        movs_filtrados = [m for m in movs_filtrados if str(m["fecha"] or "")[:10] <= fh_str]
+
+    if q and str(q).strip():
+        q_low = str(q).strip().lower()
+        movs_filtrados = [
+            m for m in movs_filtrados
+            if q_low in str(m.get("documento_numero") or "").lower()
+            or q_low in str(m.get("documento_afectado") or "").lower()
+            or q_low in str(m.get("concepto") or "").lower()
+            or q_low in str(m.get("etiqueta_tipo") or "").lower()
+            or q_low in str(m.get("resumen_pagos") or "").lower()
+        ]
+
+    if str(orden or "asc").strip().lower() == "desc":
+        movs_filtrados.reverse()
+
+    saldo_real_cuentas = round(sum(float(c.get("saldo_pendiente") or 0.0) for c in cuentas if c.get("estado") != "anulada"), 2)
+
+    return {
+        "proveedor": proveedor_info,
+        "tasa_ves": tasa_ves,
+        "tasa_cop": tasa_cop,
+        "resumen": {
+            "total_facturas_usd": total_facturas_usd,
+            "total_notas_debito_usd": total_nd_usd,
+            "total_pagos_abonos_usd": total_pagos_abonos_usd,
+            "total_pagos_usd": total_pagos_usd,
+            "total_abonos_usd": total_abonos_usd,
+            "total_abonos_parciales_usd": total_abonos_usd,
+            "total_notas_credito_usd": total_nc_usd,
+            "saldo_pendiente_usd": saldo_real_cuentas,
+            "saldo_pendiente_ves": round(saldo_real_cuentas * tasa_ves, 2),
+            "saldo_pendiente_cop": round(saldo_real_cuentas * tasa_cop, 2),
+            "saldo_acumulado_cronologico_usd": saldo_acum
+        },
+        "conteos": conteos,
+        "movimientos": movs_filtrados,
+        "total_movimientos": len(movs_filtrados),
+        "total_movimientos_global": len(movimientos),
+        "total_movimientos_filtrados": len(movs_filtrados),
+        "cuentas": cuentas
+    }
+
 if __name__ == "__main__":
     init_db()
     print("Base de datos inicializada correctamente.")

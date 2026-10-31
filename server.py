@@ -22,6 +22,7 @@ import database
 from database import (
     anular_factura_venta, anular_devolucion_cliente, anular_compra_proveedor,
     anular_abono_cxc, anular_abono_cxp, anular_cuenta_cxp_directa,
+    obtener_estado_cuenta_cliente_cxc, obtener_estado_cuenta_proveedor_cxp,
     get_connection, init_db, DB_PATH, 
     limpiar_transacciones_db, restablecer_fabrica_db, 
     schedule_cloud_sync, get_supabase_config,
@@ -843,6 +844,25 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 rows = [dict(r) for r in cursor.fetchall()]
                 self.send_json(rows)
 
+            elif path.startswith("/api/cxc/estado-cuenta/") or path == "/api/cxc/movimientos":
+                if path.startswith("/api/cxc/estado-cuenta/"):
+                    cli_id = path.split("/")[-1]
+                else:
+                    cli_id = query.get("cliente_id", [None])[0]
+                if not cli_id:
+                    self.send_error_json("Se requiere cliente_id", 400)
+                    return
+                tipo_f = query.get("tipo", [None])[0]
+                q_f = query.get("q", [None])[0]
+                f_desde = query.get("desde", [None])[0]
+                f_hasta = query.get("hasta", [None])[0]
+                orden_f = query.get("orden", ["asc"])[0]
+                data_ec = obtener_estado_cuenta_cliente_cxc(
+                    cursor, cli_id, tipo_filtro=tipo_f, q=q_f,
+                    fecha_desde=f_desde, fecha_hasta=f_hasta, orden=orden_f
+                )
+                self.send_json(data_ec)
+
             elif path.startswith("/api/cxc/"):
                 cxc_id = path.split("/")[-1]
                 cursor.execute("""
@@ -871,20 +891,24 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     ab_dict["pagos"] = [dict(p) for p in cursor.fetchall()]
                     abonos.append(ab_dict)
 
-                # Si hubo anticipo / abono inicial en la factura, incluirlo en el historial de visualización
-                if cxc["factura_id"] and float(cxc["monto_pagado"] or 0) > 0:
+                # Si hubo anticipo / abono inicial en la factura y aún no está en abonos_cxc, incluirlo como anulable
+                ya_tiene_inicial = any("inicial" in (a.get("notas") or "").lower() for a in abonos)
+                if cxc["factura_id"] and float(cxc["monto_pagado"] or 0) > 0 and not ya_tiene_inicial:
                     cursor.execute("SELECT * FROM factura_pagos WHERE factura_id = ?", (cxc["factura_id"],))
                     f_pagos = [dict(p) for p in cursor.fetchall()]
                     if f_pagos:
-                        abonos.append({
-                            "id": 0,
-                            "cxc_id": int(cxc_id),
-                            "monto_usd": round(sum(float(p.get("equivalente_usd") or 0) for p in f_pagos), 2),
-                            "fecha": cxc["fecha_emision"],
-                            "notas": "Anticipo / Pago inicial al momento de facturar",
-                            "pagos": f_pagos,
-                            "es_inicial": True
-                        })
+                        monto_ini = round(sum(float(p.get("equivalente_usd") or 0) for p in f_pagos), 2)
+                        if monto_ini > 0:
+                            abonos.append({
+                                "id": 0,
+                                "cxc_id": int(cxc_id),
+                                "monto_usd": monto_ini,
+                                "fecha": cxc["fecha_emision"],
+                                "notas": "Anticipo / Pago inicial al momento de facturar",
+                                "estado": "activo",
+                                "pagos": f_pagos,
+                                "es_inicial": True
+                            })
 
                 res["abonos"] = abonos
                 self.send_json(res)
@@ -1006,6 +1030,25 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 rows = [dict(r) for r in cursor.fetchall()]
                 self.send_json(rows)
 
+            elif path.startswith("/api/cxp/estado-cuenta/") or path == "/api/cxp/movimientos":
+                if path.startswith("/api/cxp/estado-cuenta/"):
+                    prov_id = path.split("/")[-1]
+                else:
+                    prov_id = query.get("proveedor_id", [None])[0]
+                if not prov_id:
+                    self.send_error_json("Se requiere proveedor_id", 400)
+                    return
+                tipo_f = query.get("tipo", [None])[0]
+                q_f = query.get("q", [None])[0]
+                f_desde = query.get("desde", [None])[0]
+                f_hasta = query.get("hasta", [None])[0]
+                orden_f = query.get("orden", ["asc"])[0]
+                data_ec = obtener_estado_cuenta_proveedor_cxp(
+                    cursor, prov_id, tipo_filtro=tipo_f, q=q_f,
+                    fecha_desde=f_desde, fecha_hasta=f_hasta, orden=orden_f
+                )
+                self.send_json(data_ec)
+
             # 9.3 Cuentas por Pagar (CXP) - Detalle y Abonos
             elif path.startswith("/api/cxp/"):
                 cxp_id = path.split("/")[-1]
@@ -1039,20 +1082,24 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     ab_dict["pagos"] = [dict(p) for p in cursor.fetchall()]
                     abonos.append(ab_dict)
 
-                # Si hubo anticipo / abono inicial en la compra, incluirlo en el historial de visualización
-                if cxp["compra_id"] and float(cxp["monto_pagado"] or 0) > 0:
+                # Si hubo anticipo / abono inicial en la compra y aún no está en abonos_cxp, incluirlo como anulable
+                ya_tiene_inicial = any("inicial" in (a.get("notas") or "").lower() for a in abonos)
+                if cxp["compra_id"] and float(cxp["monto_pagado"] or 0) > 0 and not ya_tiene_inicial:
                     cursor.execute("SELECT * FROM compra_pagos WHERE compra_id = ?", (cxp["compra_id"],))
                     c_pagos = [dict(p) for p in cursor.fetchall()]
                     if c_pagos:
-                        abonos.append({
-                            "id": 0,
-                            "cxp_id": int(cxp_id),
-                            "monto_usd": round(sum(float(p.get("equivalente_usd") or 0) for p in c_pagos), 2),
-                            "fecha": cxp["fecha_emision"],
-                            "notas": "Anticipo / Pago inicial en compra",
-                            "pagos": c_pagos,
-                            "es_inicial": True
-                        })
+                        monto_ini = round(sum(float(p.get("equivalente_usd") or 0) for p in c_pagos), 2)
+                        if monto_ini > 0:
+                            abonos.append({
+                                "id": 0,
+                                "cxp_id": int(cxp_id),
+                                "monto_usd": monto_ini,
+                                "fecha": cxp["fecha_emision"],
+                                "notas": "Anticipo / Pago inicial en compra",
+                                "estado": "activo",
+                                "pagos": c_pagos,
+                                "es_inicial": True
+                            })
 
                 res["abonos"] = abonos
                 self.send_json(res)
@@ -2736,6 +2783,18 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     """, (factura_id, cliente_id, total_usd, total_pagado_usd, saldo_pendiente, fecha_emision, fecha_vencimiento, cxc_estado, notas_final))
                     cxc_id = cursor.lastrowid
 
+                    if total_pagado_usd > 0 and pagos_procesados:
+                        cursor.execute("""
+                            INSERT INTO abonos_cxc (cxc_id, monto_usd, fecha, notas, estado)
+                            VALUES (?, ?, ?, 'Anticipo / Pago inicial al momento de facturar', 'activo')
+                        """, (cxc_id, round(total_pagado_usd, 2), fecha_emision))
+                        ab_ini_id = cursor.lastrowid
+                        for pp in pagos_procesados:
+                            cursor.execute("""
+                                INSERT INTO abono_cxc_pagos (abono_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (ab_ini_id, pp["moneda"], pp["metodo"], pp["monto_moneda"], pp["tasa_cambio"], pp["equivalente_usd"], pp["referencia"]))
+
                 conn.commit()
                 self.send_json({
                     "id": factura_id,
@@ -3091,6 +3150,19 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         INSERT INTO cuentas_por_pagar (compra_id, proveedor_id, descripcion_concepto, numero_factura, monto_total, monto_pagado, saldo_pendiente, fecha_emision, fecha_vencimiento, estado, tipo_registro, notas)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'compra', ?)
                     """, (compra_id, proveedor_id, f"Compra Factura #{numero_control}", numero_factura, total, total_pagado_usd, saldo_pendiente, fecha_emision, fecha_vencimiento, cxp_estado, notas))
+                    cxp_id_new = cursor.lastrowid
+
+                    if total_pagado_usd > 0 and pagos_procesados:
+                        cursor.execute("""
+                            INSERT INTO abonos_cxp (cxp_id, monto_usd, fecha, notas, estado)
+                            VALUES (?, ?, ?, 'Anticipo / Pago inicial en compra', 'activo')
+                        """, (cxp_id_new, round(total_pagado_usd, 2), fecha_emision))
+                        ab_cxp_ini_id = cursor.lastrowid
+                        for pp in pagos_procesados:
+                            cursor.execute("""
+                                INSERT INTO abono_cxp_pagos (abono_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (ab_cxp_ini_id, pp["moneda"], pp["metodo"], pp["monto_moneda"], pp["tasa_cambio"], pp["equivalente_usd"], pp["referencia"]))
 
                 conn.commit()
                 self.send_json({
@@ -4357,12 +4429,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 ab_id = int(parts[4])
                 motivo = (body.get("motivo") or "Anulación de cobro a cliente").strip()
                 usuario_id = int(body.get("usuario_id") or 1)
-                res = anular_abono_cxc(cursor, ab_id, motivo=motivo, usuario_id=usuario_id)
+                cxc_id_exp = body.get("cxc_id")
+                res = anular_abono_cxc(cursor, ab_id, motivo=motivo, usuario_id=usuario_id, cxc_id_explicit=cxc_id_exp)
                 conn.commit()
                 schedule_cloud_sync()
                 self.send_json({
                     "success": True,
-                    "message": f"Pago #{ab_id} anulado exitosamente. Saldo deudor restituido a ${res['nuevo_saldo_pendiente']:.2f}.",
+                    "message": f"Pago de ${res['monto_reintegrado_usd']:.2f} USD anulado exitosamente. Saldo deudor restituido a ${res['nuevo_saldo_pendiente']:.2f}.",
                     "data": res
                 })
                 return
@@ -4373,12 +4446,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 ab_id = int(parts[4])
                 motivo = (body.get("motivo") or "Anulación de pago a proveedor").strip()
                 usuario_id = int(body.get("usuario_id") or 1)
-                res = anular_abono_cxp(cursor, ab_id, motivo=motivo, usuario_id=usuario_id)
+                cxp_id_exp = body.get("cxp_id")
+                res = anular_abono_cxp(cursor, ab_id, motivo=motivo, usuario_id=usuario_id, cxp_id_explicit=cxp_id_exp)
                 conn.commit()
                 schedule_cloud_sync()
                 self.send_json({
                     "success": True,
-                    "message": f"Pago #{ab_id} anulado exitosamente. Deuda con proveedor restituida a ${res['nuevo_saldo_pendiente']:.2f}.",
+                    "message": f"Pago de ${res['monto_reintegrado_usd']:.2f} USD anulado exitosamente. Deuda con proveedor restituida a ${res['nuevo_saldo_pendiente']:.2f}.",
                     "data": res
                 })
                 return

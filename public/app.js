@@ -761,11 +761,12 @@ function navigate(viewName) {
   });
 
   // Sincronizar indicador de la Barra Inferior Móvil (Bottom Nav)
-  const mobItems = ['dashboard', 'facturacion', 'productos', 'reportes'];
+  const mobItems = ['dashboard', 'facturacion', 'compras', 'cxc', 'productos', 'reportes'];
   mobItems.forEach(m => {
     const mobBtn = document.getElementById(`mob-nav-${m}`);
     if (mobBtn) {
-      if (m === viewName) {
+      const isMatch = (m === viewName) || (m === 'cxc' && viewName === 'cxp');
+      if (isMatch) {
         mobBtn.classList.add('active');
       } else {
         mobBtn.classList.remove('active');
@@ -5278,13 +5279,21 @@ async function verEstadoCuentaCliente(clienteId) {
   try {
     AppState.cxcClienteSeleccionado = clienteId;
 
-    const res = await fetch(`/api/cxc?cliente_id=${clienteId}`);
-    if (!res.ok) throw new Error("No se pudo obtener las facturas del cliente");
-    const facturas = await res.json();
+    const [resFact, resEc] = await Promise.all([
+      fetch(`/api/cxc?cliente_id=${clienteId}`),
+      fetch(`/api/cxc/estado-cuenta/${clienteId}`)
+    ]);
+    if (!resFact.ok) throw new Error("No se pudo obtener las facturas del cliente");
+    const facturas = await resFact.json();
     AppState.cxcClienteFacturas = facturas;
 
+    const ecData = resEc.ok ? await resEc.json() : null;
+    AppState.cxcEstadoCuentaData = ecData;
+    AppState.cxcClienteMovimientos = ecData ? (ecData.movimientos || []) : [];
+    if (!AppState.cxcMovFilter) AppState.cxcMovFilter = 'todos';
+
     // Obtener datos del cliente
-    let cliente = AppState.clientes ? AppState.clientes.find(cl => cl.id === clienteId) : null;
+    let cliente = (ecData && ecData.cliente) ? ecData.cliente : (AppState.clientes ? AppState.clientes.find(cl => cl.id === clienteId) : null);
     if (!cliente && facturas.length > 0) {
       cliente = {
         id: clienteId,
@@ -5311,19 +5320,223 @@ async function verEstadoCuentaCliente(clienteId) {
 
     // Calcular saldos del cliente (excluyendo facturas anuladas)
     const totalSaldoUsd = facturas.filter(f => f.estado !== 'anulada').reduce((acc, f) => acc + parseFloat(f.saldo_pendiente || 0), 0);
-    const tasaVes = AppState.config.tasa_ves || 45.0;
+    const tasaVes = (ecData && ecData.tasa_ves) ? ecData.tasa_ves : (AppState.config.tasa_ves || 45.0);
     const totalSaldoBs = (totalSaldoUsd * tasaVes).toFixed(2);
 
     document.getElementById('cxcDetalleSaldoUsd').textContent = `$${totalSaldoUsd.toFixed(2)}`;
     document.getElementById('cxcDetalleSaldoBs').textContent = `≈ ${parseFloat(totalSaldoBs).toLocaleString('es-VE')} Bs.`;
 
+    // Poblar KPIs de desglose y contadores de filtros
+    if (ecData && ecData.resumen && ecData.conteos) {
+      const r = ecData.resumen;
+      const k = ecData.conteos;
+      const setEl = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+      setEl('cxcKpiFacturasUsd', `$${parseFloat(r.total_facturas_usd || 0).toFixed(2)}`);
+      setEl('cxcKpiFacturasCount', `${k.factura || 0} factura(s)`);
+      setEl('cxcKpiNotasDebitoUsd', `+$${parseFloat(r.total_notas_debito_usd || 0).toFixed(2)}`);
+      setEl('cxcKpiNotasDebitoCount', `${k.nota_debito || 0} nota(s) débito`);
+      setEl('cxcKpiPagosUsd', `-$${parseFloat(r.total_pagos_usd || 0).toFixed(2)}`);
+      setEl('cxcKpiPagosCount', `${k.pago || 0} pago(s) total(es)`);
+      setEl('cxcKpiAbonosUsd', `-$${parseFloat(r.total_abonos_usd || 0).toFixed(2)}`);
+      setEl('cxcKpiAbonosCount', `${k.abono || 0} abono(s) parcial(es)`);
+      setEl('cxcKpiNotasCreditoUsd', `-$${parseFloat(r.total_notas_credito_usd || 0).toFixed(2)}`);
+      setEl('cxcKpiNotasCreditoCount', `${k.nota_credito || 0} nota(s) crédito`);
+
+      ['todos', 'factura', 'pago_abono', 'pago', 'abono', 'nota_credito', 'nota_debito', 'anulado'].forEach(tipoKey => {
+        setEl(`cxcMovCount-${tipoKey}`, k[tipoKey] !== undefined ? k[tipoKey] : 0);
+      });
+    }
+
     // Cambiar vistas
     document.getElementById('cxcVistaConsolidada').classList.add('hidden');
     document.getElementById('cxcVistaEstadoCuenta').classList.remove('hidden');
 
+    renderCxcEstadoCuentaMovimientos();
     renderCxcClienteFacturasTable();
   } catch (err) {
     alert("Error al cargar estado de cuenta del cliente: " + err.message);
+  }
+}
+
+function filterCxcMovimientosTipo(tipo) {
+  AppState.cxcMovFilter = tipo;
+  ['todos', 'factura', 'pago_abono', 'pago', 'abono', 'nota_credito', 'nota_debito', 'anulado'].forEach(t => {
+    const btn = document.getElementById(`cxcMovFilter-${t}`);
+    if (btn) {
+      if (t === tipo) {
+        btn.className = 'px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 text-white shadow-xs transition';
+      } else {
+        btn.className = 'px-3 py-1.5 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition';
+      }
+    }
+  });
+  renderCxcEstadoCuentaMovimientos();
+}
+
+function limpiarFiltrosMovimientosCXC() {
+  const s = document.getElementById('cxcMovSearchInput');
+  const d = document.getElementById('cxcMovDesdeInput');
+  const h = document.getElementById('cxcMovHastaInput');
+  const o = document.getElementById('cxcMovOrdenSelect');
+  if (s) s.value = '';
+  if (d) d.value = '';
+  if (h) h.value = '';
+  if (o) o.value = 'asc';
+  filterCxcMovimientosTipo('todos');
+}
+
+function renderCxcEstadoCuentaMovimientos() {
+  const tbody = document.getElementById('cxcMovimientosTableBody');
+  const tfoot = document.getElementById('cxcMovimientosTableFoot');
+  const badge = document.getElementById('cxcMovsCountBadge');
+  if (!tbody) return;
+
+  const todosMovs = AppState.cxcClienteMovimientos || [];
+  let lista = [...todosMovs];
+  const tf = AppState.cxcMovFilter || 'todos';
+  const q = (document.getElementById('cxcMovSearchInput')?.value || '').trim().toLowerCase();
+  const desde = (document.getElementById('cxcMovDesdeInput')?.value || '').trim();
+  const hasta = (document.getElementById('cxcMovHastaInput')?.value || '').trim();
+  const orden = (document.getElementById('cxcMovOrdenSelect')?.value || 'asc').trim();
+
+  if (tf !== 'todos') {
+    if (tf === 'factura') {
+      lista = lista.filter(m => m.tipo_movimiento === 'factura');
+    } else if (tf === 'pago_abono') {
+      lista = lista.filter(m => m.categoria_movimiento === 'pago_abono');
+    } else if (tf === 'pago') {
+      const estrictos = lista.filter(m => m.tipo_movimiento === 'pago');
+      lista = estrictos.length > 0 ? estrictos : lista.filter(m => m.categoria_movimiento === 'pago_abono');
+    } else if (tf === 'abono') {
+      const estrictos = lista.filter(m => m.tipo_movimiento === 'abono');
+      lista = estrictos.length > 0 ? estrictos : lista.filter(m => m.categoria_movimiento === 'pago_abono');
+    } else if (tf === 'nota_credito') {
+      lista = lista.filter(m => m.tipo_movimiento === 'nota_credito');
+    } else if (tf === 'nota_debito') {
+      lista = lista.filter(m => m.tipo_movimiento === 'nota_debito');
+    } else if (tf === 'anulado') {
+      lista = lista.filter(m => m.es_anulado);
+    }
+  }
+
+  if (desde) {
+    lista = lista.filter(m => String(m.fecha || '').slice(0, 10) >= desde);
+  }
+  if (hasta) {
+    lista = lista.filter(m => String(m.fecha || '').slice(0, 10) <= hasta);
+  }
+  if (q) {
+    lista = lista.filter(m =>
+      String(m.documento_numero || '').toLowerCase().includes(q) ||
+      String(m.documento_afectado || '').toLowerCase().includes(q) ||
+      String(m.concepto || '').toLowerCase().includes(q) ||
+      String(m.etiqueta_tipo || '').toLowerCase().includes(q) ||
+      String(m.resumen_pagos || '').toLowerCase().includes(q)
+    );
+  }
+
+  if (orden === 'desc') {
+    lista.reverse();
+  }
+
+  if (badge) {
+    badge.textContent = `${lista.length} de ${todosMovs.length} movimiento(s)`;
+  }
+
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="10" class="text-center py-8 text-slate-400">No se encontraron movimientos con los filtros seleccionados en este Estado de Cuenta.</td></tr>`;
+    if (tfoot) tfoot.innerHTML = '';
+    return;
+  }
+
+  const tasaVes = AppState.config.tasa_ves || 45.0;
+  let sumCargos = 0;
+  let sumAbonos = 0;
+
+  tbody.innerHTML = lista.map(m => {
+    const esAnulado = Boolean(m.es_anulado);
+    const cargo = parseFloat(m.cargo_usd || 0);
+    const abono = parseFloat(m.abono_usd || 0);
+    const saldoAcum = parseFloat(m.saldo_acumulado_usd || 0);
+    const saldoBs = (saldoAcum * tasaVes).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    if (!esAnulado) {
+      sumCargos += cargo;
+      sumAbonos += abono;
+    }
+
+    let badgeTipo = '';
+    if (m.tipo_movimiento === 'factura') {
+      badgeTipo = `<span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-blue-100 text-blue-800 inline-flex items-center gap-1"><i class="fa-solid fa-file-invoice"></i>${escapeHtml(m.etiqueta_tipo)}</span>`;
+    } else if (m.tipo_movimiento === 'pago') {
+      badgeTipo = `<span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-emerald-100 text-emerald-800 inline-flex items-center gap-1"><i class="fa-solid fa-money-bill-wave"></i>${escapeHtml(m.etiqueta_tipo)}</span>`;
+    } else if (m.tipo_movimiento === 'abono') {
+      badgeTipo = `<span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-teal-100 text-teal-800 inline-flex items-center gap-1"><i class="fa-solid fa-hand-holding-dollar"></i>${escapeHtml(m.etiqueta_tipo)}</span>`;
+    } else if (m.tipo_movimiento === 'nota_credito') {
+      badgeTipo = `<span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-100 text-indigo-800 inline-flex items-center gap-1"><i class="fa-solid fa-circle-minus"></i>${escapeHtml(m.etiqueta_tipo)}</span>`;
+    } else if (m.tipo_movimiento === 'nota_debito') {
+      badgeTipo = `<span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-amber-100 text-amber-800 inline-flex items-center gap-1"><i class="fa-solid fa-circle-plus"></i>${escapeHtml(m.etiqueta_tipo)}</span>`;
+    }
+
+    let accionesHtml = '';
+    if (esAnulado) {
+      accionesHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800"><i class="fa-solid fa-ban mr-1"></i>ANULADO</span>`;
+    } else if (m.puede_anular_pago && m.cxc_id !== null && m.abono_id !== null) {
+      accionesHtml = `
+        <div class="flex items-center justify-center gap-1">
+          <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">ACTIVO</span>
+          <button type="button" onclick="verHistorialAbonosCXC(${m.cxc_id})" class="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold shadow-xs transition cursor-pointer" title="Anular este Pago / Abono y restituir saldo">
+            <i class="fa-solid fa-rotate-left mr-0.5"></i>Anular Pago
+          </button>
+        </div>
+      `;
+    } else if (m.tipo_movimiento === 'factura' && m.cxc_id) {
+      accionesHtml = `
+        <div class="flex items-center justify-center gap-1">
+          ${m.puede_pagar ? `<button type="button" onclick="abrirModalAbonoCXC(${m.cxc_id})" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-bold transition" title="Registrar Pago"><i class="fa-solid fa-money-bill-wave mr-0.5"></i>Pagos</button>` : `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700">SALDADA</span>`}
+          ${m.puede_anular_documento ? `<button type="button" onclick="anularFacturaDesdeCXC(${m.factura_id}, '${escapeHtml(m.documento_numero)}')" class="px-2 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-[10px] font-bold transition" title="Anular Factura"><i class="fa-solid fa-ban"></i></button>` : ''}
+        </div>
+      `;
+    } else {
+      accionesHtml = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">ACTIVO</span>`;
+    }
+
+    return `
+      <tr class="hover:bg-slate-50 transition ${esAnulado ? 'bg-rose-50/30 opacity-65' : ''}">
+        <td class="py-2.5 px-3 text-center font-mono font-bold text-slate-400">${m.nro_operacion}</td>
+        <td class="py-2.5 px-3 whitespace-nowrap text-slate-600 font-medium">${formatFecha(m.fecha)}</td>
+        <td class="py-2.5 px-3 whitespace-nowrap">${badgeTipo}</td>
+        <td class="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">${escapeHtml(m.documento_numero)}</td>
+        <td class="py-2.5 px-3 font-mono text-slate-600 whitespace-nowrap">${escapeHtml(m.documento_afectado || '-')}</td>
+        <td class="py-2.5 px-3 text-slate-700 max-w-md">
+          <div class="${esAnulado ? 'line-through text-slate-400' : ''}">${escapeHtml(m.concepto || '')}</div>
+        </td>
+        <td class="py-2.5 px-3 text-right font-bold ${cargo > 0 ? (esAnulado ? 'line-through text-slate-400' : 'text-rose-700 bg-rose-50/30') : 'text-slate-300'}">
+          ${cargo > 0 ? '+$' + cargo.toFixed(2) : '—'}
+        </td>
+        <td class="py-2.5 px-3 text-right font-bold ${abono > 0 ? (esAnulado ? 'line-through text-slate-400' : 'text-emerald-700 bg-emerald-50/30') : 'text-slate-300'}">
+          ${abono > 0 ? '-$' + abono.toFixed(2) : '—'}
+        </td>
+        <td class="py-2.5 px-3 text-right bg-amber-50/30">
+          <span class="font-black text-slate-900 block">$${saldoAcum.toFixed(2)}</span>
+          <span class="text-[10px] text-slate-500">≈ ${saldoBs} Bs.</span>
+        </td>
+        <td class="py-2.5 px-3 text-center whitespace-nowrap">${accionesHtml}</td>
+      </tr>
+    `;
+  }).join('');
+
+  if (tfoot) {
+    const saldoFinalGlobal = AppState.cxcEstadoCuentaData?.resumen?.saldo_pendiente_usd ?? Math.max(0, sumCargos - sumAbonos);
+    tfoot.innerHTML = `
+      <tr>
+        <td colspan="6" class="py-2.5 px-3 text-right uppercase tracking-wider text-slate-600">Totales de Movimientos Activos Mostrados (${lista.filter(x => !x.es_anulado).length}):</td>
+        <td class="py-2.5 px-3 text-right text-rose-700 font-extrabold">+$${sumCargos.toFixed(2)}</td>
+        <td class="py-2.5 px-3 text-right text-emerald-700 font-extrabold">-$${sumAbonos.toFixed(2)}</td>
+        <td class="py-2.5 px-3 text-right text-slate-900 font-black bg-amber-100/60">Saldo Actual: $${parseFloat(saldoFinalGlobal).toFixed(2)}</td>
+        <td></td>
+      </tr>
+    `;
   }
 }
 
@@ -5707,6 +5920,9 @@ async function confirmarAbonoCXC() {
       closeModalAbonoCXC();
       alert(`¡Pago de $${data.monto_abono_usd.toFixed(2)} USD registrado exitosamente!\nNuevo saldo pendiente: $${data.nuevo_saldo_pendiente.toFixed(2)}`);
       await loadCxc();
+      if (AppState.cxcClienteSeleccionado) {
+        await verEstadoCuentaCliente(AppState.cxcClienteSeleccionado);
+      }
       await loadDashboard();
       await loadDatabaseStatus();
       if (AppState.currentView === 'reportes' && AppState.reportesTabActual === 'cxc') loadReporteCxc();
@@ -5725,6 +5941,7 @@ async function verHistorialAbonosCXC(cxcId) {
     if (!res.ok) return;
     const c = await res.json();
     const content = document.getElementById('historialAbonosContent');
+    const abonosActivos = (c.abonos || []).filter(ab => ab.estado !== 'anulado' && ab.id !== undefined && ab.id !== null);
 
     let html = `
       <div class="bg-indigo-50/70 p-3 rounded-xl border border-indigo-200 text-xs space-y-1">
@@ -5732,25 +5949,58 @@ async function verHistorialAbonosCXC(cxcId) {
         <p><strong>Total Factura:</strong> $${parseFloat(c.monto_total).toFixed(2)} &bull; <strong>Total Abonado:</strong> $${parseFloat(c.monto_pagado).toFixed(2)}</p>
         <p><strong>Saldo Pendiente:</strong> <span class="font-bold text-rose-700">$${parseFloat(c.saldo_pendiente).toFixed(2)}</span></p>
       </div>
+      <div id="statusAnulacionCXC" class="hidden p-2.5 rounded-xl text-xs font-bold"></div>
     `;
+
+    if (abonosActivos.length > 0 && c.estado !== 'anulada') {
+      html += `
+        <div class="bg-rose-50/90 p-3.5 rounded-xl border-2 border-rose-300 space-y-2.5 shadow-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-extrabold text-rose-900 uppercase tracking-wide flex items-center gap-1.5">
+              <i class="fa-solid fa-rotate-left text-rose-600"></i> Panel de Anulación Directa de Pago / Abono
+            </span>
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-200 text-rose-900">${abonosActivos.length} activo(s)</span>
+          </div>
+          <div class="space-y-1">
+            <label class="block text-[11px] font-bold text-slate-700">1. Selecciona el pago o abono que deseas anular:</label>
+            <select id="selectPagoAnularCXC" class="w-full px-2.5 py-2 border border-rose-300 rounded-lg text-xs font-bold text-slate-800 bg-white focus:ring-2 focus:ring-rose-500 outline-none">
+              ${abonosActivos.map((ab, idx) => `
+                <option value="${ab.id}">
+                  ${ab.id === 0 ? 'Anticipo / Pago Inicial' : 'Abono #' + ab.id} — ${formatFecha(ab.fecha)} — Monto: +$${parseFloat(ab.monto_usd).toFixed(2)} USD
+                </option>
+              `).join('')}
+            </select>
+          </div>
+          <div class="space-y-1">
+            <label class="block text-[11px] font-bold text-slate-700">2. Motivo de la anulación:</label>
+            <input type="text" id="motivoAnularPagoCXC" value="Reversión de cobro / abono aplicado" placeholder="Indica el motivo de la reversión..." class="w-full px-2.5 py-1.5 border border-rose-300 rounded-lg text-xs text-slate-800 bg-white focus:ring-2 focus:ring-rose-500 outline-none">
+          </div>
+          <button type="button" id="btnEjecutarAnulacionCXC" onclick="ejecutarAnulacionPagoSeleccionadoCXC(${c.id})" class="w-full py-2.5 px-4 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-extrabold rounded-xl text-xs shadow-md flex items-center justify-center gap-2 transition cursor-pointer">
+            <i class="fa-solid fa-ban"></i> PROCESAR ANULACIÓN DE PAGO Y RESTITUIR SALDO
+          </button>
+        </div>
+      `;
+    }
 
     if (!c.abonos || c.abonos.length === 0) {
       html += `<p class="text-center py-6 text-slate-400 text-xs">No se han registrado abonos a esta cuenta.</p>`;
     } else {
+      html += `<div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider pt-1">Detalle de Pagos / Abonos Registrados:</div>`;
       html += c.abonos.map((ab, idx) => {
         const esAnulado = ab.estado === 'anulado';
+        const puedeAnular = !esAnulado && c.estado !== 'anulada' && ab.id !== undefined && ab.id !== null;
         return `
         <div class="p-3 ${esAnulado ? 'bg-rose-50/40 border-rose-200 opacity-65' : 'bg-slate-50 border-slate-200'} border rounded-xl text-xs space-y-1.5">
           <div class="flex justify-between items-center">
             <span class="font-bold text-slate-800">
-              Abono #${c.abonos.length - idx} &bull; ${formatFecha(ab.fecha)}
-              ${esAnulado ? '<span class="ml-1.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">ANULADO</span>' : ''}
+              ${ab.id === 0 ? 'Anticipo Inicial' : 'Abono #' + (c.abonos.length - idx)} &bull; ${formatFecha(ab.fecha)}
+              ${esAnulado ? '<span class="ml-1.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">ANULADO</span>' : '<span class="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">ACTIVO</span>'}
             </span>
             <div class="flex items-center gap-2">
               <strong class="${esAnulado ? 'line-through text-slate-400' : 'text-emerald-700'} font-extrabold text-sm">+$${parseFloat(ab.monto_usd).toFixed(2)}</strong>
-              ${(!esAnulado && ab.id > 0) ? `
-                <button onclick="anularAbonoCXC(${ab.id}, ${c.id})" class="px-2 py-0.5 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded text-[10px] font-bold transition" title="Anular este cobro y restituir saldo">
-                  <i class="fa-solid fa-ban mr-0.5"></i>Anular
+              ${puedeAnular ? `
+                <button type="button" onclick="anularAbonoCXC(${ab.id}, ${c.id})" class="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[11px] font-bold shadow-sm transition cursor-pointer" title="Anular este cobro y restituir saldo inmediatamente">
+                  <i class="fa-solid fa-ban mr-1"></i>Anular este Pago
                 </button>
               ` : ''}
             </div>
@@ -5956,13 +6206,21 @@ async function verEstadoCuentaProveedor(proveedorId) {
   try {
     AppState.cxpProveedorSeleccionado = proveedorId;
 
-    const res = await fetch(`/api/cxp?proveedor_id=${proveedorId}`);
-    if (!res.ok) throw new Error("No se pudo obtener las cuentas del proveedor");
-    const cuentas = await res.json();
+    const [resCuentas, resEc] = await Promise.all([
+      fetch(`/api/cxp?proveedor_id=${proveedorId}`),
+      fetch(`/api/cxp/estado-cuenta/${proveedorId}`)
+    ]);
+    if (!resCuentas.ok) throw new Error("No se pudo obtener las cuentas del proveedor");
+    const cuentas = await resCuentas.json();
     AppState.cxpProveedorCuentas = cuentas;
 
+    const ecData = resEc.ok ? await resEc.json() : null;
+    AppState.cxpEstadoCuentaData = ecData;
+    AppState.cxpProveedorMovimientos = ecData ? (ecData.movimientos || []) : [];
+    if (!AppState.cxpMovFilter) AppState.cxpMovFilter = 'todos';
+
     // Obtener datos del proveedor
-    let proveedor = AppState.proveedores ? AppState.proveedores.find(pr => pr.id === proveedorId) : null;
+    let proveedor = (ecData && ecData.proveedor) ? ecData.proveedor : (AppState.proveedores ? AppState.proveedores.find(pr => pr.id === proveedorId) : null);
     if (!proveedor && cuentas.length > 0) {
       proveedor = {
         id: proveedorId,
@@ -5989,19 +6247,223 @@ async function verEstadoCuentaProveedor(proveedorId) {
 
     // Calcular saldos del proveedor (excluyendo cuentas anuladas)
     const totalSaldoUsd = cuentas.filter(c => c.estado !== 'anulada').reduce((acc, c) => acc + parseFloat(c.saldo_pendiente || 0), 0);
-    const tasaVes = AppState.config.tasa_ves || 45.0;
+    const tasaVes = (ecData && ecData.tasa_ves) ? ecData.tasa_ves : (AppState.config.tasa_ves || 45.0);
     const totalSaldoBs = (totalSaldoUsd * tasaVes).toFixed(2);
 
     document.getElementById('cxpDetalleSaldoUsd').textContent = `$${totalSaldoUsd.toFixed(2)}`;
     document.getElementById('cxpDetalleSaldoBs').textContent = `≈ ${parseFloat(totalSaldoBs).toLocaleString('es-VE')} Bs.`;
 
+    // Poblar KPIs de desglose y contadores de filtros
+    if (ecData && ecData.resumen && ecData.conteos) {
+      const r = ecData.resumen;
+      const k = ecData.conteos;
+      const setEl = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+      setEl('cxpKpiFacturasUsd', `$${parseFloat(r.total_facturas_usd || 0).toFixed(2)}`);
+      setEl('cxpKpiFacturasCount', `${k.factura || 0} documento(s)`);
+      setEl('cxpKpiNotasDebitoUsd', `+$${parseFloat(r.total_notas_debito_usd || 0).toFixed(2)}`);
+      setEl('cxpKpiNotasDebitoCount', `${k.nota_debito || 0} nota(s) débito`);
+      setEl('cxpKpiPagosUsd', `-$${parseFloat(r.total_pagos_usd || 0).toFixed(2)}`);
+      setEl('cxpKpiPagosCount', `${k.pago || 0} pago(s) total(es)`);
+      setEl('cxpKpiAbonosUsd', `-$${parseFloat(r.total_abonos_usd || 0).toFixed(2)}`);
+      setEl('cxpKpiAbonosCount', `${k.abono || 0} abono(s) parcial(es)`);
+      setEl('cxpKpiNotasCreditoUsd', `-$${parseFloat(r.total_notas_credito_usd || 0).toFixed(2)}`);
+      setEl('cxpKpiNotasCreditoCount', `${k.nota_credito || 0} nota(s) crédito`);
+
+      ['todos', 'factura', 'pago_abono', 'pago', 'abono', 'nota_credito', 'nota_debito', 'anulado'].forEach(tipoKey => {
+        setEl(`cxpMovCount-${tipoKey}`, k[tipoKey] !== undefined ? k[tipoKey] : 0);
+      });
+    }
+
     // Cambiar vistas
     document.getElementById('cxpVistaConsolidada').classList.add('hidden');
     document.getElementById('cxpVistaEstadoCuenta').classList.remove('hidden');
 
+    renderCxpEstadoCuentaMovimientos();
     renderCxpProveedorCuentasTable();
   } catch (err) {
     alert("Error al cargar estado de cuenta del proveedor: " + err.message);
+  }
+}
+
+function filterCxpMovimientosTipo(tipo) {
+  AppState.cxpMovFilter = tipo;
+  ['todos', 'factura', 'pago_abono', 'pago', 'abono', 'nota_credito', 'nota_debito', 'anulado'].forEach(t => {
+    const btn = document.getElementById(`cxpMovFilter-${t}`);
+    if (btn) {
+      if (t === tipo) {
+        btn.className = 'px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-600 text-white shadow-xs transition';
+      } else {
+        btn.className = 'px-3 py-1.5 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition';
+      }
+    }
+  });
+  renderCxpEstadoCuentaMovimientos();
+}
+
+function limpiarFiltrosMovimientosCXP() {
+  const s = document.getElementById('cxpMovSearchInput');
+  const d = document.getElementById('cxpMovDesdeInput');
+  const h = document.getElementById('cxpMovHastaInput');
+  const o = document.getElementById('cxpMovOrdenSelect');
+  if (s) s.value = '';
+  if (d) d.value = '';
+  if (h) h.value = '';
+  if (o) o.value = 'asc';
+  filterCxpMovimientosTipo('todos');
+}
+
+function renderCxpEstadoCuentaMovimientos() {
+  const tbody = document.getElementById('cxpMovimientosTableBody');
+  const tfoot = document.getElementById('cxpMovimientosTableFoot');
+  const badge = document.getElementById('cxpMovsCountBadge');
+  if (!tbody) return;
+
+  const todosMovs = AppState.cxpProveedorMovimientos || [];
+  let lista = [...todosMovs];
+  const tf = AppState.cxpMovFilter || 'todos';
+  const q = (document.getElementById('cxpMovSearchInput')?.value || '').trim().toLowerCase();
+  const desde = (document.getElementById('cxpMovDesdeInput')?.value || '').trim();
+  const hasta = (document.getElementById('cxpMovHastaInput')?.value || '').trim();
+  const orden = (document.getElementById('cxpMovOrdenSelect')?.value || 'asc').trim();
+
+  if (tf !== 'todos') {
+    if (tf === 'factura') {
+      lista = lista.filter(m => m.tipo_movimiento === 'factura');
+    } else if (tf === 'pago_abono') {
+      lista = lista.filter(m => m.categoria_movimiento === 'pago_abono');
+    } else if (tf === 'pago') {
+      const estrictos = lista.filter(m => m.tipo_movimiento === 'pago');
+      lista = estrictos.length > 0 ? estrictos : lista.filter(m => m.categoria_movimiento === 'pago_abono');
+    } else if (tf === 'abono') {
+      const estrictos = lista.filter(m => m.tipo_movimiento === 'abono');
+      lista = estrictos.length > 0 ? estrictos : lista.filter(m => m.categoria_movimiento === 'pago_abono');
+    } else if (tf === 'nota_credito') {
+      lista = lista.filter(m => m.tipo_movimiento === 'nota_credito');
+    } else if (tf === 'nota_debito') {
+      lista = lista.filter(m => m.tipo_movimiento === 'nota_debito');
+    } else if (tf === 'anulado') {
+      lista = lista.filter(m => m.es_anulado);
+    }
+  }
+
+  if (desde) {
+    lista = lista.filter(m => String(m.fecha || '').slice(0, 10) >= desde);
+  }
+  if (hasta) {
+    lista = lista.filter(m => String(m.fecha || '').slice(0, 10) <= hasta);
+  }
+  if (q) {
+    lista = lista.filter(m =>
+      String(m.documento_numero || '').toLowerCase().includes(q) ||
+      String(m.documento_afectado || '').toLowerCase().includes(q) ||
+      String(m.concepto || '').toLowerCase().includes(q) ||
+      String(m.etiqueta_tipo || '').toLowerCase().includes(q) ||
+      String(m.resumen_pagos || '').toLowerCase().includes(q)
+    );
+  }
+
+  if (orden === 'desc') {
+    lista.reverse();
+  }
+
+  if (badge) {
+    badge.textContent = `${lista.length} de ${todosMovs.length} movimiento(s)`;
+  }
+
+  if (lista.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="10" class="text-center py-8 text-slate-400">No se encontraron movimientos con los filtros seleccionados en este Estado de Cuenta.</td></tr>`;
+    if (tfoot) tfoot.innerHTML = '';
+    return;
+  }
+
+  const tasaVes = AppState.config.tasa_ves || 45.0;
+  let sumCargos = 0;
+  let sumAbonos = 0;
+
+  tbody.innerHTML = lista.map(m => {
+    const esAnulado = Boolean(m.es_anulado);
+    const cargo = parseFloat(m.cargo_usd || 0);
+    const abono = parseFloat(m.abono_usd || 0);
+    const saldoAcum = parseFloat(m.saldo_acumulado_usd || 0);
+    const saldoBs = (saldoAcum * tasaVes).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    if (!esAnulado) {
+      sumCargos += cargo;
+      sumAbonos += abono;
+    }
+
+    let badgeTipo = '';
+    if (m.tipo_movimiento === 'factura') {
+      badgeTipo = `<span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-blue-100 text-blue-800 inline-flex items-center gap-1"><i class="fa-solid fa-file-invoice"></i>${escapeHtml(m.etiqueta_tipo)}</span>`;
+    } else if (m.tipo_movimiento === 'pago') {
+      badgeTipo = `<span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-emerald-100 text-emerald-800 inline-flex items-center gap-1"><i class="fa-solid fa-money-bill-wave"></i>${escapeHtml(m.etiqueta_tipo)}</span>`;
+    } else if (m.tipo_movimiento === 'abono') {
+      badgeTipo = `<span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-teal-100 text-teal-800 inline-flex items-center gap-1"><i class="fa-solid fa-hand-holding-dollar"></i>${escapeHtml(m.etiqueta_tipo)}</span>`;
+    } else if (m.tipo_movimiento === 'nota_credito') {
+      badgeTipo = `<span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-100 text-indigo-800 inline-flex items-center gap-1"><i class="fa-solid fa-circle-minus"></i>${escapeHtml(m.etiqueta_tipo)}</span>`;
+    } else if (m.tipo_movimiento === 'nota_debito') {
+      badgeTipo = `<span class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-rose-100 text-rose-800 inline-flex items-center gap-1"><i class="fa-solid fa-circle-plus"></i>${escapeHtml(m.etiqueta_tipo)}</span>`;
+    }
+
+    let accionesHtml = '';
+    if (esAnulado) {
+      accionesHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800"><i class="fa-solid fa-ban mr-1"></i>ANULADO</span>`;
+    } else if (m.puede_anular_pago && m.cxp_id !== null && m.abono_id !== null) {
+      accionesHtml = `
+        <div class="flex items-center justify-center gap-1">
+          <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">ACTIVO</span>
+          <button type="button" onclick="verHistorialAbonosCXP(${m.cxp_id})" class="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold shadow-xs transition cursor-pointer" title="Anular este Pago / Abono y restituir deuda">
+            <i class="fa-solid fa-rotate-left mr-0.5"></i>Anular Pago
+          </button>
+        </div>
+      `;
+    } else if (m.tipo_movimiento === 'factura' && m.cxp_id) {
+      accionesHtml = `
+        <div class="flex items-center justify-center gap-1">
+          ${m.puede_pagar ? `<button type="button" onclick="abrirModalAbonoCXP(${m.cxp_id})" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-bold transition" title="Registrar Pago"><i class="fa-solid fa-money-bill-wave mr-0.5"></i>Pagos</button>` : `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700">SALDADA</span>`}
+          ${m.puede_anular_documento ? (m.compra_id ? `<button type="button" onclick="anularCompraDesdeCXP(${m.compra_id}, '${escapeHtml(m.documento_numero)}')" class="px-2 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-[10px] font-bold transition" title="Anular Compra"><i class="fa-solid fa-ban"></i></button>` : `<button type="button" onclick="anularCuentaCXP(${m.cxp_id}, '${escapeHtml(m.documento_numero)}')" class="px-2 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-[10px] font-bold transition" title="Anular Cuenta Directa"><i class="fa-solid fa-ban"></i></button>`) : ''}
+        </div>
+      `;
+    } else {
+      accionesHtml = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">ACTIVO</span>`;
+    }
+
+    return `
+      <tr class="hover:bg-slate-50 transition ${esAnulado ? 'bg-rose-50/30 opacity-65' : ''}">
+        <td class="py-2.5 px-3 text-center font-mono font-bold text-slate-400">${m.nro_operacion}</td>
+        <td class="py-2.5 px-3 whitespace-nowrap text-slate-600 font-medium">${formatFecha(m.fecha)}</td>
+        <td class="py-2.5 px-3 whitespace-nowrap">${badgeTipo}</td>
+        <td class="py-2.5 px-3 font-mono font-bold text-slate-900 whitespace-nowrap">${escapeHtml(m.documento_numero)}</td>
+        <td class="py-2.5 px-3 font-mono text-slate-600 whitespace-nowrap">${escapeHtml(m.documento_afectado || '-')}</td>
+        <td class="py-2.5 px-3 text-slate-700 max-w-md">
+          <div class="${esAnulado ? 'line-through text-slate-400' : ''}">${escapeHtml(m.concepto || '')}</div>
+        </td>
+        <td class="py-2.5 px-3 text-right font-bold ${cargo > 0 ? (esAnulado ? 'line-through text-slate-400' : 'text-rose-700 bg-rose-50/30') : 'text-slate-300'}">
+          ${cargo > 0 ? '+$' + cargo.toFixed(2) : '—'}
+        </td>
+        <td class="py-2.5 px-3 text-right font-bold ${abono > 0 ? (esAnulado ? 'line-through text-slate-400' : 'text-emerald-700 bg-emerald-50/30') : 'text-slate-300'}">
+          ${abono > 0 ? '-$' + abono.toFixed(2) : '—'}
+        </td>
+        <td class="py-2.5 px-3 text-right bg-rose-50/30">
+          <span class="font-black text-slate-900 block">$${saldoAcum.toFixed(2)}</span>
+          <span class="text-[10px] text-slate-500">≈ ${saldoBs} Bs.</span>
+        </td>
+        <td class="py-2.5 px-3 text-center whitespace-nowrap">${accionesHtml}</td>
+      </tr>
+    `;
+  }).join('');
+
+  if (tfoot) {
+    const saldoFinalGlobal = AppState.cxpEstadoCuentaData?.resumen?.saldo_pendiente_usd ?? Math.max(0, sumCargos - sumAbonos);
+    tfoot.innerHTML = `
+      <tr>
+        <td colspan="6" class="py-2.5 px-3 text-right uppercase tracking-wider text-slate-600">Totales de Movimientos Activos Mostrados (${lista.filter(x => !x.es_anulado).length}):</td>
+        <td class="py-2.5 px-3 text-right text-rose-700 font-extrabold">+$${sumCargos.toFixed(2)}</td>
+        <td class="py-2.5 px-3 text-right text-emerald-700 font-extrabold">-$${sumAbonos.toFixed(2)}</td>
+        <td class="py-2.5 px-3 text-right text-slate-900 font-black bg-rose-100/60">Deuda Actual: $${parseFloat(saldoFinalGlobal).toFixed(2)}</td>
+        <td></td>
+      </tr>
+    `;
   }
 }
 
@@ -6782,6 +7244,9 @@ async function confirmarAbonoCXP() {
       closeModalAbonoCXP();
       alert(`¡Pago de $${data.monto_abono_usd.toFixed(2)} USD registrado exitosamente!\nNuevo saldo pendiente: $${data.nuevo_saldo_pendiente.toFixed(2)}`);
       await loadCxp();
+      if (AppState.cxpProveedorSeleccionado) {
+        await verEstadoCuentaProveedor(AppState.cxpProveedorSeleccionado);
+      }
       await loadDashboard();
       await loadDatabaseStatus();
       if (AppState.currentView === 'reportes' && AppState.reportesTabActual === 'cxp') loadReporteCxp();
@@ -6800,6 +7265,7 @@ async function verHistorialAbonosCXP(cxpId) {
     if (!res.ok) return;
     const c = await res.json();
     const content = document.getElementById('historialAbonosCxpContent');
+    const abonosActivos = (c.abonos || []).filter(ab => ab.estado !== 'anulado' && ab.id !== undefined && ab.id !== null);
 
     let html = `
       <div class="bg-rose-50/70 p-3 rounded-xl border border-rose-200 text-xs space-y-1">
@@ -6808,25 +7274,58 @@ async function verHistorialAbonosCXP(cxpId) {
         <p><strong>Total:</strong> $${parseFloat(c.monto_total).toFixed(2)} &bull; <strong>Pagado:</strong> $${parseFloat(c.monto_pagado).toFixed(2)}</p>
         <p><strong>Saldo Pendiente:</strong> <span class="font-bold text-rose-700">$${parseFloat(c.saldo_pendiente).toFixed(2)}</span></p>
       </div>
+      <div id="statusAnulacionCXP" class="hidden p-2.5 rounded-xl text-xs font-bold"></div>
     `;
+
+    if (abonosActivos.length > 0 && c.estado !== 'anulada') {
+      html += `
+        <div class="bg-rose-50/90 p-3.5 rounded-xl border-2 border-rose-300 space-y-2.5 shadow-sm">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-extrabold text-rose-900 uppercase tracking-wide flex items-center gap-1.5">
+              <i class="fa-solid fa-rotate-left text-rose-600"></i> Panel de Anulación Directa de Pago / Abono
+            </span>
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-200 text-rose-900">${abonosActivos.length} activo(s)</span>
+          </div>
+          <div class="space-y-1">
+            <label class="block text-[11px] font-bold text-slate-700">1. Selecciona el pago o abono que deseas anular:</label>
+            <select id="selectPagoAnularCXP" class="w-full px-2.5 py-2 border border-rose-300 rounded-lg text-xs font-bold text-slate-800 bg-white focus:ring-2 focus:ring-rose-500 outline-none">
+              ${abonosActivos.map((ab, idx) => `
+                <option value="${ab.id}">
+                  ${ab.id === 0 ? 'Anticipo / Pago Inicial' : 'Pago #' + ab.id} — ${formatFecha(ab.fecha)} — Monto: -$${parseFloat(ab.monto_usd).toFixed(2)} USD
+                </option>
+              `).join('')}
+            </select>
+          </div>
+          <div class="space-y-1">
+            <label class="block text-[11px] font-bold text-slate-700">2. Motivo de la anulación:</label>
+            <input type="text" id="motivoAnularPagoCXP" value="Reversión de pago a proveedor" placeholder="Indica el motivo de la reversión..." class="w-full px-2.5 py-1.5 border border-rose-300 rounded-lg text-xs text-slate-800 bg-white focus:ring-2 focus:ring-rose-500 outline-none">
+          </div>
+          <button type="button" id="btnEjecutarAnulacionCXP" onclick="ejecutarAnulacionPagoSeleccionadoCXP(${c.id})" class="w-full py-2.5 px-4 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-extrabold rounded-xl text-xs shadow-md flex items-center justify-center gap-2 transition cursor-pointer">
+            <i class="fa-solid fa-ban"></i> PROCESAR ANULACIÓN DE PAGO Y RESTITUIR DEUDA
+          </button>
+        </div>
+      `;
+    }
 
     if (!c.abonos || c.abonos.length === 0) {
       html += `<p class="text-center py-6 text-slate-400 text-xs">No se han registrado pagos para esta cuenta.</p>`;
     } else {
+      html += `<div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider pt-1">Detalle de Pagos Registrados:</div>`;
       html += c.abonos.map((ab, idx) => {
         const esAnulado = ab.estado === 'anulado';
+        const puedeAnular = !esAnulado && c.estado !== 'anulada' && ab.id !== undefined && ab.id !== null;
         return `
         <div class="p-3 ${esAnulado ? 'bg-rose-50/40 border-rose-200 opacity-65' : 'bg-slate-50 border-slate-200'} border rounded-xl text-xs space-y-1.5">
           <div class="flex justify-between items-center">
             <span class="font-bold text-slate-800">
-              Pago #${c.abonos.length - idx} &bull; ${formatFecha(ab.fecha)}
-              ${esAnulado ? '<span class="ml-1.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">ANULADO</span>' : ''}
+              ${ab.id === 0 ? 'Anticipo Inicial' : 'Pago #' + (c.abonos.length - idx)} &bull; ${formatFecha(ab.fecha)}
+              ${esAnulado ? '<span class="ml-1.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">ANULADO</span>' : '<span class="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">ACTIVO</span>'}
             </span>
             <div class="flex items-center gap-2">
               <strong class="${esAnulado ? 'line-through text-slate-400' : 'text-rose-700'} font-extrabold text-sm">-$${parseFloat(ab.monto_usd).toFixed(2)}</strong>
-              ${(!esAnulado && ab.id > 0) ? `
-                <button onclick="anularAbonoCXP(${ab.id}, ${c.id})" class="px-2 py-0.5 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded text-[10px] font-bold transition" title="Anular este pago y restituir deuda">
-                  <i class="fa-solid fa-ban mr-0.5"></i>Anular
+              ${puedeAnular ? `
+                <button type="button" onclick="anularAbonoCXP(${ab.id}, ${c.id})" class="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[11px] font-bold shadow-sm transition cursor-pointer" title="Anular este pago y restituir deuda inmediatamente">
+                  <i class="fa-solid fa-ban mr-1"></i>Anular este Pago
                 </button>
               ` : ''}
             </div>
@@ -11829,63 +12328,129 @@ async function anularCompra(compraId, numControl) {
   }
 }
 
-async function anularAbonoCXC(abonoId, cxcId) {
-  const motivo = prompt(`⚠️ ¿Deseas ANULAR este cobro/abono?\n\nEl saldo pendiente de la factura volverá a incrementarse al estado inmediatamente anterior.\n\nIngresa el motivo de la anulación:`, "Reversión de cobro registrado por error");
-  if (motivo === null) return;
-  if (!motivo.trim()) {
-    alert("Debes ingresar un motivo válido.");
+async function ejecutarAnulacionPagoSeleccionadoCXC(cxcId) {
+  const selectEl = document.getElementById('selectPagoAnularCXC');
+  if (!selectEl || selectEl.value === '') {
+    alert('No hay ningún pago o abono seleccionado para anular.');
     return;
+  }
+  const abonoId = parseInt(selectEl.value, 10);
+  const motivoEl = document.getElementById('motivoAnularPagoCXC');
+  const motivo = (motivoEl && motivoEl.value.trim()) ? motivoEl.value.trim() : 'Reversión de cobro / abono aplicado';
+  await anularAbonoCXC(abonoId, cxcId, motivo);
+}
+
+async function anularAbonoCXC(abonoId, cxcId, motivoExplicito = null) {
+  const motivoInput = document.getElementById('motivoAnularPagoCXC');
+  const motivo = (motivoExplicito || (motivoInput ? motivoInput.value : '') || 'Reversión de cobro / abono aplicado').trim();
+  const btnPanel = document.getElementById('btnEjecutarAnulacionCXC');
+  if (btnPanel) {
+    btnPanel.disabled = true;
+    btnPanel.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando anulación y restituyendo saldo...';
   }
 
   try {
     const res = await fetch(`/api/cxc/abonos/${abonoId}/anular`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ motivo: motivo.trim() })
+      body: JSON.stringify({ motivo: motivo, cxc_id: cxcId })
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
       throw new Error(data.error || data.message || "Error al anular abono");
     }
-    alert(`✅ ${data.message}`);
+
     await verHistorialAbonosCXC(cxcId);
+    const statusBox = document.getElementById('statusAnulacionCXC');
+    if (statusBox) {
+      statusBox.className = 'p-3 rounded-xl text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-900 flex items-center gap-2';
+      statusBox.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600 text-sm"></i> <span>${escapeHtml(data.message || 'Pago anulado y saldo restituido correctamente.')}</span>`;
+    }
+
     if (AppState.cxcClienteSeleccionado) {
       await verEstadoCuentaCliente(AppState.cxcClienteSeleccionado);
+    }
+    const modalAbono = document.getElementById('modalAbonoCXC');
+    if (modalAbono && !modalAbono.classList.contains('hidden')) {
+      await openModalAbonoCXC(cxcId);
     }
     await loadCxcConsolidado();
     await loadDashboard();
   } catch (err) {
-    alert("❌ Error al anular abono: " + err.message);
+    if (btnPanel) {
+      btnPanel.disabled = false;
+      btnPanel.innerHTML = '<i class="fa-solid fa-ban"></i> PROCESAR ANULACIÓN DE PAGO Y RESTITUIR SALDO';
+    }
+    const statusBox = document.getElementById('statusAnulacionCXC');
+    if (statusBox) {
+      statusBox.className = 'p-3 rounded-xl text-xs font-bold bg-rose-50 border border-rose-300 text-rose-900';
+      statusBox.textContent = '❌ Error al anular abono: ' + err.message;
+    } else {
+      alert("❌ Error al anular abono: " + err.message);
+    }
   }
 }
 
-async function anularAbonoCXP(abonoId, cxpId) {
-  const motivo = prompt(`⚠️ ¿Deseas ANULAR este pago al proveedor?\n\nEl saldo adeudado al proveedor volverá a incrementarse al estado inmediatamente anterior.\n\nIngresa el motivo de la anulación:`, "Reversión de pago registrado por error");
-  if (motivo === null) return;
-  if (!motivo.trim()) {
-    alert("Debes ingresar un motivo válido.");
+async function ejecutarAnulacionPagoSeleccionadoCXP(cxpId) {
+  const selectEl = document.getElementById('selectPagoAnularCXP');
+  if (!selectEl || selectEl.value === '') {
+    alert('No hay ningún pago o abono seleccionado para anular.');
     return;
+  }
+  const abonoId = parseInt(selectEl.value, 10);
+  const motivoEl = document.getElementById('motivoAnularPagoCXP');
+  const motivo = (motivoEl && motivoEl.value.trim()) ? motivoEl.value.trim() : 'Reversión de pago a proveedor';
+  await anularAbonoCXP(abonoId, cxpId, motivo);
+}
+
+async function anularAbonoCXP(abonoId, cxpId, motivoExplicito = null) {
+  const motivoInput = document.getElementById('motivoAnularPagoCXP');
+  const motivo = (motivoExplicito || (motivoInput ? motivoInput.value : '') || 'Reversión de pago a proveedor').trim();
+  const btnPanel = document.getElementById('btnEjecutarAnulacionCXP');
+  if (btnPanel) {
+    btnPanel.disabled = true;
+    btnPanel.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando anulación y restituyendo deuda...';
   }
 
   try {
     const res = await fetch(`/api/cxp/abonos/${abonoId}/anular`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ motivo: motivo.trim() })
+      body: JSON.stringify({ motivo: motivo, cxp_id: cxpId })
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
       throw new Error(data.error || data.message || "Error al anular pago");
     }
-    alert(`✅ ${data.message}`);
+
     await verHistorialAbonosCXP(cxpId);
+    const statusBox = document.getElementById('statusAnulacionCXP');
+    if (statusBox) {
+      statusBox.className = 'p-3 rounded-xl text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-900 flex items-center gap-2';
+      statusBox.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600 text-sm"></i> <span>${escapeHtml(data.message || 'Pago anulado y deuda restituida correctamente.')}</span>`;
+    }
+
     if (AppState.cxpProveedorSeleccionado) {
       await verEstadoCuentaProveedor(AppState.cxpProveedorSeleccionado);
+    }
+    const modalAbono = document.getElementById('modalAbonoCXP');
+    if (modalAbono && !modalAbono.classList.contains('hidden')) {
+      await openModalAbonoCXP(cxpId);
     }
     await loadCxpConsolidado();
     await loadDashboard();
   } catch (err) {
-    alert("❌ Error al anular pago: " + err.message);
+    if (btnPanel) {
+      btnPanel.disabled = false;
+      btnPanel.innerHTML = '<i class="fa-solid fa-ban"></i> PROCESAR ANULACIÓN DE PAGO Y RESTITUIR DEUDA';
+    }
+    const statusBox = document.getElementById('statusAnulacionCXP');
+    if (statusBox) {
+      statusBox.className = 'p-3 rounded-xl text-xs font-bold bg-rose-50 border border-rose-300 text-rose-900';
+      statusBox.textContent = '❌ Error al anular pago: ' + err.message;
+    } else {
+      alert("❌ Error al anular pago: " + err.message);
+    }
   }
 }
 
