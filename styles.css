@@ -1,0 +1,1281 @@
+/* styles.css - Variables de tema, navegación vertical y reglas de impresión */
+
+:root {
+  /* Variables de Color Dinámicas - Sistema Soft UI Fresco, Relajante y Proactivo */
+  --color-primary: #14b8a6;        /* Teal 500 - Calma, claridad, frescura y proactividad */
+  --color-primary-hover: #0d9488;  /* Teal 600 */
+  --color-primary-light: #ccfbf1;  /* Teal 100 */
+  --color-sidebar: #ffffff;        /* Blanco limpio, luminoso y minimalista */
+  --color-sidebar-text: #1e293b;   /* Slate 800 - Textos nítidos y sin fatiga visual */
+  --color-sidebar-active: #14b8a6; /* Teal 500 */
+  --color-bg-app: #f8fafc;         /* Slate 50 - Fondo relajante ultra suave, sin fatiga visual */
+  --color-card-bg: #ffffff;
+  --color-text-main: #1e293b;       /* Slate 800 - Sin negro puro */
+  --color-btn-factura: #14b8a6;    /* Teal 500 positivo */
+  --color-btn-compra: #0ea5e9;     /* Sky 500 proactivo */
+  --color-btn-cxc: #10b981;        /* Emerald 500 */
+  --color-btn-cxp: #64748b;        /* Slate suave */
+  --color-btn-devoluciones: #06b6d4; /* Cian refrescante */
+  --color-header-bg: #ffffff;
+  --color-btn-kardex: #14b8a6;     /* Teal 500 */
+  --color-btn-fiscal: #0284c7;     /* Sky 600 */
+}
+
+body, body.bg-slate-50, body.bg-slate-100 {
+  background-color: var(--color-bg-app) !important;
+  color: var(--color-text-main) !important;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.app-main-wrapper {
+  background-color: var(--color-bg-app) !important;
+  transition: background-color 0.3s ease;
+}
+
+/* ========================================================
+   SISTEMA DE DISEÑO SOFT UI (ELEVACIÓN, TARJETAS Y BOTONES)
+   ======================================================== */
+.soft-card {
+  background-color: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  border-radius: 1rem; /* rounded-xl equilibrado para ERP */
+  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.04);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.soft-card:hover {
+  box-shadow: 0 8px 22px -4px rgba(15, 23, 42, 0.07);
+}
+
+.soft-card-interactive {
+  background-color: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  border-radius: 1rem;
+  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.04);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.soft-card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px -4px rgba(15, 23, 42, 0.08);
+  border-color: rgba(20, 184, 166, 0.4);
+}
+
+/* Header dinámico con efecto cristal suave */
+header.app-header {
+  background-color: var(--color-header-bg) !important;
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.03);
+  border-bottom: 1px solid rgba(241, 245, 249, 0.9);
+}
+
+/* Modal Backdrop */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  overflow-y: auto;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.modal-overlay.hidden {
+  display: none !important;
+}
+
+/* ==========================================
+   BARRA LATERAL IZQUIERDA (VERTICAL SIDEBAR)
+   ========================================== */
+#appSidebar {
+  background-color: var(--color-sidebar, #ffffff) !important;
+  color: var(--color-sidebar-text, #1e293b) !important;
+  border-right: 1px solid rgba(226, 232, 240, 0.85) !important;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease, color 0.2s ease;
+  overflow: hidden;
+}
+
+/* Barra de desplazamiento independiente y dedicada para la navegación del Sidebar */
+#sidebarNavList {
+  overflow-y: auto !important;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+
+#sidebarNavList::-webkit-scrollbar {
+  width: 4px;
+}
+#sidebarNavList::-webkit-scrollbar-track {
+  background: transparent;
+}
+#sidebarNavList::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.25);
+  border-radius: 9999px;
+}
+#sidebarNavList::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.5);
+}
+
+/* Botones de navegación en Sidebar */
+.sidebar-nav-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-sidebar-text, #475569);
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  text-align: left;
+  border: 1px solid transparent;
+}
+
+.sidebar-nav-btn:hover {
+  background-color: rgba(15, 23, 42, 0.04);
+  color: #0f172a;
+  transform: translateX(2px);
+}
+
+.sidebar-nav-btn.active-nav {
+  background-color: var(--color-sidebar-active, var(--color-primary, #14b8a6)) !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow: 0 4px 14px -2px rgba(20, 184, 166, 0.35);
+  border-color: transparent;
+}
+
+.sidebar-nav-btn.active-nav i {
+  color: #ffffff !important;
+}
+
+.sidebar-nav-btn i {
+  width: 1.35rem;
+  text-align: center;
+  font-size: 0.95rem;
+  transition: color 0.15s ease-in-out;
+}
+
+/* Clases dinámicas de botones configurables */
+.btn-theme-primary {
+  background-color: var(--color-primary) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-primary:hover {
+  background-color: var(--color-primary-hover) !important;
+  filter: brightness(0.95);
+}
+
+.btn-theme-factura {
+  background-color: var(--color-btn-factura) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-factura:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-compra {
+  background-color: var(--color-btn-compra) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-compra:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-cxc {
+  background-color: var(--color-btn-cxc) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-cxc:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-cxp {
+  background-color: var(--color-btn-cxp) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-cxp:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-devoluciones {
+  background-color: var(--color-btn-devoluciones) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-devoluciones:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-kardex {
+  background-color: var(--color-btn-kardex) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-kardex:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-fiscal {
+  background-color: var(--color-btn-fiscal) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-fiscal:hover {
+  filter: brightness(0.9);
+}
+
+/* Ocultar barra de desplazamiento */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Scrollbars Globales */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Animaciones sutiles */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+main > section:not(.hidden) {
+  animation: fadeIn 0.18s ease-out forwards;
+}
+
+/* ========================================================
+   REGLAS SOFT UI: ENTRADAS, BOTONES Y TABLAS
+   ======================================================== */
+/* Inputs y selects con foco suave y elegante usando el color primario */
+input:not([type="checkbox"]):not([type="radio"]):focus, 
+select:focus, 
+textarea:focus {
+  outline: none !important;
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.18) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+/* Botones con transiciones ultra-suaves */
+button, .btn-theme-primary, .btn-theme-factura, .btn-theme-compra, .btn-theme-cxc, .btn-theme-cxp, .btn-theme-devoluciones, .btn-theme-kardex, .btn-theme-fiscal {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Tablas con cabeceras suaves y filas con hover relajante */
+table th {
+  color: #475569 !important;
+  font-weight: 600 !important;
+}
+tbody tr {
+  transition: background-color 0.15s ease-in-out;
+}
+tbody tr:hover {
+  background-color: rgba(248, 250, 252, 0.85);
+}
+
+/* Estilos de Ticket / Factura */
+.ticket-container {
+  font-family: 'Courier New', Courier, monospace, system-ui;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+}
+
+/* Color pickers estéticos */
+input[type="color"] {
+  -webkit-appearance: none;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  padding: 2px;
+  cursor: pointer;
+  background-color: #ffffff;
+  height: 2.5rem;
+}
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 0.35rem;
+}
+
+/* ========================================================
+   OPTIMIZACIONES PARA TELÉFONOS MÓVILES (SMARTPHONES)
+   ======================================================== */
+
+/* Barra de Navegación Inferior para Teléfonos (Diseño App Nativa Glassmorphism) */
+.mobile-bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3.7rem;
+  background-color: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid rgba(226, 232, 240, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 38;
+  box-shadow: 0 -4px 20px rgba(15, 23, 42, 0.06);
+  padding: 0 0.25rem env(safe-area-inset-bottom, 0) 0.25rem;
+}
+
+.mobile-nav-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  font-size: 0.625rem;
+  font-weight: 600;
+  padding: 0.25rem 0.2rem;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  flex: 1 1 0%;
+  min-width: 0;
+  touch-action: manipulation;
+  border-radius: 0.65rem;
+}
+
+.mobile-nav-item i {
+  font-size: 1.05rem;
+  margin-bottom: 0.12rem;
+  transition: transform 0.18s ease, color 0.18s ease;
+}
+
+.mobile-nav-item.active {
+  color: var(--color-primary) !important;
+  font-weight: 800;
+  background-color: rgba(20, 184, 166, 0.08);
+}
+
+.mobile-nav-item.active::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 1.5rem;
+  height: 2.5px;
+  border-radius: 999px;
+  background-color: var(--color-primary);
+}
+
+.mobile-nav-item.active i {
+  transform: translateY(-1px);
+  color: var(--color-primary) !important;
+}
+
+.mobile-nav-item:active {
+  transform: scale(0.94);
+}
+
+/* Envoltorio con scroll táctil suave para tablas en móvil */
+.table-responsive-wrapper,
+.overflow-x-auto {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch !important;
+  scrollbar-width: thin;
+}
+
+/* ========================================================
+   ESTRUCTURA Y OPTIMIZACIÓN UX/UI COMPACTA PARA MÓVILES (< 768px)
+   ======================================================== */
+@media screen and (max-width: 767.98px) {
+  html, body {
+    width: 100% !important;
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+  }
+
+  body {
+    display: block !important;
+    position: relative !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* El menú lateral en móviles es fijo, fuera del flujo y oculto a la izquierda */
+  #appSidebar {
+    position: fixed !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    z-index: 55 !important;
+    width: 280px !important;
+    max-width: 84vw !important;
+    min-width: 0 !important;
+    height: 100% !important;
+    max-height: 100dvh !important;
+    flex-shrink: 0 !important;
+    transform: translateX(-100%);
+    transition: transform 0.26s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    box-shadow: 0 0 35px rgba(15, 23, 42, 0.45) !important;
+  }
+
+  #appSidebar.translate-x-0 {
+    transform: translateX(0) !important;
+  }
+
+  /* Contenedor principal ocupa 100% del ancho */
+  .app-main-wrapper {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow-x: hidden !important;
+  }
+
+  header.app-header {
+    width: 100% !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+  }
+
+  /* Contenedor de vistas más compacto y aprovechando mejor el ancho en teléfonos */
+  main {
+    width: 100% !important;
+    max-width: 100vw !important;
+    padding: 0.65rem 0.6rem 1.25rem 0.6rem !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Pie de página visible por encima de la barra de navegación móvil */
+  footer.app-footer {
+    padding-bottom: 4.5rem !important;
+  }
+
+  /* Reducción inteligente de espacios verticales entre bloques en móvil */
+  main > section.space-y-6 {
+    row-gap: 0.75rem !important;
+  }
+  main > section.space-y-6 > * + * {
+    margin-top: 0.75rem !important;
+  }
+
+  /* Títulos y subtítulos de módulo más compactos y modernos */
+  main h2.text-2xl,
+  main h2.text-xl {
+    font-size: 1.05rem !important;
+    line-height: 1.35rem !important;
+  }
+
+  /* Tarjetas más compactas en móvil para evitar exceso de scroll */
+  .soft-card,
+  .soft-card-interactive,
+  main .rounded-2xl.p-6,
+  main .rounded-2xl.p-5,
+  main .rounded-2xl.p-4 {
+    padding: 0.75rem !important;
+    border-radius: 0.9rem !important;
+  }
+
+  /* Cuadrículas de KPIs (4 o 5 tarjetas) se muestran en 2 columnas compactas en móvil */
+  main .grid.grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-4,
+  main .grid.grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-5,
+  main .grid.grid-cols-1.sm\:grid-cols-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 0.5rem !important;
+  }
+
+  main .grid.grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-4 h3.text-2xl,
+  main .grid.grid-cols-1.sm\:grid-cols-2.lg\:grid-cols-5 h3.text-xl,
+  main .grid.grid-cols-1.sm\:grid-cols-3 h3.text-2xl {
+    font-size: 1.05rem !important;
+    line-height: 1.3rem !important;
+  }
+
+  /* Tablas ultra-prácticas y compactas en pantallas móviles */
+  table th,
+  table td {
+    padding: 0.45rem 0.5rem !important;
+    font-size: 0.74rem !important;
+  }
+
+  table th {
+    font-size: 0.65rem !important;
+    white-space: nowrap;
+  }
+
+  /* Evitar auto-zoom molesto en Safari iOS / Chrome Android manteniendo controles compactos */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+    padding-top: 0.42rem !important;
+    padding-bottom: 0.42rem !important;
+  }
+
+  /* Modales estilo Bottom-Sheet / Adaptativos para operación con una mano */
+  .modal-overlay {
+    padding: 0.4rem !important;
+    align-items: flex-end !important;
+  }
+
+  .modal-overlay > div {
+    max-height: 92dvh !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0.9rem !important;
+    border-radius: 1.15rem 1.15rem 0.75rem 0.75rem !important;
+  }
+
+  button, .btn {
+    touch-action: manipulation;
+  }
+}
+
+/* ========================================================
+   ESTRUCTURA PARA PANTALLAS GRANDES Y ESCRITORIO (>= 768px)
+   ======================================================== */
+@media screen and (min-width: 768px) {
+  body {
+    display: flex !important;
+    flex-direction: row !important;
+  }
+
+  #appSidebar {
+    position: sticky !important;
+    top: 0 !important;
+    height: 100vh !important;
+    width: 16rem !important;
+    min-width: 16rem !important;
+    flex-shrink: 0 !important;
+    transform: none !important;
+    box-shadow: none !important;
+    z-index: 40 !important;
+  }
+
+  .app-main-wrapper {
+    flex: 1 1 0% !important;
+    min-width: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+}
+
+/* ========================================================
+   FASE 2E-1: CONTENEDOR DOCUMENTAL EN PANTALLA NORMAL
+   ======================================================== */
+#areaImpresionOficial,
+.hidden-on-screen {
+  display: none !important;
+}
+
+/* ========================================================
+   REGLAS DE IMPRESIÓN PROFESIONAL (@media print)
+   ======================================================== */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  aside, #appSidebar, header, nav, .no-print, button, input, select, textarea {
+    display: none !important;
+  }
+
+  .modal-overlay {
+    position: static !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+  }
+
+  .modal-overlay > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  #printAreaFactura,
+  #printAreaDevolucion {
+    display: block !important;
+    border: none !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 10px !important;
+    font-size: 11px !important;
+  }
+
+  #printAreaFactura *,
+  #printAreaDevolucion * {
+    color: #000000 !important;
+  }
+
+  #view-reportes:not(.hidden) {
+    display: block !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #modalVistaPreliminarReporte {
+    display: block !important;
+    position: static !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #modalVistaPreliminarReporte > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #hojaReporteImprimible {
+    display: block !important;
+    border: none !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  #hojaReporteImprimible table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  #hojaReporteImprimible th,
+  #hojaReporteImprimible td {
+    padding: 6px 8px !important;
+  }
+}
+
+/* ========================================================
+   FASE 2E-1: FORMATOS DE PÁGINA (@page)
+   ======================================================== */
+@page ticket80 {
+  size: 80mm auto;
+  margin: 2mm 1mm;
+}
+
+@page letterPortrait {
+  size: letter portrait;
+  margin: 12mm;
+}
+
+@page letterLandscape {
+  size: letter landscape;
+  margin: 10mm;
+}
+
+@page a4Portrait {
+  size: a4 portrait;
+  margin: 12mm;
+}
+
+@page a4Landscape {
+  size: a4 landscape;
+  margin: 10mm;
+}
+
+/* ========================================================
+   FASE 2E-1: NÚCLEO DE IMPRESIÓN DOCUMENTAL AISLADO
+   (Reglas estrictas cuando body tiene la clase .document-printing)
+   ======================================================== */
+@media print {
+  /* Reseteo completo de body bajo el nuevo DocumentPrinter */
+  body.document-printing {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+  }
+
+  /* AISLAMIENTO ABSOLUTO: Ocultar TODOS los hijos directos de body excepto #areaImpresionOficial */
+  body.document-printing > *:not(#areaImpresionOficial) {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* ÚNICA RAÍZ IMPRIMIBLE: Forzar visualización exclusiva de #areaImpresionOficial */
+  body.document-printing #areaImpresionOficial {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Reglas documentales internas */
+  body.document-printing #areaImpresionOficial * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-sizing: border-box !important;
+  }
+
+  body.document-printing #areaImpresionOficial thead {
+    display: table-header-group !important;
+  }
+
+  body.document-printing #areaImpresionOficial tfoot {
+    display: table-footer-group !important;
+  }
+
+  body.document-printing #areaImpresionOficial tr,
+  body.document-printing #areaImpresionOficial .avoid-page-break,
+  body.document-printing #areaImpresionOficial .no-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  body.document-printing #areaImpresionOficial .page-break {
+    break-before: page !important;
+    page-break-before: always !important;
+  }
+
+  body.document-printing #areaImpresionOficial table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  /* Tipos de Documento Específicos */
+  body.document-printing #areaImpresionOficial.doc-ticket80 {
+    page: ticket80;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 3mm 4mm !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    color: #000000 !important;
+  }
+
+  body.document-printing #areaImpresionOficial.doc-letterPortrait {
+    page: letterPortrait;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  body.document-printing #areaImpresionOficial.doc-letterLandscape {
+    page: letterLandscape;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  body.document-printing #areaImpresionOficial.doc-a4Portrait {
+    page: a4Portrait;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  body.document-printing #areaImpresionOficial.doc-a4Landscape {
+    page: a4Landscape;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  /* ========================================================
+     FASE 2E-2: ESTILOS DOCUMENTALES DE FACTURA DE VENTA
+     ======================================================== */
+  body.document-printing #areaImpresionOficial .doc-factura {
+    box-sizing: border-box !important;
+    width: 100% !important;
+  }
+
+  /* Banner de Factura Anulada */
+  body.document-printing #areaImpresionOficial .doc-anulada-banner {
+    border: 2px dashed #dc2626 !important;
+    background-color: #fef2f2 !important;
+    color: #dc2626 !important;
+    padding: 8px 12px !important;
+    text-align: center !important;
+    font-weight: 900 !important;
+    font-size: 13px !important;
+    letter-spacing: 1px !important;
+    text-transform: uppercase !important;
+    margin-bottom: 12px !important;
+    border-radius: 6px !important;
+  }
+
+  /* Factura en Hoja (Carta / A4 Vertical) */
+  body.document-printing #areaImpresionOficial .doc-factura-sheet {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+    color: #1e293b !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+    border-bottom: 2px solid #0f172a !important;
+    padding-bottom: 12px !important;
+    margin-bottom: 14px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-company-title {
+    font-size: 20px !important;
+    font-weight: 900 !important;
+    color: #0f172a !important;
+    text-transform: uppercase !important;
+    margin: 0 0 4px 0 !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-invoice-badge {
+    background: #0f172a !important;
+    color: #ffffff !important;
+    padding: 6px 14px !important;
+    border-radius: 4px !important;
+    text-align: right !important;
+    display: inline-block !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-client-card {
+    background: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    margin-bottom: 14px !important;
+    display: grid !important;
+    grid-template-columns: 2fr 1.5fr !important;
+    gap: 10px !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet table.doc-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin-bottom: 14px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet table.doc-table th {
+    background: #0f172a !important;
+    color: #ffffff !important;
+    font-size: 10px !important;
+    text-transform: uppercase !important;
+    font-weight: 700 !important;
+    padding: 6px 8px !important;
+    border: 1px solid #0f172a !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet table.doc-table td {
+    padding: 6px 8px !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-bottom-grid {
+    display: grid !important;
+    grid-template-columns: 1.2fr 1fr !important;
+    gap: 16px !important;
+    margin-top: 10px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-totals-box {
+    border: 1px solid #cbd5e1 !important;
+    background: #f8fafc !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-factura-sheet .doc-signatures {
+    margin-top: 36px !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 40px !important;
+    text-align: center !important;
+    font-size: 10px !important;
+    color: #475569 !important;
+  }
+
+  /* Factura en Ticket Térmico 80mm */
+  body.document-printing #areaImpresionOficial .doc-factura-ticket {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    color: #000000 !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+  }
+
+  /* ========================================================
+     FASE 2E-3: ESTILOS DOCUMENTALES DE NOTA DE DEVOLUCIÓN
+     ======================================================== */
+  body.document-printing #areaImpresionOficial .doc-devolucion {
+    box-sizing: border-box !important;
+    width: 100% !important;
+  }
+
+  /* Nota de Devolución en Hoja (Carta / A4 Vertical) */
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+    color: #1e293b !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+    border-bottom: 2px solid #0891b2 !important;
+    padding-bottom: 12px !important;
+    margin-bottom: 14px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-company-title {
+    font-size: 20px !important;
+    font-weight: 900 !important;
+    color: #0f172a !important;
+    text-transform: uppercase !important;
+    margin: 0 0 4px 0 !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-devolucion-badge {
+    background: #0891b2 !important;
+    color: #ffffff !important;
+    padding: 6px 14px !important;
+    border-radius: 4px !important;
+    text-align: right !important;
+    display: inline-block !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-client-card {
+    background: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    margin-bottom: 14px !important;
+    display: grid !important;
+    grid-template-columns: 2fr 1.5fr !important;
+    gap: 10px !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet table.doc-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin-bottom: 14px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet table.doc-table thead {
+    display: table-header-group !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet table.doc-table tr {
+    page-break-inside: avoid !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet table.doc-table th {
+    background: #0e7490 !important;
+    color: #ffffff !important;
+    font-size: 10px !important;
+    text-transform: uppercase !important;
+    font-weight: 700 !important;
+    padding: 6px 8px !important;
+    border: 1px solid #0e7490 !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet table.doc-table td {
+    padding: 6px 8px !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-bottom-grid {
+    display: grid !important;
+    grid-template-columns: 1.2fr 1fr !important;
+    gap: 16px !important;
+    margin-top: 10px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-totals-box {
+    border: 1px solid #cbd5e1 !important;
+    background: #f8fafc !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-devolucion-sheet .doc-signatures {
+    margin-top: 36px !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 40px !important;
+    text-align: center !important;
+    font-size: 10px !important;
+    color: #475569 !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Nota de Devolución en Ticket Térmico 80mm */
+  body.document-printing #areaImpresionOficial .doc-devolucion-ticket {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    color: #000000 !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+  }
+
+  /* ========================================================
+     FASE 2E-3 (BLOQUE 2): ESTILOS DOCUMENTALES DE MOVIMIENTOS
+     ======================================================== */
+  body.document-printing #areaImpresionOficial .doc-movimiento {
+    box-sizing: border-box !important;
+    width: 100% !important;
+  }
+
+  /* Comprobante de Movimiento en Hoja (Carta / A4 Vertical) */
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.4 !important;
+    color: #1e293b !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+    border-bottom: 2px solid #0d9488 !important;
+    padding-bottom: 12px !important;
+    margin-bottom: 14px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-company-title {
+    font-size: 20px !important;
+    font-weight: 900 !important;
+    color: #0f172a !important;
+    text-transform: uppercase !important;
+    margin: 0 0 4px 0 !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-movimiento-badge {
+    background: #0d9488 !important;
+    color: #ffffff !important;
+    padding: 6px 14px !important;
+    border-radius: 4px !important;
+    text-align: right !important;
+    display: inline-block !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-info-card {
+    background: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    margin-bottom: 14px !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10px !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin-bottom: 14px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table thead {
+    display: table-header-group !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table tr {
+    page-break-inside: avoid !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table th {
+    background: #0f766e !important;
+    color: #ffffff !important;
+    font-size: 10px !important;
+    text-transform: uppercase !important;
+    font-weight: 700 !important;
+    padding: 6px 8px !important;
+    border: 1px solid #0f766e !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table td {
+    padding: 6px 8px !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-bottom-grid {
+    display: grid !important;
+    grid-template-columns: 1.2fr 1fr !important;
+    gap: 16px !important;
+    margin-top: 10px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-totals-box {
+    border: 1px solid #cbd5e1 !important;
+    background: #f8fafc !important;
+    border-radius: 6px !important;
+    padding: 10px 14px !important;
+    font-size: 11px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet .doc-signatures {
+    margin-top: 36px !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 40px !important;
+    text-align: center !important;
+    font-size: 10px !important;
+    color: #475569 !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Comprobante de Movimiento en Ticket Térmico 80mm */
+  body.document-printing #areaImpresionOficial .doc-movimiento-ticket {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace, sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    color: #000000 !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+  }
+
+  /* FASE 2F-5C: Tabla de ajustes con columnas CPP (11 columnas) — compactación legible en Carta/A4/Hoja */
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table th {
+    font-size: 8.5px !important;
+    padding: 5px 4px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table td {
+    font-size: 9.5px !important;
+    padding: 5px 4px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-hoja table.doc-table th,
+  body.document-printing #areaImpresionOficial .doc-movimiento-hoja table.doc-table td {
+    font-size: 10px !important;
+    padding: 5px 6px !important;
+  }
+}
+
+/* ========================================================
+   SISTEMA DE UTILIDADES ERP CORPORATIVO & TECLADO POS
+   ======================================================== */
+
+/* Tablas Compactas de Alta Densidad para Pantallas de Mostrador */
+.table-compact th {
+  padding: 0.65rem 0.85rem !important;
+  font-size: 0.72rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  color: #64748b;
+  background-color: #f8fafc;
+}
+
+.table-compact td {
+  padding: 0.65rem 0.85rem !important;
+  font-size: 0.8125rem !important;
+}
+
+/* Alineación Numérica Tabular para Cifras Financieras */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Estilos de Teclas Físicas (Hotkeys) */
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.6875rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+  line-height: 1;
+  color: #334155;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.35rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+/* Contenedor y Animaciones de Toast Corporativo */
+#corporateToastContainer {
+  pointer-events: none;
+}
+
+.corporate-toast {
+  pointer-events: auto;
+  transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Ocultación de Elementos Administrativos en Perfil Cajero */
+body.rol-cajero .role-admin-only {
+  display: none !important;
+}
+
