@@ -1,0 +1,601 @@
+/* styles.css - Variables de tema, navegación vertical y reglas de impresión */
+
+:root {
+  /* Variables de Color Dinámicas - Sistema Soft UI Fresco, Relajante y Proactivo */
+  --color-primary: #14b8a6;        /* Teal 500 - Calma, claridad, frescura y proactividad */
+  --color-primary-hover: #0d9488;  /* Teal 600 */
+  --color-primary-light: #ccfbf1;  /* Teal 100 */
+  --color-sidebar: #ffffff;        /* Blanco limpio, luminoso y minimalista */
+  --color-sidebar-text: #1e293b;   /* Slate 800 - Textos nítidos y sin fatiga visual */
+  --color-sidebar-active: #14b8a6; /* Teal 500 */
+  --color-bg-app: #f8fafc;         /* Slate 50 - Fondo relajante ultra suave, sin fatiga visual */
+  --color-card-bg: #ffffff;
+  --color-text-main: #1e293b;       /* Slate 800 - Sin negro puro */
+  --color-btn-factura: #14b8a6;    /* Teal 500 positivo */
+  --color-btn-compra: #0ea5e9;     /* Sky 500 proactivo */
+  --color-btn-cxc: #10b981;        /* Emerald 500 */
+  --color-btn-cxp: #64748b;        /* Slate suave */
+  --color-btn-devoluciones: #06b6d4; /* Cian refrescante */
+  --color-header-bg: #ffffff;
+  --color-btn-kardex: #14b8a6;     /* Teal 500 */
+  --color-btn-fiscal: #0284c7;     /* Sky 600 */
+}
+
+body, body.bg-slate-50, body.bg-slate-100 {
+  background-color: var(--color-bg-app) !important;
+  color: var(--color-text-main) !important;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.app-main-wrapper {
+  background-color: var(--color-bg-app) !important;
+  transition: background-color 0.3s ease;
+}
+
+/* ========================================================
+   SISTEMA DE DISEÑO SOFT UI (ELEVACIÓN, TARJETAS Y BOTONES)
+   ======================================================== */
+.soft-card {
+  background-color: #ffffff;
+  border: 1px solid rgba(241, 245, 249, 0.95);
+  border-radius: 1.25rem; /* rounded-2xl */
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.05);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.soft-card:hover {
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.07);
+}
+
+.soft-card-interactive {
+  background-color: #ffffff;
+  border: 1px solid rgba(241, 245, 249, 0.95);
+  border-radius: 1.25rem;
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.05);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+
+.soft-card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px -6px rgba(15, 23, 42, 0.08);
+  border-color: rgba(20, 184, 166, 0.3);
+}
+
+/* Header dinámico con efecto cristal suave */
+header.app-header {
+  background-color: var(--color-header-bg) !important;
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.03);
+  border-bottom: 1px solid rgba(241, 245, 249, 0.9);
+}
+
+/* Modal Backdrop */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  overflow-y: auto;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.modal-overlay.hidden {
+  display: none !important;
+}
+
+/* ==========================================
+   BARRA LATERAL IZQUIERDA (VERTICAL SIDEBAR)
+   ========================================== */
+#appSidebar {
+  background-color: var(--color-sidebar, #ffffff) !important;
+  color: var(--color-sidebar-text, #1e293b) !important;
+  border-right: 1px solid rgba(226, 232, 240, 0.85) !important;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease, color 0.2s ease;
+  overflow: hidden;
+}
+
+/* Barra de desplazamiento independiente y dedicada para la navegación del Sidebar */
+#sidebarNavList {
+  overflow-y: auto !important;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+
+#sidebarNavList::-webkit-scrollbar {
+  width: 4px;
+}
+#sidebarNavList::-webkit-scrollbar-track {
+  background: transparent;
+}
+#sidebarNavList::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.25);
+  border-radius: 9999px;
+}
+#sidebarNavList::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.5);
+}
+
+/* Botones de navegación en Sidebar */
+.sidebar-nav-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-sidebar-text, #475569);
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  text-align: left;
+  border: 1px solid transparent;
+}
+
+.sidebar-nav-btn:hover {
+  background-color: rgba(15, 23, 42, 0.04);
+  color: #0f172a;
+  transform: translateX(2px);
+}
+
+.sidebar-nav-btn.active-nav {
+  background-color: var(--color-sidebar-active, var(--color-primary, #14b8a6)) !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow: 0 4px 14px -2px rgba(20, 184, 166, 0.35);
+  border-color: transparent;
+}
+
+.sidebar-nav-btn.active-nav i {
+  color: #ffffff !important;
+}
+
+.sidebar-nav-btn i {
+  width: 1.35rem;
+  text-align: center;
+  font-size: 0.95rem;
+  transition: color 0.15s ease-in-out;
+}
+
+/* Clases dinámicas de botones configurables */
+.btn-theme-primary {
+  background-color: var(--color-primary) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-primary:hover {
+  background-color: var(--color-primary-hover) !important;
+  filter: brightness(0.95);
+}
+
+.btn-theme-factura {
+  background-color: var(--color-btn-factura) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-factura:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-compra {
+  background-color: var(--color-btn-compra) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-compra:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-cxc {
+  background-color: var(--color-btn-cxc) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-cxc:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-cxp {
+  background-color: var(--color-btn-cxp) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-cxp:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-devoluciones {
+  background-color: var(--color-btn-devoluciones) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-devoluciones:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-kardex {
+  background-color: var(--color-btn-kardex) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-kardex:hover {
+  filter: brightness(0.9);
+}
+
+.btn-theme-fiscal {
+  background-color: var(--color-btn-fiscal) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease-in-out;
+}
+.btn-theme-fiscal:hover {
+  filter: brightness(0.9);
+}
+
+/* Ocultar barra de desplazamiento */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Scrollbars Globales */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Animaciones sutiles */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+main > section:not(.hidden) {
+  animation: fadeIn 0.18s ease-out forwards;
+}
+
+/* ========================================================
+   REGLAS SOFT UI: ENTRADAS, BOTONES Y TABLAS
+   ======================================================== */
+/* Inputs y selects con foco suave y elegante usando el color primario */
+input:not([type="checkbox"]):not([type="radio"]):focus, 
+select:focus, 
+textarea:focus {
+  outline: none !important;
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.18) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+/* Botones con transiciones ultra-suaves */
+button, .btn-theme-primary, .btn-theme-factura, .btn-theme-compra, .btn-theme-cxc, .btn-theme-cxp, .btn-theme-devoluciones, .btn-theme-kardex, .btn-theme-fiscal {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Tablas con cabeceras suaves y filas con hover relajante */
+table th {
+  color: #475569 !important;
+  font-weight: 600 !important;
+}
+tbody tr {
+  transition: background-color 0.15s ease-in-out;
+}
+tbody tr:hover {
+  background-color: rgba(248, 250, 252, 0.85);
+}
+
+/* Estilos de Ticket / Factura */
+.ticket-container {
+  font-family: 'Courier New', Courier, monospace, system-ui;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+}
+
+/* Color pickers estéticos */
+input[type="color"] {
+  -webkit-appearance: none;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  padding: 2px;
+  cursor: pointer;
+  background-color: #ffffff;
+  height: 2.5rem;
+}
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 0.35rem;
+}
+
+/* ========================================================
+   OPTIMIZACIONES PARA TELÉFONOS MÓVILES (SMARTPHONES)
+   ======================================================== */
+
+/* Barra de Navegación Inferior para Teléfonos */
+.mobile-bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3.75rem;
+  background-color: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 35;
+  box-shadow: 0 -4px 15px rgba(0, 0, 0, 0.05);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.mobile-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.25rem 0.4rem;
+  transition: all 0.15s ease;
+  min-width: 3.25rem;
+  touch-action: manipulation;
+  border-radius: 0.5rem;
+}
+
+.mobile-nav-item i {
+  font-size: 1.15rem;
+  margin-bottom: 0.15rem;
+  transition: transform 0.15s ease;
+}
+
+.mobile-nav-item.active {
+  color: var(--color-primary) !important;
+  font-weight: 700;
+}
+
+.mobile-nav-item.active i {
+  transform: translateY(-1px);
+}
+
+.mobile-nav-item:active {
+  transform: scale(0.95);
+}
+
+/* Envoltorio con scroll táctil suave para tablas en móvil */
+.table-responsive-wrapper,
+.overflow-x-auto {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch !important;
+  scrollbar-width: thin;
+}
+
+/* ========================================================
+   ESTRUCTURA Y RESPONSIVIDAD PARA DISPOSITIVOS MÓVILES (< 768px)
+   ======================================================== */
+@media screen and (max-width: 767.98px) {
+  html, body {
+    width: 100% !important;
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+  }
+
+  body {
+    display: block !important; /* Desactiva el flex horizontal que comprimía la pantalla en smartphones */
+    position: relative !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* El menú lateral en móviles es fijo, fuera del flujo y oculto a la izquierda */
+  #appSidebar {
+    position: fixed !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    z-index: 50 !important;
+    width: 280px !important;
+    max-width: 82vw !important;
+    min-width: 0 !important;
+    height: 100% !important;
+    max-height: 100vh !important;
+    flex-shrink: 0 !important;
+    transform: translateX(-100%);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    box-shadow: 0 0 35px rgba(0, 0, 0, 0.5) !important;
+  }
+
+  /* Al presionar el botón de hamburguesa en móvil */
+  #appSidebar.translate-x-0 {
+    transform: translateX(0) !important;
+  }
+
+  /* El contenedor principal ocupa el 100% del ancho del teléfono */
+  .app-main-wrapper {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow-x: hidden !important;
+  }
+
+  /* Header ocupa el 100% del ancho sin cortes */
+  header.app-header {
+    width: 100% !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+  }
+
+  /* Dejar espacio inferior para la barra móvil flotante */
+  main {
+    width: 100% !important;
+    max-width: 100vw !important;
+    padding-bottom: 5.5rem !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Evitar auto-zoom molesto en Safari iOS / Chrome Android */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+
+  /* Modales a pantalla completa o adaptables con scroll táctil */
+  .modal-overlay > div {
+    max-height: 92vh !important;
+    width: 96% !important;
+    margin: auto !important;
+    padding: 1rem !important;
+  }
+
+  /* Botones de acción táctiles cómodos */
+  button, .btn {
+    touch-action: manipulation;
+  }
+}
+
+/* ========================================================
+   ESTRUCTURA PARA PANTALLAS GRANDES Y ESCRITORIO (>= 768px)
+   ======================================================== */
+@media screen and (min-width: 768px) {
+  body {
+    display: flex !important;
+    flex-direction: row !important;
+  }
+
+  #appSidebar {
+    position: sticky !important;
+    top: 0 !important;
+    height: 100vh !important;
+    width: 16rem !important;
+    min-width: 16rem !important;
+    flex-shrink: 0 !important;
+    transform: none !important;
+    box-shadow: none !important;
+    z-index: 40 !important;
+  }
+
+  .app-main-wrapper {
+    flex: 1 1 0% !important;
+    min-width: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+}
+
+/* ========================================================
+   REGLAS DE IMPRESIÓN PROFESIONAL (@media print)
+   ======================================================== */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  aside, #appSidebar, header, nav, .no-print, button, input, select, textarea {
+    display: none !important;
+  }
+
+  .modal-overlay {
+    position: static !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+  }
+
+  .modal-overlay > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  #printAreaFactura,
+  #printAreaDevolucion {
+    display: block !important;
+    border: none !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 10px !important;
+    font-size: 11px !important;
+  }
+
+  #printAreaFactura *,
+  #printAreaDevolucion * {
+    color: #000000 !important;
+  }
+
+  #view-reportes:not(.hidden) {
+    display: block !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #modalVistaPreliminarReporte {
+    display: block !important;
+    position: static !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #modalVistaPreliminarReporte > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #hojaReporteImprimible {
+    display: block !important;
+    border: none !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  #hojaReporteImprimible table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  #hojaReporteImprimible th,
+  #hojaReporteImprimible td {
+    padding: 6px 8px !important;
+  }
+}
