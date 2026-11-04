@@ -37,29 +37,29 @@ body, body.bg-slate-50, body.bg-slate-100 {
    ======================================================== */
 .soft-card {
   background-color: #ffffff;
-  border: 1px solid rgba(241, 245, 249, 0.95);
-  border-radius: 1.25rem; /* rounded-2xl */
-  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.05);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  border-radius: 1rem; /* rounded-xl equilibrado para ERP */
+  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.04);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .soft-card:hover {
-  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.07);
+  box-shadow: 0 8px 22px -4px rgba(15, 23, 42, 0.07);
 }
 
 .soft-card-interactive {
   background-color: #ffffff;
-  border: 1px solid rgba(241, 245, 249, 0.95);
-  border-radius: 1.25rem;
-  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.05);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  border-radius: 1rem;
+  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.04);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
 }
 
 .soft-card-interactive:hover {
   transform: translateY(-2px);
-  box-shadow: 0 12px 28px -6px rgba(15, 23, 42, 0.08);
-  border-color: rgba(20, 184, 166, 0.3);
+  box-shadow: 0 10px 24px -4px rgba(15, 23, 42, 0.08);
+  border-color: rgba(20, 184, 166, 0.4);
 }
 
 /* Header dinámico con efecto cristal suave */
@@ -1202,4 +1202,80 @@ input[type="color"]::-webkit-color-swatch {
     max-width: 80mm !important;
     margin: 0 auto !important;
   }
+
+  /* FASE 2F-5C: Tabla de ajustes con columnas CPP (11 columnas) — compactación legible en Carta/A4/Hoja */
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table th {
+    font-size: 8.5px !important;
+    padding: 5px 4px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-sheet table.doc-table td {
+    font-size: 9.5px !important;
+    padding: 5px 4px !important;
+  }
+
+  body.document-printing #areaImpresionOficial .doc-movimiento-hoja table.doc-table th,
+  body.document-printing #areaImpresionOficial .doc-movimiento-hoja table.doc-table td {
+    font-size: 10px !important;
+    padding: 5px 6px !important;
+  }
 }
+
+/* ========================================================
+   SISTEMA DE UTILIDADES ERP CORPORATIVO & TECLADO POS
+   ======================================================== */
+
+/* Tablas Compactas de Alta Densidad para Pantallas de Mostrador */
+.table-compact th {
+  padding: 0.65rem 0.85rem !important;
+  font-size: 0.72rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  color: #64748b;
+  background-color: #f8fafc;
+}
+
+.table-compact td {
+  padding: 0.65rem 0.85rem !important;
+  font-size: 0.8125rem !important;
+}
+
+/* Alineación Numérica Tabular para Cifras Financieras */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Estilos de Teclas Físicas (Hotkeys) */
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.6875rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+  line-height: 1;
+  color: #334155;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.35rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+/* Contenedor y Animaciones de Toast Corporativo */
+#corporateToastContainer {
+  pointer-events: none;
+}
+
+.corporate-toast {
+  pointer-events: auto;
+  transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Ocultación de Elementos Administrativos en Perfil Cajero */
+body.rol-cajero .role-admin-only {
+  display: none !important;
+}
+

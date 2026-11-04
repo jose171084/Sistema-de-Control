@@ -224,6 +224,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadProveedores();
   await loadDashboard();
   await loadDatabaseStatus();
+  initRolUsuario();
 
   // Fecha por defecto en compras (hoy)
   const today = new Date().toISOString().split('T')[0];
@@ -790,6 +791,13 @@ function navigate(viewName) {
     populatePosSelectors();
     renderPosCatalog();
     renderPosCart();
+    setTimeout(() => {
+      const search = document.getElementById('posSearchProduct');
+      if (search) {
+        search.focus();
+        search.select();
+      }
+    }, 150);
   }
   if (viewName === 'devoluciones') {
     initDevolucionesView();
@@ -1174,7 +1182,7 @@ async function loadDatabaseStatus() {
     // Banner superior si está en la nube efímera
     const alertBanner = document.getElementById('cloudEphemeralAlert');
     if (alertBanner) {
-      if (isCloudEphemeral) {
+      if (isCloudEphemeral && sessionStorage.getItem('dismissCloudAlert') !== '1') {
         alertBanner.classList.remove('hidden');
       } else {
         alertBanner.classList.add('hidden');
@@ -1997,6 +2005,7 @@ async function saveProducto(e) {
       await loadProductos();
       await loadDashboard();
   await loadDatabaseStatus();
+  initRolUsuario();
 
       // Si se creó desde Compras, poblar y auto-seleccionar el nuevo ítem
       if (AppState.productoModalOrigen === 'compras' || AppState.currentView === 'compras') {
@@ -2036,6 +2045,7 @@ async function deleteProducto(id) {
       await loadProductos();
       await loadDashboard();
   await loadDatabaseStatus();
+  initRolUsuario();
     } else {
       const err = await res.json();
       alert('Error: ' + (err.error || 'No se pudo eliminar'));
@@ -2357,7 +2367,11 @@ function addPosItem(productoId) {
   if (prod.tipo === 'producto') {
     const currentCant = existing ? existing.cantidad : 0;
     if (currentCant + 1 > prod.stock) {
-      alert(`Existencias insuficientes para '${prod.nombre}'. Disponibles: ${prod.stock}`);
+      if (typeof showToast === 'function') {
+        showToast(`Existencias insuficientes para '${prod.nombre}'. Disponibles: ${prod.stock}`, 'warning');
+      } else {
+        alert(`Existencias insuficientes para '${prod.nombre}'. Disponibles: ${prod.stock}`);
+      }
       return;
     }
   }
@@ -2810,6 +2824,7 @@ async function procesarFactura(tipoVentaForzado = null) {
       await loadProductos();
       await loadDashboard();
   await loadDatabaseStatus();
+  initRolUsuario();
       if (AppState.currentView === 'cxc') await loadCxc();
       await verFacturaEmitida(data.id);
     } else {
@@ -4213,6 +4228,7 @@ async function procesarDevolucionConfirm() {
     await loadProductos();
     await loadDashboard();
   await loadDatabaseStatus();
+  initRolUsuario();
     await loadFacturasParaDevolucion();
     if (AppState.devolucionFacturaSeleccionada?.tipo_venta === 'credito') {
       await loadCxc();
@@ -4905,6 +4921,7 @@ async function guardarCompra() {
       await loadProductos();
       await loadDashboard();
   await loadDatabaseStatus();
+  initRolUsuario();
       if (AppState.currentView === 'cxp') loadCxp();
       toggleHistorialCompras();
     } else {
@@ -6778,6 +6795,7 @@ async function guardarDirectoCXP(e) {
       await loadCxp();
       await loadDashboard();
   await loadDatabaseStatus();
+  initRolUsuario();
     } else {
       const err = await res.json();
       alert('Error: ' + (err.error || 'No se pudo guardar la cuenta'));
@@ -6962,6 +6980,7 @@ Efecto: ${efecto.toUpperCase()} saldo por $${montoUsd.toFixed(2)} USD (${data.mo
       }
       await loadDashboard();
   await loadDatabaseStatus();
+  initRolUsuario();
     } else {
       const err = await res.json();
       alert('Error: ' + (err.error || 'No se pudo guardar la nota de ajuste'));
@@ -9656,19 +9675,324 @@ function formatFecha(str) {
 
 // ========================================================
 // MÓDULO DE AJUSTES FORMALES DE INVENTARIO (FASE 2C)
+// FASE 2F-5C: TAXONOMÍA CANÓNICA + PREVISUALIZACIÓN CPP + IDEMPOTENCIA
+// El backend (procesar_ajuste_inventario_cpp) es la autoridad matemática y de integridad.
+// Todas las validaciones y cálculos de esta sección son exclusivamente de UX.
 // ========================================================
 
-function openAjusteModal(tipo = 'CARGO') {
+const AJUSTE_SUBTIPOS_UI = {
+  CARGO: [
+    {
+      value: 'CARGO_SOBRANTE_CONTEO',
+      label: 'Sobrante de Conteo',
+      tituloDoc: 'AJUSTE — SOBRANTE DE CONTEO',
+      descripcion: 'Diferencia positiva detectada en conteo físico. Se valorará al CPP vigente.',
+      modoCosto: 'CPP_INVARIANTE',
+      advertencia: ''
+    },
+    {
+      value: 'CARGO_HALLAZGO_CON_SOPORTE',
+      label: 'Hallazgo con Soporte',
+      tituloDoc: 'AJUSTE — HALLAZGO CON SOPORTE',
+      descripcion: 'Mercancía encontrada con documento de respaldo. Ingresa a su costo documentado y recalcula el CPP por promedio ponderado.',
+      modoCosto: 'PONDERADO',
+      advertencia: ''
+    },
+    {
+      value: 'CARGO_TASACION_MANUAL',
+      label: 'Tasación Manual',
+      tituloDoc: 'AJUSTE — TASACIÓN MANUAL',
+      descripcion: 'Entrada valorada mediante tasación técnica documentada y autorizada.',
+      modoCosto: 'PONDERADO',
+      advertencia: 'Este ajuste modifica el CPP mediante valoración ponderada y requiere autorización.'
+    }
+  ],
+  DESCARGO: [
+    { value: 'DESCARGO_MERMA', label: 'Merma', tituloDoc: 'DESCARGO — MERMA', descripcion: 'Pérdida operativa de producto. Se valora al CPP vigente; el CPP no cambia.', modoCosto: 'CPP_SALIDA', advertencia: '' },
+    { value: 'DESCARGO_VENCIMIENTO', label: 'Vencimiento', tituloDoc: 'DESCARGO — VENCIMIENTO', descripcion: 'Producto vencido retirado del inventario. Se valora al CPP vigente; el CPP no cambia.', modoCosto: 'CPP_SALIDA', advertencia: '' },
+    { value: 'DESCARGO_ROTURA', label: 'Rotura / Daño', tituloDoc: 'DESCARGO — ROTURA', descripcion: 'Producto dañado o roto. Se valora al CPP vigente; el CPP no cambia.', modoCosto: 'CPP_SALIDA', advertencia: '' },
+    { value: 'DESCARGO_USO_INTERNO', label: 'Uso Interno', tituloDoc: 'DESCARGO — USO INTERNO', descripcion: 'Consumo interno de la empresa. Se valora al CPP vigente; el CPP no cambia.', modoCosto: 'CPP_SALIDA', advertencia: '' },
+    { value: 'DESCARGO_PERDIDA_NO_EXPLICADA', label: 'Pérdida no Explicada', tituloDoc: 'DESCARGO — PÉRDIDA NO EXPLICADA', descripcion: 'Faltante sin causa determinada. Se valora al CPP vigente; el CPP no cambia.', modoCosto: 'CPP_SALIDA', advertencia: '' }
+  ]
+};
+
+// Alias legados NO ambiguos (compatibilidad con payloads/registros previos). 'regularizacion' y 'ajuste_manual' se excluyen deliberadamente.
+const AJUSTE_ALIAS_LEGADOS_UI = {
+  sobrante: 'CARGO_SOBRANTE_CONTEO',
+  merma: 'DESCARGO_MERMA',
+  vencimiento: 'DESCARGO_VENCIMIENTO',
+  rotura: 'DESCARGO_ROTURA',
+  uso_interno: 'DESCARGO_USO_INTERNO',
+  perdida_no_explicada: 'DESCARGO_PERDIDA_NO_EXPLICADA'
+};
+const AJUSTE_MOTIVOS_AMBIGUOS_UI = ['regularizacion', 'ajuste_manual'];
+
+const MSG_CONFIRMACION_ANULACION_AJUSTE = 'La anulación directa solo es posible si este ajuste permanece en el tope de la secuencia de inventario. Si existen movimientos posteriores, el sistema bloqueará la anulación y deberá utilizarse un contra-ajuste.';
+const MSG_ANULACION_BLOQUEADA_AJUSTE = 'Este ajuste tiene movimientos posteriores y no puede anularse directamente. Debe realizarse un contra-ajuste para conservar la integridad histórica.';
+
+// Contra-ajuste: el backend (FASE 2F-5B) soporta 'ajuste_referencia_id' sobre el MISMO endpoint POST /api/inventario/ajustes.
+// No existe (ni se inventa) un endpoint específico de contra-ajuste. La UI solo pre-llena el formulario; el usuario confirma manualmente.
+const CONTRA_AJUSTE_FLUJO_BACKEND = {
+  disponible: true,
+  endpoint: '/api/inventario/ajustes',
+  campoReferencia: 'ajuste_referencia_id'
+};
+
+function getSubtiposAjusteUI(tipo) {
+  const t = String(tipo || '').toUpperCase();
+  return (AJUSTE_SUBTIPOS_UI[t] || []).slice();
+}
+
+function obtenerConfigSubtipoAjuste(subtipo) {
+  const s = String(subtipo || '').trim().toUpperCase();
+  return AJUSTE_SUBTIPOS_UI.CARGO.concat(AJUSTE_SUBTIPOS_UI.DESCARGO).find(x => x.value === s) || null;
+}
+
+function resolverSubtipoAjusteUI(tipo, valor) {
+  const t = String(tipo || '').toUpperCase();
+  const raw = String(valor || '').trim();
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  if (AJUSTE_MOTIVOS_AMBIGUOS_UI.includes(lower)) return null;
+  const upper = raw.toUpperCase();
+  const lista = getSubtiposAjusteUI(t);
+  if (lista.some(x => x.value === upper)) return upper;
+  const alias = AJUSTE_ALIAS_LEGADOS_UI[lower];
+  if (alias && lista.some(x => x.value === alias)) return alias;
+  return null;
+}
+
+function getCamposRequeridosSubtipo(subtipo) {
+  const s = String(subtipo || '').toUpperCase();
+  return {
+    documento: s === 'CARGO_HALLAZGO_CON_SOPORTE' || s === 'CARGO_TASACION_MANUAL',
+    costoEditable: s === 'CARGO_HALLAZGO_CON_SOPORTE' || s === 'CARGO_TASACION_MANUAL',
+    motivoTexto: s === 'CARGO_HALLAZGO_CON_SOPORTE',
+    justificacion: s === 'CARGO_TASACION_MANUAL',
+    autorizado: s === 'CARGO_TASACION_MANUAL'
+  };
+}
+
+function generarIdempotencyKeyAjuste() {
+  try {
+    if (typeof crypto !== 'undefined' && crypto && typeof crypto.randomUUID === 'function') {
+      return `AJ-UI-${crypto.randomUUID()}`;
+    }
+  } catch (e) {}
+  const rnd = Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12);
+  return `AJ-UI-${Date.now().toString(36)}-${rnd}`;
+}
+
+function redondear4Ajuste(x) {
+  const n = Number(x);
+  if (!isFinite(n)) return NaN;
+  const sign = n < 0 ? -1 : 1;
+  return sign * Math.round((Math.abs(n) + Number.EPSILON) * 10000) / 10000;
+}
+
+// Previsualización matemática (NO es confirmación contable; el backend recalcula con Decimal ROUND_HALF_UP)
+function calcularPreviewAjusteCPP(params) {
+  const p = params || {};
+  const cfg = obtenerConfigSubtipoAjuste(p.subtipo);
+  const stock = Number(p.stock);
+  const cppRaw = (p.cpp === null || p.cpp === undefined || p.cpp === '') ? NaN : Number(p.cpp);
+  const cant = Number(p.cantidad);
+  const costo = (p.costo === null || p.costo === undefined || p.costo === '') ? NaN : Number(p.costo);
+  const base = { valido: false, incompleto: false, stockActual: stock, cppActual: cppRaw, cantidad: cant, costoEntrada: null, stockResultante: null, cppResultante: null, valorMovimiento: null, mensaje: '' };
+
+  if (!cfg) return Object.assign(base, { incompleto: true, mensaje: 'Seleccione un subtipo canónico.' });
+  if (!isFinite(stock)) return Object.assign(base, { incompleto: true, mensaje: 'Seleccione un producto.' });
+  if (!isFinite(cant) || cant <= 0) return Object.assign(base, { incompleto: true, mensaje: 'Ingrese una cantidad mayor a 0.' });
+  if (stock < 0) return Object.assign(base, { mensaje: 'Stock actual negativo: el backend bloqueará la operación.' });
+
+  if (cfg.modoCosto === 'CPP_INVARIANTE') {
+    if (!isFinite(cppRaw) || cppRaw <= 0) return Object.assign(base, { mensaje: 'CPP vigente inválido (≤ 0 o nulo): el backend bloqueará el sobrante.' });
+    const cpp = redondear4Ajuste(cppRaw);
+    return Object.assign(base, { valido: true, costoEntrada: cpp, stockResultante: redondear4Ajuste(stock + cant), cppResultante: cpp, valorMovimiento: redondear4Ajuste(cant * cpp) });
+  }
+
+  if (cfg.modoCosto === 'CPP_SALIDA') {
+    if (!isFinite(cppRaw) || cppRaw <= 0) return Object.assign(base, { mensaje: 'CPP vigente inválido (≤ 0 o nulo): el backend bloqueará el descargo.' });
+    if (cant > stock) return Object.assign(base, { mensaje: `Cantidad (${cant}) supera el stock disponible (${stock}).` });
+    const cpp = redondear4Ajuste(cppRaw);
+    return Object.assign(base, { valido: true, costoEntrada: cpp, stockResultante: redondear4Ajuste(stock - cant), cppResultante: cpp, valorMovimiento: redondear4Ajuste(cant * cpp) });
+  }
+
+  // PONDERADO (Hallazgo con soporte / Tasación manual)
+  if (!isFinite(costo) || costo <= 0) return Object.assign(base, { incompleto: true, mensaje: 'Ingrese el costo de entrada (> 0) para calcular el CPP resultante.' });
+  const costoR = redondear4Ajuste(costo);
+  const stockNuevo = redondear4Ajuste(stock + cant);
+  let cppNuevo;
+  if (stock === 0) {
+    cppNuevo = costoR;
+  } else {
+    if (!isFinite(cppRaw) || cppRaw <= 0) return Object.assign(base, { mensaje: 'CPP vigente inválido con stock positivo: el backend bloqueará la operación.' });
+    cppNuevo = redondear4Ajuste(((stock * cppRaw) + (cant * costoR)) / (stock + cant));
+  }
+  return Object.assign(base, { valido: true, costoEntrada: costoR, stockResultante: stockNuevo, cppResultante: cppNuevo, valorMovimiento: redondear4Ajuste(cant * costoR) });
+}
+
+function validarFormularioAjuste(form) {
+  const f = form || {};
+  const errores = [];
+  const tipo = String(f.tipo || '').toUpperCase();
+  if (tipo !== 'CARGO' && tipo !== 'DESCARGO') errores.push('Tipo de ajuste inválido (CARGO / DESCARGO).');
+
+  const subtipo = resolverSubtipoAjusteUI(tipo, f.subtipoRaw);
+  if (!subtipo) {
+    const lower = String(f.subtipoRaw || '').trim().toLowerCase();
+    if (AJUSTE_MOTIVOS_AMBIGUOS_UI.includes(lower)) {
+      errores.push(`SUBTIPO_AJUSTE_OBLIGATORIO: '${lower}' es ambiguo y no está permitido. Seleccione un subtipo canónico explícito.`);
+    } else {
+      errores.push('SUBTIPO_AJUSTE_OBLIGATORIO: Debe seleccionar explícitamente un subtipo canónico de ajuste.');
+    }
+  }
+  const req = getCamposRequeridosSubtipo(subtipo);
+  const lineas = Array.isArray(f.lineas) ? f.lineas : [];
+  if (lineas.length === 0) errores.push('Debe incluir al menos un producto en el ajuste.');
+
+  const vistos = new Set();
+  lineas.forEach((l, idx) => {
+    const n = idx + 1;
+    const pid = parseInt(l.producto_id, 10);
+    if (!pid) { errores.push(`Línea ${n}: el producto es obligatorio.`); return; }
+    if (vistos.has(pid)) errores.push(`Línea ${n}: SKU duplicado en el mismo ajuste (${l.codigo || 'ID ' + pid}). Consolide la cantidad en una sola línea.`);
+    vistos.add(pid);
+
+    const cantStr = String(l.cantidad === undefined || l.cantidad === null ? '' : l.cantidad).trim();
+    const cant = Number(cantStr);
+    if (cantStr === '' || !isFinite(cant)) errores.push(`Línea ${n}: la cantidad debe ser un número válido.`);
+    else if (cant <= 0) errores.push(`Línea ${n}: la cantidad debe ser mayor a 0.`);
+    else if (tipo === 'DESCARGO') {
+      const stk = Number(l.stock);
+      if (isFinite(stk) && cant > stk) errores.push(`Línea ${n}: la cantidad (${cant}) supera el stock disponible (${stk}).`);
+    }
+    if (req.costoEditable) {
+      const c = Number(l.costo_unitario);
+      if (l.costo_unitario === '' || l.costo_unitario === null || l.costo_unitario === undefined || !isFinite(c) || c <= 0) {
+        errores.push(`Línea ${n}: el costo unitario de entrada debe ser mayor a 0.`);
+      }
+    }
+  });
+
+  if (req.documento && !String(f.documentoReferencia || '').trim()) errores.push('El documento de referencia es obligatorio para este subtipo.');
+  if (req.motivoTexto && !String(f.motivoTexto || f.observaciones || '').trim()) errores.push('El motivo / observación es obligatorio para Hallazgo con Soporte.');
+  if (req.justificacion && !String(f.justificacion || '').trim()) errores.push('La justificación técnica es obligatoria para Tasación Manual.');
+  if (req.autorizado && !String(f.autorizadoPor || '').trim()) errores.push('El campo "Autorizado por" es obligatorio para Tasación Manual.');
+  return errores;
+}
+
+// Construye el payload compatible EXCLUSIVAMENTE con el contrato real de POST /api/inventario/ajustes
+function construirPayloadAjuste(form, idempotencyKey) {
+  const f = form || {};
+  const tipo = String(f.tipo || '').toUpperCase();
+  const subtipo = resolverSubtipoAjusteUI(tipo, f.subtipoRaw);
+  const cfg = obtenerConfigSubtipoAjuste(subtipo);
+  const req = getCamposRequeridosSubtipo(subtipo);
+  const motivo = String(f.motivoTexto || '').trim() || String(f.observaciones || '').trim() || (cfg ? cfg.label : '');
+  const payload = {
+    tipo_ajuste: tipo,
+    subtipo_ajuste: subtipo,
+    motivo,
+    fecha: f.fecha || undefined,
+    observaciones: String(f.observaciones || '').trim(),
+    idempotency_key: idempotencyKey,
+    detalles: (f.lineas || []).map(l => {
+      const d = { producto_id: parseInt(l.producto_id, 10), cantidad: Number(l.cantidad) };
+      if (req.costoEditable) d.costo_unitario = Number(l.costo_unitario);
+      return d;
+    })
+  };
+  const doc = String(f.documentoReferencia || '').trim();
+  if (doc) payload.documento_referencia = doc;
+  if (req.autorizado || String(f.autorizadoPor || '').trim()) {
+    const aut = String(f.autorizadoPor || '').trim();
+    if (aut) payload.autorizado_por = aut;
+  }
+  if (req.justificacion || String(f.justificacion || '').trim()) {
+    const j = String(f.justificacion || '').trim();
+    if (j) payload.justificacion_tecnica = j;
+  }
+  const refId = parseInt(f.ajusteReferenciaId, 10);
+  if (refId) payload.ajuste_referencia_id = refId;
+  if (!payload.fecha) delete payload.fecha;
+  return payload;
+}
+
+function _valorElementoAjuste(id) {
+  const el = document.getElementById(id);
+  return el && el.value !== undefined && el.value !== null ? String(el.value) : '';
+}
+
+function leerFormularioAjusteDOM() {
+  const rows = document.querySelectorAll('.ajuste-item-row') || [];
+  const lineas = [];
+  for (const row of rows) {
+    const select = row.querySelector ? row.querySelector('.ajuste-prod-select') : null;
+    const cantInput = row.querySelector ? row.querySelector('.ajuste-cant-input') : null;
+    const costoInput = row.querySelector ? row.querySelector('.ajuste-costo-input') : null;
+    if (!select) continue;
+    const opt = select.selectedOptions && select.selectedOptions[0];
+    const ga = (attr) => (opt && typeof opt.getAttribute === 'function') ? opt.getAttribute(attr) : null;
+    lineas.push({
+      producto_id: select.value,
+      cantidad: cantInput ? cantInput.value : '',
+      costo_unitario: costoInput ? costoInput.value : '',
+      stock: ga('data-stock'),
+      cpp: ga('data-costo-cpp'),
+      codigo: ga('data-codigo') || ''
+    });
+  }
+  return {
+    tipo: _valorElementoAjuste('ajusteTipo'),
+    subtipoRaw: _valorElementoAjuste('ajusteMotivo'),
+    fecha: _valorElementoAjuste('ajusteFecha'),
+    observaciones: _valorElementoAjuste('ajusteObservaciones'),
+    motivoTexto: _valorElementoAjuste('ajusteMotivoTexto'),
+    documentoReferencia: _valorElementoAjuste('ajusteDocumentoReferencia'),
+    autorizadoPor: _valorElementoAjuste('ajusteAutorizadoPor'),
+    justificacion: _valorElementoAjuste('ajusteJustificacion'),
+    ajusteReferenciaId: _valorElementoAjuste('ajusteReferenciaId'),
+    lineas
+  };
+}
+
+function openAjusteModal(tipo = 'CARGO', opciones = {}) {
   const modal = document.getElementById('modalAjusteInventario');
   if (!modal) return;
   document.getElementById('ajusteTipo').value = tipo;
+  ['ajusteMotivoTexto', 'ajusteDocumentoReferencia', 'ajusteAutorizadoPor', 'ajusteJustificacion', 'ajusteReferenciaId', 'ajusteObservaciones'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   onAjusteTipoChange();
   const hoy = new Date().toISOString().split('T')[0];
   document.getElementById('ajusteFecha').value = hoy;
-  document.getElementById('ajusteObservaciones').value = '';
+
+  // Nueva operación => nueva clave de idempotencia (nunca se reutiliza entre ajustes distintos)
+  AppState.ajusteIdempotencyKey = generarIdempotencyKeyAjuste();
+  AppState.ajusteGuardando = false;
+
+  const banner = document.getElementById('ajusteContraAjusteBanner');
   const itemsContainer = document.getElementById('ajusteItemsList');
   itemsContainer.innerHTML = '';
-  addAjusteRow();
+
+  const ref = opciones && opciones.contraAjusteDe;
+  if (ref && ref.id) {
+    document.getElementById('ajusteReferenciaId').value = String(ref.id);
+    const mt = document.getElementById('ajusteMotivoTexto');
+    if (mt) mt.value = `Contra-ajuste del ajuste N° ${ref.numero_ajuste || ref.id}`;
+    if (banner) {
+      banner.innerHTML = `<i class="fa-solid fa-link mr-1"></i> Contra-ajuste referenciado al ajuste <strong>${escapeHtml(ref.numero_ajuste || ('#' + ref.id))}</strong> (ajuste_referencia_id = ${escapeHtml(ref.id)}). Seleccione el subtipo canónico y revise cantidades antes de confirmar.`;
+      banner.classList.remove('hidden');
+    }
+    (ref.detalles || []).forEach(d => addAjusteRow(d.producto_id, d.cantidad));
+    if (!(ref.detalles || []).length) addAjusteRow();
+  } else {
+    if (banner) { banner.innerHTML = ''; banner.classList.add('hidden'); }
+    addAjusteRow();
+  }
+  renderErroresAjuste([]);
   modal.classList.remove('hidden');
 }
 
@@ -9682,33 +10006,56 @@ function onAjusteTipoChange() {
   const motivoSelect = document.getElementById('ajusteMotivo');
   motivoSelect.innerHTML = '';
 
-  const motivosCargo = [
-    { value: 'sobrante', label: 'Sobrante físico en almacén' },
-    { value: 'regularizacion', label: 'Regularización de inventario físico' },
-    { value: 'ajuste_manual', label: 'Ajuste manual justificado' }
-  ];
+  const ph = document.createElement('option');
+  ph.value = '';
+  ph.textContent = 'Seleccione el subtipo canónico...';
+  motivoSelect.appendChild(ph);
 
-  const motivosDescargo = [
-    { value: 'merma', label: 'Merma operativa' },
-    { value: 'vencimiento', label: 'Vencimiento de producto' },
-    { value: 'rotura', label: 'Rotura o daño físico' },
-    { value: 'uso_interno', label: 'Consumo o uso interno' },
-    { value: 'perdida_no_explicada', label: 'Pérdida no explicada / Faltante' },
-    { value: 'ajuste_manual', label: 'Ajuste manual justificado' }
-  ];
-
-  const lista = (tipo === 'CARGO') ? motivosCargo : motivosDescargo;
-  lista.forEach(m => {
+  getSubtiposAjusteUI(tipo).forEach(m => {
     const opt = document.createElement('option');
     opt.value = m.value;
-    opt.textContent = m.label;
+    opt.textContent = `${m.label} — ${m.value}`;
     motivoSelect.appendChild(opt);
   });
+  motivoSelect.value = '';
+  onAjusteSubtipoChange();
+}
+
+function onAjusteSubtipoChange() {
+  const tipo = _valorElementoAjuste('ajusteTipo');
+  const subtipo = resolverSubtipoAjusteUI(tipo, _valorElementoAjuste('ajusteMotivo'));
+  const cfg = obtenerConfigSubtipoAjuste(subtipo);
+  const req = getCamposRequeridosSubtipo(subtipo);
+
+  const desc = document.getElementById('ajusteSubtipoDescripcion');
+  if (desc) {
+    desc.innerHTML = cfg
+      ? `<span class="font-mono font-bold text-slate-700">${escapeHtml(cfg.value)}</span> — ${escapeHtml(cfg.descripcion)}`
+      : 'Seleccione explícitamente un subtipo. No se admiten motivos genéricos ("regularización" / "ajuste manual").';
+  }
+  const adv = document.getElementById('ajusteSubtipoAdvertencia');
+  if (adv) {
+    if (cfg && cfg.advertencia) { adv.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-1"></i>${escapeHtml(cfg.advertencia)}`; adv.classList.remove('hidden'); }
+    else { adv.innerHTML = ''; adv.classList.add('hidden'); }
+  }
+  const toggle = (wrapId, inputId, visible) => {
+    const w = document.getElementById(wrapId);
+    const i = document.getElementById(inputId);
+    if (w) { if (visible) w.classList.remove('hidden'); else w.classList.add('hidden'); }
+    if (i) i.required = !!visible;
+  };
+  toggle('ajusteCampoDocumentoWrap', 'ajusteDocumentoReferencia', req.documento);
+  toggle('ajusteCampoJustificacionWrap', 'ajusteJustificacion', req.justificacion);
+  toggle('ajusteCampoAutorizadoWrap', 'ajusteAutorizadoPor', req.autorizado);
+  const mt = document.getElementById('ajusteMotivoTexto');
+  if (mt) mt.required = !!req.motivoTexto;
+  const mtLbl = document.getElementById('ajusteMotivoTextoLabel');
+  if (mtLbl) mtLbl.textContent = req.motivoTexto ? 'Motivo / Observación *' : 'Motivo / Observación';
 
   recalcularAjusteTotales();
 }
 
-function addAjusteRow(selectedProdId = null) {
+function addAjusteRow(selectedProdId = null, cantidadInicial = null) {
   const container = document.getElementById('ajusteItemsList');
   if (!container) return;
 
@@ -9719,39 +10066,43 @@ function addAjusteRow(selectedProdId = null) {
   }
 
   const row = document.createElement('div');
-  row.className = 'ajuste-item-row bg-slate-50 p-3 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-12 gap-2 items-center';
+  row.className = 'ajuste-item-row bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2';
 
   let optionsHtml = '<option value="">Seleccionar producto...</option>';
   prods.forEach(p => {
     const isSel = selectedProdId && p.id === parseInt(selectedProdId) ? 'selected' : '';
-    const cppVal = (p.costo_cpp !== undefined && p.costo_cpp !== null && p.costo_cpp > 0) ? p.costo_cpp : p.costo;
-    optionsHtml += `<option value="${p.id}" data-stock="${p.stock}" data-costo="${cppVal}" data-costo-cpp="${p.costo_cpp || ''}" ${isSel}>${p.codigo || 'SIN-COD'} - ${p.nombre} (Stock: ${p.stock})</option>`;
+    const cppAttr = (p.costo_cpp !== undefined && p.costo_cpp !== null) ? p.costo_cpp : '';
+    optionsHtml += `<option value="${p.id}" data-stock="${p.stock}" data-costo-cpp="${cppAttr}" data-costo-reposicion="${p.costo !== undefined && p.costo !== null ? p.costo : ''}" data-codigo="${escapeHtml(p.codigo || 'SIN-COD')}" data-nombre="${escapeHtml(p.nombre || '')}" ${isSel}>${escapeHtml(p.codigo || 'SIN-COD')} - ${escapeHtml(p.nombre)} (Stock: ${p.stock})</option>`;
   });
 
   row.innerHTML = `
-    <div class="sm:col-span-5">
-      <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Producto</label>
-      <select class="ajuste-prod-select w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs focus:outline-none focus:border-amber-500" onchange="recalcularAjusteTotales()">
-        ${optionsHtml}
-      </select>
+    <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+      <div class="sm:col-span-5">
+        <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Producto *</label>
+        <select class="ajuste-prod-select w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs focus:outline-none focus:border-amber-500" onchange="recalcularAjusteTotales()">
+          ${optionsHtml}
+        </select>
+      </div>
+      <div class="sm:col-span-2">
+        <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Cantidad *</label>
+        <input type="number" step="any" min="0.0001" value="${cantidadInicial !== null && cantidadInicial !== undefined ? Number(cantidadInicial) : 1}" class="ajuste-cant-input w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs text-center font-bold focus:outline-none focus:border-amber-500" oninput="recalcularAjusteTotales()">
+      </div>
+      <div class="sm:col-span-2">
+        <label class="ajuste-costo-label block text-[11px] font-semibold text-slate-600 mb-0.5">CPP vigente</label>
+        <input type="number" step="any" min="0" value="" class="ajuste-costo-input w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs text-right focus:outline-none focus:border-amber-500" oninput="recalcularAjusteTotales()">
+      </div>
+      <div class="sm:col-span-2 text-center">
+        <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Stock Final</label>
+        <span class="ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold bg-slate-200 text-slate-700">--</span>
+      </div>
+      <div class="sm:col-span-1 flex items-center justify-center">
+        <button type="button" onclick="removeAjusteRow(this)" class="text-rose-500 hover:text-rose-700 p-1 rounded transition" title="Eliminar producto">
+          <i class="fa-solid fa-trash-can text-sm"></i>
+        </button>
+      </div>
     </div>
-    <div class="sm:col-span-2">
-      <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Cantidad</label>
-      <input type="number" step="any" min="0.01" value="1" class="ajuste-cant-input w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs text-center font-bold focus:outline-none focus:border-amber-500" oninput="recalcularAjusteTotales()">
-    </div>
-    <div class="sm:col-span-2">
-      <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Costo ($)</label>
-      <input type="number" step="any" min="0" value="0.00" class="ajuste-costo-input w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs text-right focus:outline-none focus:border-amber-500" oninput="recalcularAjusteTotales()">
-    </div>
-    <div class="sm:col-span-2 text-center">
-      <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Stock Final</label>
-      <span class="ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold bg-slate-200 text-slate-700">--</span>
-    </div>
-    <div class="sm:col-span-1 flex items-center justify-center pt-3 sm:pt-0">
-      <button type="button" onclick="removeAjusteRow(this)" class="text-rose-500 hover:text-rose-700 p-1 rounded transition" title="Eliminar producto">
-        <i class="fa-solid fa-trash-can text-sm"></i>
-      </button>
-    </div>
+    <div class="ajuste-prod-info text-[11px] text-slate-500"></div>
+    <div class="ajuste-row-preview text-[11px]"></div>
   `;
 
   container.appendChild(row);
@@ -9766,87 +10117,137 @@ function removeAjusteRow(btn) {
   }
 }
 
+function _fmt4(n) { return (n === null || n === undefined || !isFinite(Number(n))) ? 'N/D' : Number(n).toFixed(4); }
+
 function recalcularAjusteTotales() {
-  const tipo = document.getElementById('ajusteTipo').value;
+  const tipo = _valorElementoAjuste('ajusteTipo');
+  const subtipo = resolverSubtipoAjusteUI(tipo, _valorElementoAjuste('ajusteMotivo'));
+  const cfg = obtenerConfigSubtipoAjuste(subtipo);
+  const req = getCamposRequeridosSubtipo(subtipo);
   const rows = document.querySelectorAll('.ajuste-item-row');
   let totalItems = 0;
   let totalCantidad = 0;
   let totalCosto = 0;
+  const previews = [];
+  const conteoSku = {};
 
   rows.forEach(row => {
+    if (!row.querySelector) return;
+    const select = row.querySelector('.ajuste-prod-select');
+    if (select && select.value) conteoSku[select.value] = (conteoSku[select.value] || 0) + 1;
+  });
+
+  rows.forEach(row => {
+    if (!row.querySelector) return;
     const select = row.querySelector('.ajuste-prod-select');
     const cantInput = row.querySelector('.ajuste-cant-input');
     const costoInput = row.querySelector('.ajuste-costo-input');
+    const costoLabel = row.querySelector('.ajuste-costo-label');
     const badge = row.querySelector('.ajuste-result-badge');
-
+    const info = row.querySelector('.ajuste-prod-info');
+    const rowPrev = row.querySelector('.ajuste-row-preview');
     if (!select || !cantInput || !badge) return;
 
-    const opt = select.selectedOptions[0];
+    // Configurar campo de costo según subtipo (nunca editable en sobrante ni descargos)
+    if (costoInput) {
+      if (req.costoEditable) {
+        costoInput.readOnly = false;
+        costoInput.classList.remove('bg-slate-100', 'text-slate-500', 'cursor-not-allowed');
+        costoInput.title = 'Costo unitario de entrada documentado (> 0). Recalcula el CPP por promedio ponderado.';
+        if (costoLabel) costoLabel.textContent = 'Costo de entrada ($) *';
+      } else {
+        costoInput.readOnly = true;
+        costoInput.classList.add('bg-slate-100', 'text-slate-500', 'cursor-not-allowed');
+        costoInput.title = (tipo === 'DESCARGO') ? 'Descargo valorado al CPP vigente (no editable)' : 'Sobrante valorado al CPP vigente (no editable)';
+        if (costoLabel) costoLabel.textContent = 'CPP vigente (solo lectura)';
+      }
+    }
+
+    const opt = select.selectedOptions && select.selectedOptions[0];
     if (!opt || !opt.value) {
       badge.textContent = '--';
       badge.className = 'ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold bg-slate-200 text-slate-700';
+      if (info) info.innerHTML = '';
+      if (rowPrev) rowPrev.innerHTML = '';
+      if (costoInput && !req.costoEditable) costoInput.value = '';
       return;
     }
 
-        const currentStock = parseFloat(opt.getAttribute('data-stock') || 0);
-    const prodCosto = parseFloat(opt.getAttribute('data-costo') || 0);
+    const stock = parseFloat(opt.getAttribute('data-stock') || 0);
+    const cppAttr = opt.getAttribute('data-costo-cpp');
+    const cpp = (cppAttr === null || cppAttr === '' || cppAttr === undefined) ? null : parseFloat(cppAttr);
+    const repAttr = opt.getAttribute('data-costo-reposicion');
+    const costoRep = (repAttr === null || repAttr === '' || repAttr === undefined) ? null : parseFloat(repAttr);
+    const codigo = opt.getAttribute('data-codigo') || '';
+    const nombre = opt.getAttribute('data-nombre') || '';
 
-    // Ajuste CPP (FASE 2F-5B): Proteger integridad contable de costos
-    const motivoSelect = document.getElementById('ajusteMotivo');
-    const motivoVal = motivoSelect ? motivoSelect.value : '';
-    const esSobrante = motivoVal === 'sobrante' || motivoVal === 'regularizacion';
+    if (costoInput && !req.costoEditable) costoInput.value = (cpp !== null && isFinite(cpp)) ? cpp.toFixed(4) : '';
 
-    if (tipo === 'DESCARGO' || esSobrante) {
-      if (costoInput) {
-        costoInput.value = prodCosto.toFixed(4);
-        costoInput.readOnly = true;
-        costoInput.classList.add('bg-slate-100', 'text-slate-500', 'cursor-not-allowed');
-        costoInput.title = (tipo === 'DESCARGO') ? 'El costo de descargo se fija rigurosamente al CPP vigente' : 'Sobrante fisico: costo fijado al CPP vigente (invariante)';
-      }
-    } else {
-      if (costoInput) {
-        costoInput.readOnly = false;
-        costoInput.classList.remove('bg-slate-100', 'text-slate-500', 'cursor-not-allowed');
-        costoInput.title = 'Ingrese costo unitario de tasacion/hallazgo si aplica';
-        if (parseFloat(costoInput.value) <= 0 || costoInput.value === '') {
-          costoInput.value = prodCosto.toFixed(2);
-        }
-      }
+    if (info) {
+      info.innerHTML = `
+        <div class="flex flex-wrap gap-x-3 gap-y-1 items-center">
+          <span><strong>SKU:</strong> <span class="font-mono">${escapeHtml(codigo)}</span></span>
+          <span><strong>Producto:</strong> ${escapeHtml(nombre)}</span>
+          <span><strong>Stock actual:</strong> ${stock.toFixed(4)}</span>
+          <span class="px-1.5 py-0.5 rounded bg-teal-50 text-teal-800 border border-teal-200"><strong>CPP actual:</strong> ${_fmt4(cpp)}</span>
+          <span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200" title="Costo de catálogo/reposición: solo referencial, NO se utiliza en el cálculo del CPP"><strong>Costo de reposición (referencial):</strong> ${costoRep !== null && isFinite(costoRep) ? costoRep.toFixed(4) : 'N/D'}</span>
+          <span><strong>Tipo:</strong> ${escapeHtml(tipo || '—')}${cfg ? ' / ' + escapeHtml(cfg.value) : ''}</span>
+          <span><strong>Cantidad:</strong> ${escapeHtml(cantInput.value || '0')}</span>
+          ${conteoSku[select.value] > 1 ? '<span class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">SKU duplicado en este ajuste</span>' : ''}
+        </div>`;
     }
 
-    const cant = parseFloat(cantInput.value) || 0;
-    const costo = parseFloat(costoInput.value) || prodCosto;
+    const prev = calcularPreviewAjusteCPP({ subtipo, stock, cpp, cantidad: cantInput.value, costo: costoInput ? costoInput.value : '' });
 
-    let nuevoStock = currentStock;
-    if (tipo === 'CARGO') {
-      nuevoStock = currentStock + cant;
-      badge.textContent = `${nuevoStock.toFixed(2)}`;
-      badge.className = 'ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold bg-emerald-100 text-emerald-800';
-    } else {
-      nuevoStock = currentStock - cant;
-      if (nuevoStock < 0) {
-        badge.textContent = `Insuficiente (${currentStock})`;
-        badge.className = 'ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold bg-rose-100 text-rose-800 animate-pulse';
-      } else {
-        badge.textContent = `${nuevoStock.toFixed(2)}`;
-        badge.className = 'ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold bg-amber-100 text-amber-800';
-      }
-    }
-
-    if (cant > 0) {
+    if (prev.valido) {
+      badge.textContent = prev.stockResultante.toFixed(2);
+      badge.className = `ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold ${tipo === 'CARGO' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`;
       totalItems += 1;
-      totalCantidad += cant;
-      totalCosto += (cant * costo);
+      totalCantidad += Number(prev.cantidad);
+      totalCosto += Number(prev.valorMovimiento);
+      previews.push({ codigo, nombre, prev });
+    } else {
+      badge.textContent = prev.incompleto ? '--' : 'Bloqueado';
+      badge.className = `ajuste-result-badge inline-block px-2 py-1 rounded text-xs font-bold ${prev.incompleto ? 'bg-slate-200 text-slate-700' : 'bg-rose-100 text-rose-800'}`;
+    }
+
+    if (rowPrev) {
+      rowPrev.innerHTML = prev.valido
+        ? `<div class="grid grid-cols-2 sm:grid-cols-6 gap-1 bg-white border border-dashed border-slate-300 rounded-lg p-2 font-mono">
+             <div><span class="block text-[9px] uppercase text-slate-400">Stock actual</span>${prev.stockActual.toFixed(4)}</div>
+             <div><span class="block text-[9px] uppercase text-slate-400">Cantidad</span>${Number(prev.cantidad).toFixed(4)}</div>
+             <div><span class="block text-[9px] uppercase text-slate-400">Stock resultante</span>${prev.stockResultante.toFixed(4)}</div>
+             <div><span class="block text-[9px] uppercase text-slate-400">CPP actual</span>${_fmt4(prev.cppActual)}</div>
+             <div><span class="block text-[9px] uppercase text-slate-400">${cfg && cfg.modoCosto === 'PONDERADO' ? 'Costo de entrada' : 'Costo aplicado (CPP)'}</span>${_fmt4(prev.costoEntrada)}</div>
+             <div><span class="block text-[9px] uppercase text-slate-400">CPP resultante</span><strong>${_fmt4(prev.cppResultante)}</strong></div>
+           </div>`
+        : `<div class="${prev.incompleto ? 'text-slate-400' : 'text-rose-600 font-semibold'}">${escapeHtml(prev.mensaje)}</div>`;
     }
   });
 
   const sumItemsEl = document.getElementById('ajusteSummaryItems');
   const sumCantEl = document.getElementById('ajusteSummaryCantidad');
   const sumCostoEl = document.getElementById('ajusteSummaryCosto');
-
   if (sumItemsEl) sumItemsEl.textContent = totalItems;
   if (sumCantEl) sumCantEl.textContent = totalCantidad.toFixed(2);
   if (sumCostoEl) sumCostoEl.textContent = totalCosto.toFixed(2);
+
+  const prevBox = document.getElementById('ajustePreviewCPP');
+  if (prevBox) {
+    prevBox.innerHTML = previews.length
+      ? `<div class="font-bold text-[11px] uppercase tracking-wide text-slate-600 mb-1"><i class="fa-solid fa-eye mr-1"></i>Previsualización — no constituye confirmación contable</div>
+         <div class="text-[10px] text-slate-500 mb-1">Cálculo estimado en pantalla. El backend recalcula con precisión Decimal (4 decimales, ROUND_HALF_UP) y es la única autoridad.</div>
+         ${previews.map(x => `<div class="font-mono text-[11px]">[${escapeHtml(x.codigo)}] CPP ${_fmt4(x.prev.cppActual)} &rarr; ${_fmt4(x.prev.cppResultante)} &bull; Stock ${x.prev.stockActual.toFixed(4)} &rarr; ${x.prev.stockResultante.toFixed(4)}</div>`).join('')}`
+      : '';
+  }
+}
+
+function renderErroresAjuste(errores) {
+  const box = document.getElementById('ajusteErroresValidacion');
+  if (!box) return;
+  if (!errores || errores.length === 0) { box.innerHTML = ''; box.classList.add('hidden'); return; }
+  box.innerHTML = `<ul class="list-disc pl-4 space-y-0.5">${errores.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>`;
+  box.classList.remove('hidden');
 }
 
 // Helper seguro de notificaciones Toast (no bloqueante)
@@ -9881,61 +10282,35 @@ function showToast(message, type = 'info') {
 window.showToast = showToast;
 
 async function saveAjuste(e) {
-  e.preventDefault();
-  const tipo = document.getElementById('ajusteTipo').value;
-  const motivo = document.getElementById('ajusteMotivo').value;
-  const fecha = document.getElementById('ajusteFecha').value;
-  const observaciones = document.getElementById('ajusteObservaciones').value.trim();
+  if (e && typeof e.preventDefault === 'function') e.preventDefault();
 
-  const rows = document.querySelectorAll('.ajuste-item-row');
-  const detalles = [];
-
-  for (let row of rows) {
-    const select = row.querySelector('.ajuste-prod-select');
-    const cantInput = row.querySelector('.ajuste-cant-input');
-    const costoInput = row.querySelector('.ajuste-costo-input');
-
-    if (!select || !select.value) continue;
-
-    const producto_id = parseInt(select.value);
-    const cantidad = parseFloat(cantInput.value) || 0;
-    const costo_unitario = parseFloat(costoInput.value) || 0;
-
-    if (cantidad <= 0) {
-      showToast('Cada producto debe tener una cantidad mayor a 0', 'error');
-      return;
-    }
-
-    const currentStock = parseFloat(select.selectedOptions[0].getAttribute('data-stock') || 0);
-    if (tipo === 'DESCARGO' && cantidad > currentStock) {
-      showToast(`Stock insuficiente para el producto seleccionado (Disponible: ${currentStock}, Solicitado: ${cantidad})`, 'error');
-      return;
-    }
-
-    detalles.push({
-      producto_id,
-      cantidad,
-      costo_unitario
-    });
-  }
-
-  if (detalles.length === 0) {
-    showToast('Debe seleccionar al menos un producto válido para el ajuste', 'error');
+  // Bloqueo de doble envío mientras una operación está en curso
+  if (AppState.ajusteGuardando) {
+    showToast('Ya hay un ajuste en proceso de guardado. Espere la respuesta del servidor.', 'info');
     return;
   }
 
-  const payload = {
-    tipo_ajuste: tipo,
-    motivo,
-    fecha,
-    observaciones,
-    detalles
-  };
+  const form = leerFormularioAjusteDOM();
+  const errores = validarFormularioAjuste(form);
+  if (errores.length > 0) {
+    renderErroresAjuste(errores);
+    showToast(errores[0], 'error');
+    return;
+  }
+  renderErroresAjuste([]);
+
+  // Clave de idempotencia de ESTA operación (se conserva ante reintentos del mismo formulario)
+  if (!AppState.ajusteIdempotencyKey) {
+    AppState.ajusteIdempotencyKey = generarIdempotencyKeyAjuste();
+  }
+  const payload = construirPayloadAjuste(form, AppState.ajusteIdempotencyKey);
 
   const btnGuardar = document.getElementById('btnGuardarAjuste');
+  AppState.ajusteGuardando = true;
+  AppState.ajusteUIEstado = 'guardando';
   if (btnGuardar) {
     btnGuardar.disabled = true;
-    btnGuardar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando...';
+    btnGuardar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Guardando...';
   }
 
   try {
@@ -9947,19 +10322,23 @@ async function saveAjuste(e) {
 
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.error || 'Error al procesar el ajuste de inventario');
+      throw new Error((data && data.error) || 'Error al procesar el ajuste de inventario');
     }
 
-    // 1. Extraer ID del ajuste devuelto por el backend
     const ajusteId = data.id || data.ajuste_id;
+    AppState.ajusteUIEstado = 'guardado';
 
-    // 2. Notificación visual al usuario
-    showToast(`Ajuste ${data.numero_ajuste || ''} aplicado con éxito`, 'success');
+    if (data.duplicado_ignorado) {
+      showToast(`La operación ya fue procesada previamente (Ajuste ${data.numero_ajuste || ''}). No se creó un duplicado.`, 'info');
+    } else {
+      showToast(`Ajuste ${data.numero_ajuste || ''} aplicado con éxito`, 'success');
+    }
 
-    // 3. Cerrar el modal del formulario
+    // La clave queda consumida: un nuevo ajuste nunca la reutilizará
+    AppState.ajusteIdempotencyKey = null;
+
     closeAjusteModal();
 
-    // 4. PRIORIDAD ABSOLUTA: Abrir inmediatamente el comprobante oficial
     if (ajusteId) {
       try {
         await abrirComprobanteAjuste(ajusteId);
@@ -9968,7 +10347,6 @@ async function saveAjuste(e) {
       }
     }
 
-    // 5. Refrescar historial de ajustes de forma segura (sin bloquear el comprobante)
     try {
       if (typeof cargarHistorialAjustes === 'function') {
         await cargarHistorialAjustes();
@@ -9977,11 +10355,10 @@ async function saveAjuste(e) {
       console.warn('No se pudo refrescar el historial de ajustes:', histErr);
     }
 
-    // 6. Actualizar inventario/catálogo y dashboard según el flujo existente
     try {
       await loadProductos();
       await loadDashboard();
-  await loadDatabaseStatus();
+      await loadDatabaseStatus();
       if (typeof loadReporteKardex === 'function' && AppState.currentView === 'reportes') {
         loadReporteKardex();
       }
@@ -9990,8 +10367,11 @@ async function saveAjuste(e) {
     }
 
   } catch (err) {
+    AppState.ajusteUIEstado = 'error';
     showToast(err.message || 'Error al procesar el ajuste', 'error');
+    renderErroresAjuste([err.message || 'Error al procesar el ajuste']);
   } finally {
+    AppState.ajusteGuardando = false;
     if (btnGuardar) {
       btnGuardar.disabled = false;
       btnGuardar.innerHTML = '<i class="fa-solid fa-check"></i> <span>Confirmar y Aplicar Ajuste</span>';
@@ -10038,6 +10418,8 @@ function cambiarSubtabProductos(subtab) {
 
 function formatMotivoAjuste(motivo) {
   if (!motivo) return 'General';
+  const cfgCanon = obtenerConfigSubtipoAjuste(motivo);
+  if (cfgCanon) return cfgCanon.label;
   const m = String(motivo).toLowerCase().trim();
   if (m === 'sobrante') return 'Sobrante físico';
   if (m === 'regularizacion') return 'Regularización';
@@ -10082,6 +10464,8 @@ async function cargarHistorialAjustes() {
     if (tableContainer) tableContainer.classList.remove('hidden');
 
     filtrarHistorialAjustes();
+    // Enriquecimiento asíncrono de CPP anterior/nuevo por línea mediante el endpoint existente GET /api/inventario/ajustes/:id
+    enriquecerHistorialAjustesCPP(AppState.historialAjustes).catch(e => console.warn('Enriquecimiento CPP de historial no disponible:', e));
   } catch (err) {
     console.error('Error cargando historial de ajustes:', err);
     if (loading) loading.classList.add('hidden');
@@ -10111,12 +10495,23 @@ function filtrarHistorialAjustes() {
 
   const filtrados = totalOriginal.filter(a => {
     if (fTipo && String(a.tipo_ajuste || '').toUpperCase() !== fTipo) return false;
-    if (fMotivo && String(a.motivo || '').toLowerCase() !== fMotivo) return false;
+    if (fMotivo) {
+      const sub = String(a.subtipo_ajuste || '').toLowerCase();
+      if (fMotivo === '__legacy__') {
+        if (sub) return false;
+      } else if (fMotivo === '__anulado__') {
+        if (String(a.estado || 'activo').toLowerCase() !== 'anulado') return false;
+      } else if (sub !== fMotivo && String(a.motivo || '').toLowerCase() !== fMotivo) {
+        return false;
+      }
+    }
     if (q) {
       const num = String(a.numero_ajuste || '').toLowerCase();
       const mot = String(a.motivo || '').toLowerCase();
       const obs = String(a.observaciones || '').toLowerCase();
-      if (!num.includes(q) && !mot.includes(q) && !obs.includes(q)) return false;
+      const doc = String(a.documento_referencia || '').toLowerCase();
+      const sub = String(a.subtipo_ajuste || '').toLowerCase();
+      if (!num.includes(q) && !mot.includes(q) && !obs.includes(q) && !doc.includes(q) && !sub.includes(q)) return false;
     }
     return true;
   });
@@ -10134,6 +10529,41 @@ function limpiarFiltrosAjustes() {
   filtrarHistorialAjustes();
 }
 
+function _resumenCPPHistorialAjuste(a) {
+  const cache = AppState.ajustesDetalleCache || {};
+  const det = cache[a.id];
+  if (!det) return '<span class="text-slate-300" title="Cargando detalle CPP...">…</span>';
+  const lineas = det.detalles || [];
+  const conCpp = lineas.filter(d => d.cpp_anterior !== null && d.cpp_anterior !== undefined && d.cpp_nuevo !== null && d.cpp_nuevo !== undefined);
+  if (lineas.length === 0) return '<span class="text-slate-400">—</span>';
+  if (conCpp.length === 0) return '<span class="text-[10px] text-slate-400" title="Registro anterior a FASE 2F-5B: no almacenó instantánea CPP">N/D (histórico)</span>';
+  if (lineas.length === 1) {
+    const d = conCpp[0];
+    return `<span class="font-mono text-[11px]">${Number(d.cpp_anterior).toFixed(4)} &rarr; <strong>${Number(d.cpp_nuevo).toFixed(4)}</strong></span>`;
+  }
+  return `<span class="text-[10px] text-slate-500">${lineas.length} líneas &bull; ver detalle</span>`;
+}
+
+async function enriquecerHistorialAjustesCPP(lista, limite = 60) {
+  AppState.ajustesDetalleCache = AppState.ajustesDetalleCache || {};
+  const pendientes = (lista || []).filter(a => a && a.id && !AppState.ajustesDetalleCache[a.id]).slice(0, limite);
+  if (pendientes.length === 0) return 0;
+  let cargados = 0;
+  for (const a of pendientes) {
+    try {
+      const res = await fetch(`/api/inventario/ajustes/${a.id}`);
+      if (res && res.ok) {
+        AppState.ajustesDetalleCache[a.id] = await res.json();
+        cargados++;
+      }
+    } catch (e) { /* tolerante: el historial sigue operativo sin CPP */ }
+  }
+  if (cargados > 0 && AppState.productoSubtab === 'ajustes') {
+    try { filtrarHistorialAjustes(); } catch (e) {}
+  }
+  return cargados;
+}
+
 function renderHistorialAjustes(lista) {
   const tbody = document.getElementById('ajustesTableBody');
   const tableContainer = document.getElementById('ajustesTableContainer');
@@ -10147,7 +10577,7 @@ function renderHistorialAjustes(lista) {
   if (!lista || lista.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="9" class="text-center py-10 text-slate-400">
+        <td colspan="11" class="text-center py-10 text-slate-400">
           <i class="fa-solid fa-filter-circle-xmark text-2xl block mb-2 text-slate-300"></i>
           No se encontraron ajustes de inventario que coincidan con los filtros aplicados.
         </td>
@@ -10161,16 +10591,29 @@ function renderHistorialAjustes(lista) {
     const tipoBadge = esCargo
       ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-2xs"><i class="fa-solid fa-arrow-down text-[10px]"></i> CARGO</span>`
       : `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200 shadow-2xs"><i class="fa-solid fa-arrow-up text-[10px]"></i> DESCARGO</span>`;
+    const subtipoTxt = a.subtipo_ajuste
+      ? `<div class="font-mono text-[9px] text-slate-500 mt-1">${escapeHtml(a.subtipo_ajuste)}</div>`
+      : `<div class="text-[9px] text-slate-400 mt-1" title="Registro previo a la taxonomía canónica">Sin subtipo (histórico)</div>`;
 
     const motivoLabel = formatMotivoAjuste(a.motivo);
     const fechaTexto = typeof formatFecha === 'function' ? formatFecha(a.fecha) : escapeHtml(a.fecha || '—');
     const totalItems = parseInt(a.total_items || 0);
     const totalCantidad = parseFloat(a.total_cantidad || 0).toFixed(2);
     const totalCosto = parseFloat(a.total_costo || 0).toFixed(2);
+    const anulado = String(a.estado || 'activo').toLowerCase() === 'anulado';
+
+    const estadoBadge = anulado
+      ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200"><i class="fa-solid fa-ban text-[9px]"></i> ANULADO</span>`
+      : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"><i class="fa-solid fa-circle-check text-[9px]"></i> ACTIVO</span>`;
+
+    const btnAnular = anulado ? '' : `
+          <button type="button" onclick="anularAjusteInventarioUI(${a.id})" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-2.5 py-1.5 rounded-xl text-xs font-bold transition inline-flex items-center gap-1" title="Anular ajuste (solo si permanece en el tope de la secuencia)">
+            <i class="fa-solid fa-ban"></i> Anular
+          </button>`;
 
     return `
-      <tr class="hover:bg-slate-50/80 transition-colors">
-        <td class="py-3 px-4 font-mono font-bold text-teal-800 whitespace-nowrap">
+      <tr class="hover:bg-slate-50/80 transition-colors ${anulado ? 'opacity-70' : ''}">
+        <td class="py-3 px-4 font-mono font-bold text-teal-800 whitespace-nowrap ${anulado ? 'line-through' : ''}">
           ${escapeHtml(a.numero_ajuste || '—')}
         </td>
         <td class="py-3 px-4 text-xs text-slate-600 whitespace-nowrap">
@@ -10178,9 +10621,11 @@ function renderHistorialAjustes(lista) {
         </td>
         <td class="py-3 px-4 text-center whitespace-nowrap">
           ${tipoBadge}
+          ${subtipoTxt}
         </td>
         <td class="py-3 px-4 text-xs text-slate-800 font-medium">
           <div>${escapeHtml(motivoLabel)}</div>
+          ${a.documento_referencia ? `<div class="text-[11px] text-indigo-700"><i class="fa-solid fa-paperclip text-[9px]"></i> ${escapeHtml(a.documento_referencia)}</div>` : ''}
           ${a.observaciones ? `<div class="text-[11px] text-slate-400 truncate max-w-xs" title="${escapeHtml(a.observaciones)}">${escapeHtml(a.observaciones)}</div>` : ''}
         </td>
         <td class="py-3 px-4 text-center font-mono text-xs font-semibold text-slate-700 whitespace-nowrap">
@@ -10189,18 +10634,22 @@ function renderHistorialAjustes(lista) {
         <td class="py-3 px-4 text-right font-mono text-xs font-bold text-slate-800 whitespace-nowrap">
           ${totalCantidad}
         </td>
+        <td class="py-3 px-4 text-center whitespace-nowrap">
+          ${_resumenCPPHistorialAjuste(a)}
+        </td>
         <td class="py-3 px-4 text-right font-mono text-xs font-bold text-teal-700 whitespace-nowrap">
           $${totalCosto}
         </td>
-        <td class="py-3 px-4 text-center whitespace-nowrap">
-          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-            <i class="fa-solid fa-circle-check text-[9px]"></i> Aplicado
-          </span>
+        <td class="py-3 px-4 text-xs text-slate-600 whitespace-nowrap">
+          Usuario #${escapeHtml(a.usuario_id || 1)}
         </td>
-        <td class="py-3 px-4 text-right whitespace-nowrap">
+        <td class="py-3 px-4 text-center whitespace-nowrap">
+          ${estadoBadge}
+        </td>
+        <td class="py-3 px-4 text-right whitespace-nowrap space-x-1">
           <button type="button" onclick="abrirComprobanteAjuste(${a.id})" class="bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 px-3 py-1.5 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 shadow-2xs hover:shadow-xs">
             <i class="fa-solid fa-print"></i> Ver / Reimprimir
-          </button>
+          </button>${btnAnular}
         </td>
       </tr>
     `;
@@ -11672,6 +12121,7 @@ const DocumentTemplates = {
     const titulo = getTituloMovimientoInventario(data);
     const sentido = (data.sentido || (data.tipo_ajuste === 'CARGO' ? 'ENTRADA' : 'SALIDA')).toUpperCase();
     const detalles = data.detalles || data.productos || [];
+    const meta = construirMetaDocumentoAjuste(data);
 
     // 1. Encabezado de la Empresa
     let headerHtml = `
@@ -11680,11 +12130,14 @@ const DocumentTemplates = {
         ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 10px;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
         ${cfg.telefono ? `<p style="margin: 2px 0; font-size: 10px;">Tel: ${esc(cfg.telefono)}</p>` : ''}
         ${cfg.direccion ? `<p style="margin: 2px 0; font-size: 9px; color: #333;">${esc(cfg.direccion)}</p>` : ''}
+        ${meta.esCanonico ? `<p style="margin: 3px 0 0 0; font-size: 8px; font-weight: 800; letter-spacing: 0.4px;">COMPROBANTE OFICIAL DE AJUSTE DE INVENTARIO</p>` : ''}
         <div style="margin: 4px 0; border: 1px solid #000; padding: 3px 6px; font-weight: 900; font-size: 10px; background: #f0fdfa;">
           ${esc(titulo)}
         </div>
         <p style="margin: 2px 0 0 0; font-size: 11px; font-weight: 900; font-family: monospace;">N° ${esc(data.numero_ajuste || 'AJU')}</p>
         <p style="margin: 2px 0 0 0; font-size: 9px; color: #444;">Fecha: ${typeof formatFecha === 'function' ? formatFecha(data.fecha) : esc(data.fecha)}</p>
+        ${meta.estadoTxt ? `<p style="margin: 2px 0 0 0; font-size: 10px; font-weight: 900; ${meta.anulado ? 'color: #b91c1c;' : ''}">ESTADO: ${esc(meta.estadoTxt)}</p>` : ''}
+        ${meta.anulado ? `<div class="doc-anulada-banner" style="margin-top: 4px; border: 2px solid #b91c1c; color: #b91c1c; font-weight: 900; font-size: 11px; padding: 2px;">DOCUMENTO ANULADO</div>` : ''}
       </div>
     `;
 
@@ -11703,6 +12156,21 @@ const DocumentTemplates = {
           <span style="color: #444;">Responsable:</span>
           <span>${esc(data.usuario_nombre || `Usuario #${data.usuario_id || 1}`)}</span>
         </div>
+        ${meta.subtipo ? `
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Subtipo:</span>
+          <strong style="font-family: monospace; font-size: 9px;">${esc(meta.subtipo)}</strong>
+        </div>` : ''}
+        ${meta.documentoReferencia ? `
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Doc. Referencia:</span>
+          <strong>${esc(meta.documentoReferencia)}</strong>
+        </div>` : ''}
+        ${meta.autorizadoPor ? `
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Autorizado por:</span>
+          <strong>${esc(meta.autorizadoPor)}</strong>
+        </div>` : ''}
         <div style="border-top: 1px dotted #ccc; margin-top: 3px; padding-top: 3px;">
           <span style="color: #444; display: block; font-weight: bold;">Motivo Declarado:</span>
           <span style="font-style: italic; color: #222;">${esc(data.motivo || '-')}</span>
@@ -11737,7 +12205,8 @@ const DocumentTemplates = {
         <tr style="border-bottom: 1px dotted #e5e7eb;">
           <td style="padding: 3px 0; vertical-align: top;">
             <div style="font-weight: bold;">[${codigo}] ${nombre}</div>
-            <div style="font-size: 8px; color: #555;">Stock: ${stkAnt} &rarr; ${stkNue}</div>
+            <div style="font-size: 8px; color: #555;">Stock: ${stkAnt} &rarr; ${stkNue} &bull; Und: ${esc(meta.unidadTxt)}</div>
+            <div style="font-size: 8px; color: #555;">CPP: ${_cppDocTxt(d.cpp_anterior)} &rarr; ${_cppDocTxt(d.cpp_nuevo)}</div>
           </td>
           <td style="padding: 3px 2px; text-align: center; vertical-align: top; font-weight: bold;">${cant.toFixed(2)}</td>
           <td style="padding: 3px 0; text-align: right; vertical-align: top;">$${cu.toFixed(2)}</td>
@@ -11773,10 +12242,21 @@ const DocumentTemplates = {
           <span style="color: #444;">Total Unidades Afectadas:</span>
           <strong>${totalUnits.toFixed(2)}</strong>
         </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: #444;">Stock Resultante:</span>
+          <strong>${esc(_stockResultanteDocTxt(detalles))}</strong>
+        </div>
         <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 900; border-top: 1px dashed #000; margin-top: 3px; padding-top: 3px; color: #0d9488;">
           <span>VALORIZACIÓN TOTAL:</span>
           <span>$${totalValuation.toFixed(2)}</span>
         </div>
+      </div>
+      <div style="font-size: 8px; color: #333; border-top: 1px dashed #000; padding-top: 3px; margin-bottom: 4px; line-height: 1.35;">
+        <strong>AUDITORÍA</strong><br>
+        Usuario: ${esc(meta.usuarioTxt)}<br>
+        Registro: ${esc(meta.registroTxt)}
+        ${meta.relacionadoTxt ? `<br>Ajuste relacionado: ${esc(meta.relacionadoTxt)}` : ''}
+        ${meta.anulado ? `<br>Anulado: ${esc(meta.fechaAnulacionTxt)}${meta.motivoAnulacion ? ' — ' + esc(meta.motivoAnulacion) : ''}` : ''}
       </div>
     `;
 
@@ -11816,7 +12296,9 @@ const DocumentTemplates = {
     const titulo = getTituloMovimientoInventario(data);
     const sentido = (data.sentido || (data.tipo_ajuste === 'CARGO' ? 'ENTRADA' : 'SALIDA')).toUpperCase();
     const isA4 = paperFormat === 'a4Portrait';
+    const isLandscape = paperFormat === 'letterLandscape' || paperFormat === 'a4Landscape';
     const detalles = data.detalles || data.productos || [];
+    const meta = construirMetaDocumentoAjuste(data);
 
     // 1. Encabezado Corporativo
     let headerHtml = `
@@ -11829,6 +12311,7 @@ const DocumentTemplates = {
         </div>
         <div style="text-align: right; max-width: 42%;">
           <div class="doc-movimiento-badge">
+            ${meta.esCanonico ? `<span style="font-size: 9px; font-weight: 700; letter-spacing: 0.5px; display: block;">COMPROBANTE OFICIAL DE AJUSTE DE INVENTARIO</span>` : ''}
             <span style="font-size: 11px; font-weight: 800; letter-spacing: 0.5px; display: block;">${esc(titulo)}</span>
             <span style="font-size: 15px; font-weight: 900; font-family: monospace;">N° ${esc(data.numero_ajuste || 'AJU')}</span>
           </div>
@@ -11836,9 +12319,11 @@ const DocumentTemplates = {
             <p style="margin: 0;"><strong>Fecha de Operación:</strong> ${typeof formatFecha === 'function' ? formatFecha(data.fecha) : esc(data.fecha)}</p>
             <p style="margin: 0;"><strong>Sentido:</strong> <span style="font-weight: 800; ${sentido === 'ENTRADA' ? 'color: #047857;' : 'color: #b91c1c;'}">${sentido}</span> &bull; <strong>Operación:</strong> ${esc(data.tipo_ajuste || 'AJUSTE')}</p>
             <p style="margin: 0;"><strong>Responsable:</strong> <span>${esc(data.usuario_nombre || `Usuario #${data.usuario_id || 1}`)}</span></p>
+            ${meta.estadoTxt ? `<p style="margin: 0;"><strong>Estado:</strong> <span style="font-weight: 900; ${meta.anulado ? 'color: #b91c1c;' : 'color: #047857;'}">${esc(meta.estadoTxt)}</span></p>` : ''}
           </div>
         </div>
       </div>
+      ${meta.anulado ? `<div class="doc-anulada-banner avoid-page-break" style="border: 2px solid #b91c1c; color: #b91c1c; text-align: center; font-weight: 900; padding: 4px; margin: 6px 0; letter-spacing: 1px;">DOCUMENTO ANULADO — ${esc(meta.fechaAnulacionTxt)}${meta.motivoAnulacion ? ' — ' + esc(meta.motivoAnulacion) : ''}</div>` : ''}
     `;
 
     // 2. Ficha de Motivo y Justificación
@@ -11847,6 +12332,9 @@ const DocumentTemplates = {
         <div>
           <span style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #64748b; display: block; margin-bottom: 2px;">Causal y Justificación Operativa</span>
           <strong style="font-size: 12px; color: #0f172a;">${esc(data.motivo || 'Ajuste formal de inventario')}</strong>
+          ${meta.subtipo ? `<p style="margin: 2px 0 0 0; font-size: 10px; color: #334155;"><strong>Subtipo:</strong> <span style="font-family: monospace;">${esc(meta.subtipo)}</span></p>` : ''}
+          ${meta.documentoReferencia ? `<p style="margin: 2px 0 0 0; font-size: 10px; color: #334155;"><strong>Documento de referencia:</strong> ${esc(meta.documentoReferencia)}</p>` : ''}
+          ${meta.autorizadoPor ? `<p style="margin: 2px 0 0 0; font-size: 10px; color: #334155;"><strong>Autorizado por:</strong> ${esc(meta.autorizadoPor)}</p>` : ''}
         </div>
         <div>
           <span style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #64748b; display: block; margin-bottom: 2px;">Observaciones / Notas de Auditoría</span>
@@ -11878,10 +12366,13 @@ const DocumentTemplates = {
           <td style="text-align: center; color: #64748b; font-family: monospace;">${num}</td>
           <td style="font-family: monospace; font-weight: 600;">${codigo}</td>
           <td><strong>${nombre}</strong>${d.motivo_detalle ? `<br><small style="color: #64748b; font-style: italic;">${esc(d.motivo_detalle)}</small>` : ''}</td>
+          <td style="text-align: center; color: #64748b;">${esc(meta.unidadTxt)}</td>
           <td style="text-align: right; font-weight: 700; font-family: monospace; ${sentido === 'ENTRADA' ? 'color: #047857;' : 'color: #b91c1c;'}">${sentido === 'ENTRADA' ? '+' : '-'}${cant.toFixed(2)}</td>
           <td style="text-align: center; font-family: monospace; color: #475569;">${stkAnt}</td>
           <td style="text-align: center; font-family: monospace; font-weight: 700; color: #0f172a;">${stkNue}</td>
+          <td style="text-align: right; font-family: monospace; color: #475569;">${_cppDocTxt(d.cpp_anterior)}</td>
           <td style="text-align: right; font-family: monospace;">$${cu.toFixed(2)}</td>
+          <td style="text-align: right; font-family: monospace; font-weight: 700;">${_cppDocTxt(d.cpp_nuevo)}</td>
           <td style="text-align: right; font-family: monospace; font-weight: 800; color: #0f766e;">$${tot.toFixed(2)}</td>
         </tr>
       `;
@@ -11891,13 +12382,16 @@ const DocumentTemplates = {
       <table class="doc-table">
         <thead>
           <tr>
-            <th style="width: 4%; text-align: center;">#</th>
-            <th style="width: 14%; text-align: left;">Código</th>
-            <th style="width: 34%; text-align: left;">Descripción del Producto</th>
-            <th style="width: 10%; text-align: right;">Cant. (${sentido === 'ENTRADA' ? '+' : '-'})</th>
-            <th style="width: 10%; text-align: center;">Stock Ant.</th>
-            <th style="width: 10%; text-align: center;">Stock Nue.</th>
-            <th style="width: 9%; text-align: right;">Costo U. ($)</th>
+            <th style="width: 3%; text-align: center;">#</th>
+            <th style="width: 10%; text-align: left;">Código</th>
+            <th style="width: 24%; text-align: left;">Descripción del Producto</th>
+            <th style="width: 5%; text-align: center;">Und.</th>
+            <th style="width: 8%; text-align: right;">Cant. (${sentido === 'ENTRADA' ? '+' : '-'})</th>
+            <th style="width: 8%; text-align: center;">Stock Ant.</th>
+            <th style="width: 8%; text-align: center;">Stock Nue.</th>
+            <th style="width: 8%; text-align: right;">CPP Ant.</th>
+            <th style="width: 9%; text-align: right;">Costo U. Aplicado ($)</th>
+            <th style="width: 8%; text-align: right;">CPP Nue.</th>
             <th style="width: 9%; text-align: right;">Valuación ($)</th>
           </tr>
         </thead>
@@ -11919,6 +12413,16 @@ const DocumentTemplates = {
               Afectación física materializada en el catálogo de productos con respaldo de saldos anteriores y resultantes.
             </p>
           </div>
+          <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 12px; font-size: 10px; color: #475569; margin-top: 6px;">
+            <span style="font-weight: 800; text-transform: uppercase; display: block; margin-bottom: 2px;">Auditoría</span>
+            <p style="margin: 0; line-height: 1.4;">
+              <strong>Usuario:</strong> ${esc(meta.usuarioTxt)}<br>
+              <strong>Fecha/Hora de registro:</strong> ${esc(meta.registroTxt)}<br>
+              <strong>Documento ID:</strong> ${esc(data.id !== undefined ? data.id : 'N/D')}
+              ${meta.relacionadoTxt ? `<br><strong>Ajuste relacionado:</strong> ${esc(meta.relacionadoTxt)}` : ''}
+              ${meta.anulado ? `<br><strong>Anulación:</strong> ${esc(meta.fechaAnulacionTxt)}${meta.motivoAnulacion ? ' — ' + esc(meta.motivoAnulacion) : ''}` : ''}
+            </p>
+          </div>
         </div>
 
         <!-- Columna Derecha: Totales Físicos y Valuación -->
@@ -11931,6 +12435,10 @@ const DocumentTemplates = {
             <div style="display: flex; justify-content: space-between; padding: 3px 0;">
               <span style="color: #475569;">Total Unidades Afectadas:</span>
               <strong style="font-family: monospace;">${totalUnits.toFixed(2)}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding: 3px 0;">
+              <span style="color: #475569;">Stock Resultante:</span>
+              <strong style="font-family: monospace;">${esc(_stockResultanteDocTxt(detalles))}</strong>
             </div>
             <div style="display: flex; justify-content: space-between; padding: 6px 0; border-top: 2px solid #0d9488; margin-top: 4px; font-size: 13px; font-weight: 900; color: #0f766e;">
               <span>VALUACIÓN TOTAL:</span>
@@ -11960,7 +12468,7 @@ const DocumentTemplates = {
     `;
 
     return `
-      <div class="doc-movimiento doc-movimiento-sheet ${isA4 ? 'doc-a4-sheet doc-a4-movimiento' : ''}">
+      <div class="doc-movimiento doc-movimiento-sheet ${isA4 ? 'doc-a4-sheet doc-a4-movimiento' : ''} ${isLandscape ? 'doc-movimiento-hoja' : ''}">
         ${headerHtml}
         ${infoCardHtml}
         ${tableHtml}
@@ -11984,6 +12492,11 @@ const DocumentTemplates = {
 // ========================================================
 function getTituloMovimientoInventario(data) {
   if (!data) return 'COMPROBANTE OFICIAL DE MOVIMIENTO DE INVENTARIO';
+  // FASE 2F-5C: Título dinámico por subtipo canónico (si existe). Registros legados conservan su título histórico.
+  const subCanon = String(data.subtipo_ajuste || data.subtipo_movimiento || '').trim().toUpperCase();
+  if (subCanon === 'ANULACION_AJUSTE') return 'REVERSIÓN — ANULACIÓN DE AJUSTE';
+  const cfgCanon = (typeof obtenerConfigSubtipoAjuste === 'function') ? obtenerConfigSubtipoAjuste(subCanon) : null;
+  if (cfgCanon) return cfgCanon.tituloDoc;
   const tipoAju = String(data.tipo_ajuste || '').trim().toLowerCase();
   const tipoMov = String(data.tipo_movimiento || '').trim().toLowerCase();
   const motivo = String(data.motivo || '').trim().toLowerCase();
@@ -12022,8 +12535,151 @@ function getTituloMovimientoInventario(data) {
 }
 
 // ========================================================
-// CONTROLADOR DE COMPROBANTE DE AJUSTE DE INVENTARIO
+// FASE 2F-5C: METADATOS DOCUMENTALES DE AJUSTE (fuente única para todos los formatos)
+// No inventa datos: lo no registrado en la base se muestra como N/D.
 // ========================================================
+function construirMetaDocumentoAjuste(data) {
+  const d = data || {};
+  const subtipo = String(d.subtipo_ajuste || '').trim().toUpperCase();
+  const esCanonico = !!(typeof obtenerConfigSubtipoAjuste === 'function' && obtenerConfigSubtipoAjuste(subtipo));
+  const estadoRaw = d.estado !== undefined && d.estado !== null ? String(d.estado).trim().toLowerCase() : '';
+  const anulado = estadoRaw === 'anulado';
+  const fmt = (f) => (f ? (typeof formatFecha === 'function' ? formatFecha(f) : String(f)) : '');
+  let relacionadoTxt = '';
+  if (d.ajuste_referencia_id) {
+    const rel = (AppState && Array.isArray(AppState.historialAjustes)) ? AppState.historialAjustes.find(x => x.id === parseInt(d.ajuste_referencia_id, 10)) : null;
+    relacionadoTxt = rel ? `${rel.numero_ajuste} (ID ${d.ajuste_referencia_id})` : `ID ${d.ajuste_referencia_id}`;
+  }
+  return {
+    esCanonico,
+    subtipo: subtipo || '',
+    estadoTxt: estadoRaw ? (anulado ? 'ANULADO' : 'ACTIVO') : '',
+    anulado,
+    documentoReferencia: d.documento_referencia || '',
+    autorizadoPor: d.autorizado_por || '',
+    usuarioTxt: d.usuario_nombre || `Usuario #${d.usuario_id || 1}`,
+    registroTxt: fmt(d.created_at || d.fecha) || 'N/D',
+    relacionadoTxt,
+    fechaAnulacionTxt: fmt(d.fecha_anulacion) || 'N/D',
+    motivoAnulacion: d.motivo_anulacion || '',
+    // El catálogo no registra unidad de medida: se informa N/D en lugar de inventar una.
+    unidadTxt: d.unidad || 'N/D'
+  };
+}
+
+function _cppDocTxt(v) {
+  if (v === null || v === undefined || v === '' || !isFinite(Number(v))) return 'N/D';
+  return '$' + Number(v).toFixed(4);
+}
+
+function _stockResultanteDocTxt(detalles) {
+  const ds = detalles || [];
+  if (ds.length === 0) return 'N/D';
+  if (ds.length === 1) return parseFloat(ds[0].stock_nuevo || 0).toFixed(2);
+  return 'Ver columna Stock Nue. por línea';
+}
+
+// ========================================================
+// CONTROLADOR DE COMPROBANTE / DETALLE DE AJUSTE DE INVENTARIO
+// ========================================================
+function renderDetalleAjusteHTML(ajuste) {
+  const a = ajuste || {};
+  const meta = construirMetaDocumentoAjuste(a);
+  const titulo = getTituloMovimientoInventario(a);
+  const sentido = (a.sentido || (a.tipo_ajuste === 'CARGO' ? 'ENTRADA' : 'SALIDA')).toUpperCase();
+  const detalles = a.detalles || [];
+  const totalUnits = detalles.reduce((sum, d) => sum + parseFloat(d.cantidad || 0), 0);
+  const totalCosto = detalles.reduce((sum, d) => sum + parseFloat(d.costo_total !== undefined ? d.costo_total : (d.cantidad * d.costo_unitario) || 0), 0);
+  const fechaTxt = typeof formatFecha === 'function' ? formatFecha(a.fecha) : escapeHtml(a.fecha);
+  const derivados = (AppState.historialAjustes || []).filter(x => parseInt(x.ajuste_referencia_id, 10) === parseInt(a.id, 10));
+
+  const accionesHtml = meta.anulado
+    ? `<div class="text-[11px] text-rose-700 font-semibold"><i class="fa-solid fa-ban mr-1"></i>Ajuste anulado: no admite nueva anulación. Disponible para consulta e impresión.</div>`
+    : `<div class="flex flex-wrap gap-2">
+         <button type="button" onclick="anularAjusteInventarioUI(${parseInt(a.id, 10)})" class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5"><i class="fa-solid fa-ban"></i> Anular ajuste</button>
+         ${CONTRA_AJUSTE_FLUJO_BACKEND.disponible
+           ? `<button type="button" onclick="prepararContraAjuste(${parseInt(a.id, 10)})" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5" title="Pre-llena un nuevo ajuste con ajuste_referencia_id. Se registra solo si usted lo confirma."><i class="fa-solid fa-right-left"></i> Crear contra-ajuste</button>`
+           : `<button type="button" disabled class="bg-slate-100 text-slate-400 border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-bold cursor-not-allowed">Crear contra-ajuste (no disponible)</button>`}
+       </div>`;
+
+  return `
+    <div class="border-b pb-2 flex justify-between items-start">
+      <div>
+        <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold ${sentido === 'ENTRADA' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}">
+          ${sentido} &bull; ${escapeHtml(a.tipo_ajuste)}
+        </span>
+        <span class="inline-block ml-1 px-2.5 py-0.5 rounded text-[11px] font-bold ${meta.anulado ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}">${meta.anulado ? 'ANULADO' : 'ACTIVO'}</span>
+        <h4 class="font-bold text-sm text-slate-800 mt-1">${escapeHtml(titulo)}</h4>
+      </div>
+      <span class="font-mono font-black text-sm text-teal-800">${escapeHtml(a.numero_ajuste)}</span>
+    </div>
+
+    <div>
+      <div class="text-[10px] font-bold uppercase text-slate-500 mb-1">Documento</div>
+      <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-slate-600 text-[11px]">
+        <div><strong>Número:</strong> ${escapeHtml(a.numero_ajuste || '—')}</div>
+        <div><strong>Fecha:</strong> ${fechaTxt}</div>
+        <div><strong>Estado:</strong> ${meta.anulado ? 'ANULADO' : 'ACTIVO'}</div>
+        <div><strong>Usuario:</strong> ${escapeHtml(meta.usuarioTxt)}</div>
+        <div class="col-span-2"><strong>Subtipo:</strong> <span class="font-mono">${escapeHtml(meta.subtipo || 'Sin subtipo (registro histórico)')}</span></div>
+        <div class="col-span-2"><strong>Motivo:</strong> ${escapeHtml(a.motivo || '-')}</div>
+        <div><strong>Referencia:</strong> ${escapeHtml(meta.documentoReferencia || 'N/D')}</div>
+        <div><strong>Autorización:</strong> ${escapeHtml(meta.autorizadoPor || 'N/D')}</div>
+        ${a.observaciones ? `<div class="col-span-2"><strong>Observaciones:</strong> ${escapeHtml(a.observaciones)}</div>` : ''}
+        ${meta.anulado ? `<div class="col-span-2 text-rose-700"><strong>Anulación:</strong> ${escapeHtml(meta.fechaAnulacionTxt)}${meta.motivoAnulacion ? ' — ' + escapeHtml(meta.motivoAnulacion) : ''}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="border-t pt-2 overflow-x-auto">
+      <div class="text-[10px] font-bold uppercase text-slate-500 mb-1">Producto y Valoración</div>
+      <table class="w-full text-[11px] text-left">
+        <thead>
+          <tr class="border-b font-bold text-slate-700">
+            <th class="py-1">Producto</th>
+            <th class="py-1 text-right">Cant</th>
+            <th class="py-1 text-center">Sentido / Subtipo</th>
+            <th class="py-1 text-center">Stock Ant &rarr; Nue</th>
+            <th class="py-1 text-center">CPP Ant &rarr; Nue</th>
+            <th class="py-1 text-right">Costo U.</th>
+            <th class="py-1 text-right">Valuación</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          ${detalles.map(d => `
+            <tr>
+              <td class="py-1">
+                <span class="font-bold text-slate-900">${escapeHtml(d.producto_nombre || d.nombre || 'Producto')}</span>
+                ${d.producto_codigo ? `<span class="block text-[10px] text-slate-400 font-mono">SKU ${escapeHtml(d.producto_codigo)}</span>` : ''}
+                <span class="block text-[9px] text-slate-400 font-mono">documento_id=${escapeHtml(a.id)} &bull; documento_linea_id=${escapeHtml(d.id)}</span>
+              </td>
+              <td class="py-1 text-right font-mono font-bold">${parseFloat(d.cantidad || 0).toFixed(4)}</td>
+              <td class="py-1 text-center text-[10px]">${sentido}<br><span class="font-mono text-slate-500">${escapeHtml(d.subtipo_movimiento || meta.subtipo || '—')}</span></td>
+              <td class="py-1 text-center font-mono text-[10px] text-slate-500">${parseFloat(d.stock_anterior || 0).toFixed(4)} &rarr; ${parseFloat(d.stock_nuevo || 0).toFixed(4)}</td>
+              <td class="py-1 text-center font-mono text-[10px]">${_cppDocTxt(d.cpp_anterior)} &rarr; <strong>${_cppDocTxt(d.cpp_nuevo)}</strong></td>
+              <td class="py-1 text-right font-mono">$${parseFloat(d.costo_unitario || 0).toFixed(4)}</td>
+              <td class="py-1 text-right font-mono font-bold">$${parseFloat(d.costo_total !== undefined ? d.costo_total : (d.cantidad * d.costo_unitario) || 0).toFixed(2)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="border-t pt-2 flex justify-between font-bold text-slate-800 text-xs">
+      <span>Total: ${detalles.length} ítem(s) &bull; ${totalUnits.toFixed(2)} unidades</span>
+      <span class="text-teal-700 font-mono text-sm">Valuación Total: $${totalCosto.toFixed(2)}</span>
+    </div>
+
+    <div class="border-t pt-2 text-[11px] text-slate-600">
+      <div class="text-[10px] font-bold uppercase text-slate-500 mb-1">Trazabilidad</div>
+      <div><strong>documento_tipo:</strong> INVENTARIO_AJUSTE &bull; <strong>documento_id:</strong> ${escapeHtml(a.id)}</div>
+      <div><strong>Ajuste relacionado (ajuste_referencia_id):</strong> ${escapeHtml(meta.relacionadoTxt || 'Ninguno')}</div>
+      ${derivados.length ? `<div><strong>Contra-ajustes que lo referencian:</strong> ${derivados.map(x => escapeHtml(x.numero_ajuste)).join(', ')}</div>` : ''}
+    </div>
+
+    <div class="border-t pt-2 no-print" id="detalleAjusteAcciones">${accionesHtml}</div>
+  `;
+}
+
 async function abrirComprobanteAjuste(ajusteId) {
   try {
     const res = await fetch(`/api/inventario/ajustes/${ajusteId}`);
@@ -12034,61 +12690,12 @@ async function abrirComprobanteAjuste(ajusteId) {
     const ajuste = await res.json();
     AppState.ultimoMovimientoInventario = ajuste;
     AppState.ultimoAjusteInventario = ajuste;
+    AppState.ajustesDetalleCache = AppState.ajustesDetalleCache || {};
+    if (ajuste && ajuste.id) AppState.ajustesDetalleCache[ajuste.id] = ajuste;
 
     const previewContainer = document.getElementById('previewComprobanteAjusteContenido');
     if (previewContainer) {
-      const titulo = getTituloMovimientoInventario(ajuste);
-      const sentido = (ajuste.sentido || (ajuste.tipo_ajuste === 'CARGO' ? 'ENTRADA' : 'SALIDA')).toUpperCase();
-      const detalles = ajuste.detalles || [];
-      const totalUnits = detalles.reduce((sum, d) => sum + parseFloat(d.cantidad || 0), 0);
-      const totalCosto = detalles.reduce((sum, d) => sum + parseFloat(d.costo_total !== undefined ? d.costo_total : (d.cantidad * d.costo_unitario) || 0), 0);
-
-      previewContainer.innerHTML = `
-        <div class="border-b pb-2 flex justify-between items-start">
-          <div>
-            <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold ${sentido === 'ENTRADA' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}">
-              ${sentido} &bull; ${escapeHtml(ajuste.tipo_ajuste)}
-            </span>
-            <h4 class="font-bold text-sm text-slate-800 mt-1">${escapeHtml(titulo)}</h4>
-          </div>
-          <span class="font-mono font-black text-sm text-teal-800">${escapeHtml(ajuste.numero_ajuste)}</span>
-        </div>
-        <div class="grid grid-cols-2 gap-2 text-slate-600 text-[11px]">
-          <div><strong>Fecha:</strong> ${typeof formatFecha === 'function' ? formatFecha(ajuste.fecha) : escapeHtml(ajuste.fecha)}</div>
-          <div><strong>Operador ID:</strong> #${escapeHtml(ajuste.usuario_id || 1)}</div>
-          <div class="col-span-2"><strong>Motivo:</strong> ${escapeHtml(ajuste.motivo || '-')}</div>
-          ${ajuste.observaciones ? `<div class="col-span-2"><strong>Observaciones:</strong> ${escapeHtml(ajuste.observaciones)}</div>` : ''}
-        </div>
-        <div class="border-t pt-2">
-          <table class="w-full text-[11px] text-left">
-            <thead>
-              <tr class="border-b font-bold text-slate-700">
-                <th class="py-1">Producto</th>
-                <th class="py-1 text-right">Cant</th>
-                <th class="py-1 text-center">Stock Ant &rarr; Nue</th>
-                <th class="py-1 text-right">Valuación</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100">
-              ${detalles.map(d => `
-                <tr>
-                  <td class="py-1">
-                    <span class="font-bold text-slate-900">${escapeHtml(d.producto_nombre || d.nombre || 'Producto')}</span>
-                    ${d.producto_codigo ? `<span class="block text-[10px] text-slate-400 font-mono">${escapeHtml(d.producto_codigo)}</span>` : ''}
-                  </td>
-                  <td class="py-1 text-right font-mono font-bold">${parseFloat(d.cantidad || 0).toFixed(2)}</td>
-                  <td class="py-1 text-center font-mono text-[10px] text-slate-500">${parseFloat(d.stock_anterior || 0).toFixed(2)} &rarr; ${parseFloat(d.stock_nuevo || 0).toFixed(2)}</td>
-                  <td class="py-1 text-right font-mono font-bold">$${parseFloat(d.costo_total !== undefined ? d.costo_total : (d.cantidad * d.costo_unitario) || 0).toFixed(2)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        <div class="border-t pt-2 flex justify-between font-bold text-slate-800 text-xs">
-          <span>Total: ${detalles.length} ítem(s) &bull; ${totalUnits.toFixed(2)} unidades</span>
-          <span class="text-teal-700 font-mono text-sm">Valuación Total: $${totalCosto.toFixed(2)}</span>
-        </div>
-      `;
+      previewContainer.innerHTML = renderDetalleAjusteHTML(ajuste);
     }
 
     const modal = document.getElementById('modalComprobanteAjuste');
@@ -12097,6 +12704,109 @@ async function abrirComprobanteAjuste(ajusteId) {
     console.error('Error al abrir comprobante de ajuste:', err);
     alert('Error al visualizar comprobante: ' + err.message);
   }
+}
+
+// ========================================================
+// FASE 2F-5C: ANULACIÓN DIRECTA LIFO (POST /api/inventario/ajustes/:id/anular)
+// ========================================================
+function interpretarErrorAnulacionAjuste(mensaje) {
+  const m = String(mensaje || '');
+  if (m.includes('ANULACION_BLOQUEADA_MOVIMIENTOS_POSTERIORES')) return 'BLOQUEADA_MOVIMIENTOS_POSTERIORES';
+  if (m.includes('PERIODO_CERRADO')) return 'PERIODO_CERRADO';
+  if (m.includes('AJUSTE_YA_ANULADO')) return 'YA_ANULADO';
+  if (m.includes('AJUSTE_NO_ENCONTRADO')) return 'NO_ENCONTRADO';
+  if (m.includes('STOCK_NEGATIVO')) return 'STOCK_NEGATIVO';
+  return 'ERROR';
+}
+
+async function anularAjusteInventarioUI(ajusteId) {
+  const id = parseInt(ajusteId, 10);
+  if (!id) return { estado: 'invalido' };
+  const ref = (AppState.historialAjustes || []).find(x => x.id === id) || (AppState.ajustesDetalleCache || {})[id] || {};
+  if (String(ref.estado || '').toLowerCase() === 'anulado') {
+    showToast(`El ajuste ${ref.numero_ajuste || id} ya está anulado y no puede volver a anularse.`, 'error');
+    return { estado: 'ya_anulado' };
+  }
+  if (AppState.ajusteAnulando) {
+    showToast('Ya hay una anulación en proceso.', 'info');
+    return { estado: 'en_proceso' };
+  }
+
+  const ok = (typeof confirm === 'function') ? confirm(`${MSG_CONFIRMACION_ANULACION_AJUSTE}\n\n¿Confirma la anulación del ajuste ${ref.numero_ajuste || ('#' + id)}?`) : false;
+  if (!ok) return { estado: 'cancelado' };
+  const motivo = (typeof prompt === 'function') ? prompt('Indique el motivo de la anulación:', 'Anulación por error de registro') : null;
+  if (motivo === null) return { estado: 'cancelado' };
+  if (!String(motivo).trim()) {
+    showToast('Debe indicar un motivo válido para anular el ajuste.', 'error');
+    return { estado: 'motivo_invalido' };
+  }
+
+  AppState.ajusteAnulando = true;
+  try {
+    const res = await fetch(`/api/inventario/ajustes/${id}/anular`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: String(motivo).trim() })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const msg = (data && data.error) || `Error HTTP ${res.status}`;
+      const tipo = interpretarErrorAnulacionAjuste(msg);
+      if (tipo === 'BLOQUEADA_MOVIMIENTOS_POSTERIORES') {
+        if (typeof alert === 'function') alert(MSG_ANULACION_BLOQUEADA_AJUSTE);
+        showToast(MSG_ANULACION_BLOQUEADA_AJUSTE, 'error');
+        return { estado: 'bloqueado', tipo, mensaje: msg };
+      }
+      if (tipo === 'PERIODO_CERRADO') {
+        showToast('Ajuste perteneciente al período histórico certificado: no puede anularse directamente. Utilice un contra-ajuste.', 'error');
+        return { estado: 'bloqueado', tipo, mensaje: msg };
+      }
+      showToast(msg, 'error');
+      return { estado: 'error', tipo, mensaje: msg };
+    }
+
+    showToast(`Ajuste ${ref.numero_ajuste || id} anulado. Stock y CPP restaurados al estado anterior.`, 'success');
+    if (AppState.ajustesDetalleCache) delete AppState.ajustesDetalleCache[id];
+    try { await cargarHistorialAjustes(); } catch (e) {}
+    try { if (typeof loadProductos === 'function') await loadProductos(); } catch (e) {}
+    const modal = document.getElementById('modalComprobanteAjuste');
+    if (modal && modal.classList && !modal.classList.contains('hidden')) {
+      try { await abrirComprobanteAjuste(id); } catch (e) {}
+    }
+    return { estado: 'anulado', data };
+  } catch (err) {
+    showToast(err.message || 'Error al anular el ajuste', 'error');
+    return { estado: 'error', mensaje: err.message };
+  } finally {
+    AppState.ajusteAnulando = false;
+  }
+}
+
+// ========================================================
+// FASE 2F-5C: PREPARACIÓN DE CONTRA-AJUSTE
+// Solo pre-llena el formulario con ajuste_referencia_id. NO envía nada ni usa endpoints nuevos.
+// El registro ocurre únicamente si el usuario confirma el formulario (POST /api/inventario/ajustes).
+// ========================================================
+async function prepararContraAjuste(ajusteId) {
+  if (!CONTRA_AJUSTE_FLUJO_BACKEND.disponible) {
+    showToast('Contra-ajuste no disponible en esta versión.', 'info');
+    return null;
+  }
+  const id = parseInt(ajusteId, 10);
+  let ajuste = (AppState.ajustesDetalleCache || {})[id];
+  if (!ajuste || !ajuste.detalles) {
+    const res = await fetch(`/api/inventario/ajustes/${id}`);
+    if (!res.ok) { showToast('No se pudo cargar el ajuste a compensar.', 'error'); return null; }
+    ajuste = await res.json();
+  }
+  if (String(ajuste.estado || '').toLowerCase() === 'anulado') {
+    showToast('El ajuste está anulado: no requiere contra-ajuste.', 'info');
+    return null;
+  }
+  const tipoContrario = String(ajuste.tipo_ajuste || '').toUpperCase() === 'CARGO' ? 'DESCARGO' : 'CARGO';
+  cerrarModalComprobanteAjuste();
+  openAjusteModal(tipoContrario, { contraAjusteDe: ajuste });
+  return { tipo: tipoContrario, ajuste_referencia_id: id };
 }
 
 function cerrarModalComprobanteAjuste() {
@@ -12135,6 +12845,10 @@ function imprimirMovimientoActual(formatoForzado) {
   } else if (formato === 'a4Portrait') {
     htmlDoc = DocumentTemplates.movimientoA4(data, cfg);
     printType = 'a4Portrait';
+  } else if (formato === 'hoja' || formato === 'letterLandscape') {
+    // Hoja: reutiliza la plantilla documental común movimientoHoja en el formato oficial existente Carta Horizontal
+    htmlDoc = DocumentTemplates.movimientoHoja(data, cfg, 'letterLandscape');
+    printType = 'letterLandscape';
   } else {
     htmlDoc = DocumentTemplates.movimientoCarta(data, cfg);
     printType = 'letterPortrait';
@@ -12236,6 +12950,16 @@ window.abrirComprobanteAjuste = abrirComprobanteAjuste;
 window.cerrarModalComprobanteAjuste = cerrarModalComprobanteAjuste;
 window.abrirComprobanteDesdeKardex = abrirComprobanteDesdeKardex;
 window.getTituloMovimientoInventario = getTituloMovimientoInventario;
+window.anularAjusteInventarioUI = anularAjusteInventarioUI;
+window.prepararContraAjuste = prepararContraAjuste;
+window.renderDetalleAjusteHTML = renderDetalleAjusteHTML;
+window.onAjusteSubtipoChange = onAjusteSubtipoChange;
+window.openAjusteModal = openAjusteModal;
+window.saveAjuste = saveAjuste;
+window.AJUSTE_SUBTIPOS_UI = AJUSTE_SUBTIPOS_UI;
+window.CONTRA_AJUSTE_FLUJO_BACKEND = CONTRA_AJUSTE_FLUJO_BACKEND;
+window.MSG_ANULACION_BLOQUEADA_AJUSTE = MSG_ANULACION_BLOQUEADA_AJUSTE;
+window.MSG_CONFIRMACION_ANULACION_AJUSTE = MSG_CONFIRMACION_ANULACION_AJUSTE;
 window.verDetalleMovimientoKardex = verDetalleMovimientoKardex;
 window.cerrarModalDetalleMovimiento = cerrarModalDetalleMovimiento;
 
@@ -12501,3 +13225,216 @@ async function anularCompraDesdeCXP(compraId, numControl) {
   await loadCxpConsolidado();
   if (AppState.currentView === 'reportes' && AppState.reportesTabActual === 'cxp') loadReporteCxp();
 }
+
+// ========================================================
+// SISTEMA DE NOTIFICACIONES TOAST CORPORATIVO (ERP GRADE)
+// ========================================================
+function showToast(message, type = 'info', duration = 3500) {
+  let container = document.getElementById('corporateToastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'corporateToastContainer';
+    container.className = 'fixed bottom-5 right-5 z-[9999] flex flex-col space-y-2 pointer-events-none max-w-sm w-full px-4';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = 'corporate-toast pointer-events-auto flex items-start gap-3 p-3.5 rounded-xl shadow-lg border text-xs font-medium transition-all duration-300 transform translate-y-3 opacity-0';
+
+  let icon = 'fa-circle-info';
+  let colors = 'bg-white text-slate-800 border-slate-200';
+  let iconColor = 'text-teal-600';
+
+  if (type === 'success') {
+    icon = 'fa-circle-check';
+    colors = 'bg-white text-emerald-900 border-emerald-200 shadow-emerald-500/10';
+    iconColor = 'text-emerald-500';
+  } else if (type === 'error') {
+    icon = 'fa-triangle-exclamation';
+    colors = 'bg-white text-rose-900 border-rose-200 shadow-rose-500/10';
+    iconColor = 'text-rose-500';
+  } else if (type === 'warning') {
+    icon = 'fa-circle-exclamation';
+    colors = 'bg-white text-amber-900 border-amber-200 shadow-amber-500/10';
+    iconColor = 'text-amber-500';
+  }
+
+  toast.className += ' ' + colors;
+  toast.innerHTML = `
+    <i class="fa-solid ${icon} text-base mt-0.5 shrink-0 ${iconColor}"></i>
+    <div class="flex-1 min-w-0 pr-1 leading-snug">${escapeHtml(message)}</div>
+    <button type="button" onclick="this.closest('.corporate-toast').remove()" class="text-slate-400 hover:text-slate-700 shrink-0 cursor-pointer">
+      <i class="fa-solid fa-xmark text-sm"></i>
+    </button>
+  `;
+
+  container.appendChild(toast);
+  requestAnimationFrame(() => {
+    toast.classList.remove('translate-y-3', 'opacity-0');
+    toast.classList.add('translate-y-0', 'opacity-100');
+  });
+
+  setTimeout(() => {
+    toast.classList.add('opacity-0', 'translate-x-3');
+    setTimeout(() => {
+      if (toast.parentElement) toast.remove();
+    }, 300);
+  }, duration);
+}
+window.showToast = showToast;
+
+// ========================================================
+// MODAL ACERCA DEL SISTEMA & LICENCIA CORPORATIVA
+// ========================================================
+function openAcercaDeModal() {
+  const modal = document.getElementById('modalAcercaDe');
+  if (modal) modal.classList.remove('hidden');
+}
+window.openAcercaDeModal = openAcercaDeModal;
+
+function closeAcercaDeModal() {
+  const modal = document.getElementById('modalAcercaDe');
+  if (modal) modal.classList.add('hidden');
+}
+window.closeAcercaDeModal = closeAcercaDeModal;
+
+// ========================================================
+// SIMULADOR RBAC: CONTROL DE ROLES (ADMINISTRADOR VS CAJERO)
+// ========================================================
+function initRolUsuario() {
+  const rol = localStorage.getItem('sistema_perfil_rol') || 'admin';
+  aplicarRolUsuario(rol);
+}
+window.initRolUsuario = initRolUsuario;
+
+function toggleRolUsuario() {
+  const actual = localStorage.getItem('sistema_perfil_rol') || 'admin';
+  const nuevo = actual === 'admin' ? 'cajero' : 'admin';
+  localStorage.setItem('sistema_perfil_rol', nuevo);
+  aplicarRolUsuario(nuevo);
+  showToast(`Modo de Operación cambiado a: ${nuevo === 'admin' ? 'Administrador' : 'Cajero (POS)'}`, 'info');
+}
+window.toggleRolUsuario = toggleRolUsuario;
+
+function aplicarRolUsuario(rol) {
+  const badgeText = document.getElementById('headerRoleText');
+  const badgeContainer = document.getElementById('headerRoleBadge');
+
+  if (rol === 'cajero') {
+    document.body.classList.add('rol-cajero');
+    if (badgeText) badgeText.textContent = 'Cajero (POS)';
+    if (badgeContainer) {
+      badgeContainer.className = 'inline-flex items-center text-[10px] font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200 transition cursor-pointer shadow-2xs';
+    }
+    // Si el usuario está en vistas administrativas, dirigir a facturacion
+    if (AppState.currentView === 'reportes' || AppState.currentView === 'cxp') {
+      navigate('facturacion');
+    }
+  } else {
+    document.body.classList.remove('rol-cajero');
+    if (badgeText) badgeText.textContent = 'Administrador';
+    if (badgeContainer) {
+      badgeContainer.className = 'inline-flex items-center text-[10px] font-bold text-teal-800 bg-teal-50 hover:bg-teal-100 px-2 py-0.5 rounded-full border border-teal-200 transition cursor-pointer shadow-2xs';
+    }
+  }
+}
+window.aplicarRolUsuario = aplicarRolUsuario;
+
+// ========================================================
+// ERGONOMÍA POS: ESCÁNER DE CÓDIGOS DE BARRA & TECLADO RÁPIDO
+// ========================================================
+function handlePosCatalogKeydown(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    handlePosBarcodeScan(event.target.value.trim());
+  }
+}
+window.handlePosCatalogKeydown = handlePosCatalogKeydown;
+
+function handlePosBarcodeScan(query) {
+  if (!query) return;
+
+  const q = query.toLowerCase();
+  // 1. Buscar coincidencia exacta por código de producto o código de barras
+  let prod = AppState.productos.find(p => (p.codigo && p.codigo.toLowerCase() === q) || (p.codigo_barras && p.codigo_barras.toLowerCase() === q));
+
+  // 2. Si no hay coincidencia exacta por código, buscar coincidencia exacta por nombre
+  if (!prod) {
+    prod = AppState.productos.find(p => p.nombre && p.nombre.toLowerCase() === q);
+  }
+
+  // 3. Si no hay exacta, pero la búsqueda actual arroja un único producto
+  if (!prod) {
+    const filtrados = AppState.productos.filter(p => 
+      (p.nombre && p.nombre.toLowerCase().includes(q)) || 
+      (p.codigo && p.codigo.toLowerCase().includes(q))
+    );
+    if (filtrados.length === 1) {
+      prod = filtrados[0];
+    }
+  }
+
+  if (prod) {
+    addPosItem(prod.id);
+    showToast(`Ítem agregado: ${prod.nombre}`, 'success', 2200);
+    const searchInput = document.getElementById('posSearchProduct');
+    if (searchInput) {
+      searchInput.value = '';
+      renderPosCatalog();
+      searchInput.focus();
+    }
+  } else {
+    showToast(`No se encontró producto con código o nombre: "${query}"`, 'warning', 3000);
+  }
+}
+window.handlePosBarcodeScan = handlePosBarcodeScan;
+
+// Listener Global de Atajos de Teclado (F2, F4, F8, Escape)
+window.addEventListener('keydown', (e) => {
+  // Tecla Escape: cerrar cualquier modal activo
+  if (e.key === 'Escape') {
+    const openModals = document.querySelectorAll('.modal-overlay:not(.hidden)');
+    if (openModals.length > 0) {
+      e.preventDefault();
+      openModals.forEach(m => m.classList.add('hidden'));
+      return;
+    }
+  }
+
+  // Atajos para la vista de Facturación / POS
+  const isPosView = AppState.currentView === 'facturacion';
+  if (isPosView) {
+    if (e.key === 'F2') {
+      e.preventDefault();
+      const search = document.getElementById('posSearchProduct');
+      if (search) {
+        search.focus();
+        search.select();
+      }
+    } else if (e.key === 'F4') {
+      e.preventDefault();
+      if (AppState.posCart && AppState.posCart.length > 0) {
+        const btnContado = document.getElementById('btnProcesarContado');
+        const btnCredito = document.getElementById('btnProcesarCredito');
+        if (btnContado && !btnContado.classList.contains('hidden')) {
+          btnContado.click();
+        } else if (btnCredito && !btnCredito.classList.contains('hidden')) {
+          btnCredito.click();
+        }
+      } else {
+        showToast('El carrito está vacío. Agregue productos antes de cobrar (F2 para buscar).', 'warning');
+      }
+    } else if (e.key === 'F8') {
+      e.preventDefault();
+      if (AppState.posCart && AppState.posCart.length > 0) {
+        if (confirm('¿Desea limpiar el carrito actual e iniciar una nueva venta?')) {
+          limpiarPOS();
+          showToast('Venta reiniciada.', 'info', 2000);
+        }
+      } else {
+        limpiarPOS();
+      }
+    }
+  }
+});
+

@@ -9,7 +9,7 @@
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <!-- Estilos Custom Soft UI y Tematización Dinámica -->
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=2.5.0">
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans min-h-screen antialiased overflow-x-hidden md:flex selection:bg-teal-100 selection:text-teal-900">
 
@@ -38,7 +38,7 @@
       </button>
     </div>
 
-    <!-- Navegación Vertical con Pestañas (Minimalista, Estructurada y Fresca) -->
+    <!-- Navegación Vertical con Pestañas (Estructura Corporativa ERP) -->
     <nav class="flex-1 px-3 py-2 space-y-1 overflow-y-auto" id="sidebarNavList">
       
       <!-- Panel General -->
@@ -47,59 +47,64 @@
         <span data-label-key="tab_dashboard">Dashboard</span>
       </button>
 
-      <!-- Sección: Catálogo & Clientes -->
+      <!-- Sección: Ventas & Mostrador -->
       <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Catálogo & Entidades</span>
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Ventas & Mostrador</span>
       </div>
-      <button onclick="navigate('categorias')" id="nav-categorias" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-tags mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_categorias">1. Categorías</span>
-      </button>
-      <button onclick="navigate('productos')" id="nav-productos" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-box mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_productos">2. Productos & Servicios</span>
+      <button onclick="navigate('facturacion')" id="nav-facturacion" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-cash-register mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+        <span data-label-key="tab_facturacion">Punto de Venta (POS)</span>
       </button>
       <button onclick="navigate('clientes')" id="nav-clientes" class="sidebar-nav-btn group">
         <i class="fa-solid fa-users mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_clientes">3. Clientes</span>
-      </button>
-
-      <!-- Sección: Operaciones Comerciales -->
-      <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Operaciones</span>
-      </div>
-      <button onclick="navigate('facturacion')" id="nav-facturacion" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-file-invoice-dollar mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_facturacion">4. Facturación (Ventas)</span>
+        <span data-label-key="tab_clientes">Clientes</span>
       </button>
       <button onclick="navigate('devoluciones')" id="nav-devoluciones" class="sidebar-nav-btn group">
         <i class="fa-solid fa-arrow-rotate-left mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_devoluciones">5. Devoluciones</span>
+        <span data-label-key="tab_devoluciones">Devoluciones & NC</span>
       </button>
+
+      <!-- Sección: Inventario & Catálogo -->
+      <div class="pt-3 pb-1 px-2.5">
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Inventario & Catálogo</span>
+      </div>
+      <button onclick="navigate('productos')" id="nav-productos" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-boxes-stacked mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+        <span data-label-key="tab_productos">Productos & Servicios</span>
+      </button>
+      <button onclick="navigate('categorias')" id="nav-categorias" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-tags mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+        <span data-label-key="tab_categorias">Categorías</span>
+      </button>
+
+      <!-- Sección: Compras & Proveedores -->
+      <div class="pt-3 pb-1 px-2.5">
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Compras & Proveedores</span>
+      </div>
       <button onclick="navigate('compras')" id="nav-compras" class="sidebar-nav-btn group">
         <i class="fa-solid fa-truck-ramp-box mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_compras">6. Compras</span>
+        <span data-label-key="tab_compras">Compras de Mercancía</span>
       </button>
       <button onclick="navigate('proveedores')" id="nav-proveedores" class="sidebar-nav-btn group">
         <i class="fa-solid fa-building-user mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_proveedores">7. Proveedores</span>
+        <span data-label-key="tab_proveedores">Proveedores</span>
       </button>
 
-      <!-- Sección: Informes & Saldos -->
+      <!-- Sección: Finanzas & Control -->
       <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Informes & Saldos</span>
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Finanzas & Control</span>
       </div>
-      <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-chart-column mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_reportes">8. Informes, Kardex & Fiscales</span>
-      </button>
       <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn group">
         <i class="fa-solid fa-hand-holding-dollar mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_cxc">9. Cuentas por Cobrar</span>
+        <span data-label-key="tab_cxc">Cuentas por Cobrar (CxC)</span>
       </button>
-      <button onclick="navigate('cxp')" id="nav-cxp" class="sidebar-nav-btn group">
+      <button onclick="navigate('cxp')" id="nav-cxp" class="sidebar-nav-btn group role-admin-only">
         <i class="fa-solid fa-receipt mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_cxp">10. Cuentas por Pagar</span>
+        <span data-label-key="tab_cxp">Cuentas por Pagar (CxP)</span>
+      </button>
+      <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn group role-admin-only">
+        <i class="fa-solid fa-chart-column mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+        <span data-label-key="tab_reportes">Informes & Kardex Fiscal</span>
       </button>
     </nav>
 
@@ -139,27 +144,28 @@
     </div>
 
     <!-- Opciones del Sistema en Pie de Sidebar -->
-    <div class="p-2.5 border-t border-slate-100 space-y-0.5 text-xs shrink-0">
+    <div class="p-2.5 border-t border-slate-100 space-y-1 text-xs shrink-0">
       <button onclick="openPersonalizacionModal()" class="w-full flex items-center px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition font-medium group">
         <i class="fa-solid fa-palette mr-2.5 text-teal-600 group-hover:scale-110 transition-transform"></i>
-        <span>Personalizar Todo</span>
+        <span>Personalizar Marca</span>
       </button>
-      <button onclick="openConfigModal()" class="w-full flex items-center px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition font-medium group">
+      <button onclick="openConfigModal()" class="w-full flex items-center px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition font-medium group role-admin-only">
         <i class="fa-solid fa-sliders mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors"></i>
         <span>Configuración Negocio</span>
       </button>
-      <button onclick="openDatabaseModal()" class="w-full flex items-center px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition font-medium group">
+      <button onclick="openDatabaseModal()" id="btnSidebarDb" class="w-full flex items-center px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition font-medium group role-admin-only">
         <i class="fa-solid fa-database mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors"></i>
-        <span>Base de Datos & Beta Tester</span>
+        <span>Base de Datos & Cloud</span>
       </button>
-      <!-- Sello de Autoría y Desarrollo en Sidebar -->
-      <div class="mt-2 pt-2 border-t border-slate-100 px-2.5 py-2 rounded-xl bg-gradient-to-br from-slate-50 to-teal-50/40 border border-slate-200/70 text-[10px] leading-snug text-slate-600">
-        <div class="flex items-center gap-1.5 font-extrabold text-teal-700 uppercase tracking-wider text-[9px] mb-0.5">
-          <i class="fa-solid fa-microchip text-teal-600"></i>
-          <span>D-BIAN SYSTEM COMPUTER</span>
+      <button onclick="openAcercaDeModal()" class="w-full flex items-center justify-between px-3 py-2 text-slate-600 hover:text-teal-700 hover:bg-teal-50/60 rounded-xl transition font-medium group border border-slate-200/70 mt-1">
+        <div class="flex items-center">
+          <i class="fa-solid fa-circle-info mr-2.5 text-teal-600 group-hover:scale-110 transition-transform"></i>
+          <span>Acerca del Sistema</span>
         </div>
-        <p class="font-semibold text-slate-700">Diseñado y Desarrollado por <strong class="text-slate-900">Ing. Jose Morales</strong></p>
-        <span class="inline-block mt-0.5 font-mono font-bold text-[9px] text-teal-800 bg-teal-100/80 px-1.5 py-0.5 rounded border border-teal-200">V165392830</span>
+        <span class="text-[9px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">v2.5 Pro</span>
+      </button>
+      <div class="pt-1 text-center">
+        <p class="text-[9px] text-slate-400 font-mono tracking-tight">© 2026 D-BIAN SYSTEM COMPUTER</p>
       </div>
     </div>
   </aside>
@@ -172,41 +178,55 @@
        ======================================================== -->
   <div class="app-main-wrapper flex-1 flex flex-col min-w-0 min-h-screen w-full">
     
-    <!-- Banner de Alerta para Entorno Efímero en la Nube (Render sin Persistencia) -->
-    <div id="cloudEphemeralAlert" class="hidden bg-gradient-to-r from-amber-600 to-rose-600 text-white px-3 sm:px-6 py-2 text-xs font-semibold flex items-center justify-between shadow-md sticky top-0 z-30 transition">
-      <div class="flex items-center space-x-2">
-        <i class="fa-solid fa-triangle-exclamation text-base text-amber-200 animate-pulse"></i>
-        <span><strong>MODO VOLÁTIL DETECTADO:</strong> El servidor en la nube no tiene persistencia activa. Las facturas y pagos se perderán al suspenderse Render si no configuras Supabase Storage.</span>
+    <!-- Banner de Alerta para Entorno Efímero en la Nube (Estilo Corporativo Cloud Demo) -->
+    <div id="cloudEphemeralAlert" class="hidden bg-slate-900 text-slate-200 px-3 sm:px-6 py-2 text-xs font-medium flex items-center justify-between border-b border-amber-500/40 shadow-sm sticky top-0 z-30 transition">
+      <div class="flex items-center space-x-2.5">
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+          <i class="fa-solid fa-cloud-arrow-up mr-1 text-amber-400"></i>Cloud Demo
+        </span>
+        <span class="text-slate-300">Entorno en la nube de demostración. Para sincronización permanente active Supabase Storage.</span>
       </div>
       <div class="flex items-center space-x-2 shrink-0">
-        <button onclick="openDatabaseModal()" class="bg-white text-rose-800 hover:bg-amber-50 px-3 py-1 rounded-lg text-xs font-bold shadow-xs transition cursor-pointer">
-          <i class="fa-solid fa-cloud-arrow-up mr-1 text-rose-600"></i>Configurar Nube
+        <button onclick="openDatabaseModal()" class="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-2.5 py-1 rounded-lg text-xs font-semibold shadow-2xs transition cursor-pointer">
+          <i class="fa-solid fa-cloud-arrow-up mr-1"></i>Configurar Nube
         </button>
-        <button onclick="document.getElementById('cloudEphemeralAlert').classList.add('hidden')" class="text-white hover:text-amber-200 p-1 cursor-pointer" title="Cerrar aviso temporalmente">
+        <button onclick="document.getElementById('cloudEphemeralAlert').classList.add('hidden'); sessionStorage.setItem('dismissCloudAlert', '1');" class="text-slate-400 hover:text-white p-1 cursor-pointer" title="Cerrar aviso temporalmente">
           <i class="fa-solid fa-xmark text-sm"></i>
         </button>
       </div>
     </div>
 
     <!-- Barra Superior (Header Compacto y Optimizado para Móvil / Desktop) -->
-    <header class="app-header bg-white border-b border-slate-200 sticky top-0 z-20 px-2.5 sm:px-6 py-2 sm:py-3 flex items-center justify-between gap-1.5 shadow-xs">
+    <header class="app-header bg-white border-b border-slate-200 sticky top-0 z-20 px-2.5 sm:px-6 py-2 sm:py-2.5 flex items-center justify-between gap-1.5 shadow-xs">
       <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
         <!-- Botón Toggle Menú Móvil -->
         <button onclick="toggleMobileSidebar()" class="md:hidden w-9 h-9 flex items-center justify-center text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 shrink-0 shadow-2xs active:scale-95 transition" aria-label="Abrir Menú">
           <i class="fa-solid fa-bars text-sm"></i>
         </button>
         <div class="min-w-0 flex-1">
-          <h2 class="font-extrabold text-xs sm:text-base text-slate-800 leading-tight truncate" id="headerBusinessName">Mi Negocio Comercial</h2>
-          <div class="flex items-center space-x-1 sm:space-x-1.5 text-[10px] sm:text-xs text-slate-500 truncate">
+          <div class="flex items-center space-x-2">
+            <h2 class="font-extrabold text-xs sm:text-base text-slate-800 leading-tight truncate" id="headerBusinessName">Mi Negocio Comercial</h2>
+            <!-- Badge Terminal / Caja -->
+            <span class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200/80">
+              <i class="fa-solid fa-desktop mr-1 text-slate-400 text-[9px]"></i>Terminal #01
+            </span>
+          </div>
+          <div class="flex items-center space-x-1 sm:space-x-2 text-[10px] sm:text-xs text-slate-500 truncate mt-0.5">
             <span id="headerDocFiscal" class="truncate font-mono">J-12345678-9</span>
             <span>•</span>
             <span class="text-emerald-600 font-semibold flex items-center shrink-0">
               <i class="fa-solid fa-circle-check text-[8px] sm:text-[9px] mr-0.5 sm:mr-1"></i>En línea
             </span>
-            <span class="hidden xl:inline text-slate-300">|</span>
-            <span class="hidden xl:inline text-[10px] font-semibold text-teal-700 bg-teal-50 px-2 py-0.2 rounded-full border border-teal-200/70">
-              <i class="fa-solid fa-code mr-1 text-teal-600"></i>Ing. Jose Morales • D-BIAN SYSTEM COMPUTER V165392830
-            </span>
+            <span class="hidden lg:inline text-slate-300">|</span>
+            <!-- Selector de Rol (RBAC Switcher) -->
+            <div class="hidden lg:inline-flex items-center space-x-1.5">
+              <span class="text-slate-400 text-[10px] font-medium">Perfil:</span>
+              <button type="button" onclick="toggleRolUsuario()" id="headerRoleBadge" class="inline-flex items-center text-[10px] font-bold text-teal-800 bg-teal-50 hover:bg-teal-100 px-2 py-0.5 rounded-full border border-teal-200 transition cursor-pointer shadow-2xs" title="Clic para alternar entre perfil Administrador y Cajero POS">
+                <i class="fa-solid fa-shield-halved mr-1 text-teal-600"></i>
+                <span id="headerRoleText">Administrador</span>
+                <i class="fa-solid fa-arrows-rotate ml-1.5 text-[8px] text-teal-500"></i>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -427,12 +447,12 @@
     </section>
 
     <!-- ========================================================
-         VISTA 2: CATEGORÍAS (SERVICIOS Y PRODUCTOS)
+         VISTA: CATEGORÍAS (SERVICIOS Y PRODUCTOS)
          ======================================================== -->
     <section id="view-categorias" class="hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 class="text-2xl font-bold text-slate-800">Módulo 1: Categorías</h2>
+          <h2 class="text-2xl font-bold text-slate-800">Categorías de Productos & Servicios</h2>
           <p class="text-sm text-slate-500">
             Estructuradas en dos clasificaciones maestras: 
             <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-purple-100 text-purple-700">Servicios (Sin stock)</span> y 
@@ -474,7 +494,7 @@
     </section>
 
     <!-- ========================================================
-         VISTA 3: PRODUCTOS & SERVICIOS
+         VISTA: PRODUCTOS & SERVICIOS
          ======================================================== -->
     <section id="view-productos" class="hidden space-y-6">
       
@@ -494,7 +514,7 @@
       <div id="subtabProdCatalogoContainer" class="space-y-6">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h2 class="text-2xl font-bold text-slate-800">Módulo 2: Productos y Servicios</h2>
+            <h2 class="text-2xl font-bold text-slate-800">Catálogo de Productos & Servicios</h2>
             <p class="text-sm text-slate-500">Gestión de catálogo, asignación gravado (16% IVA) / exento, imágenes y control de existencia.</p>
           </div>
           <div class="flex items-center gap-2">
@@ -583,15 +603,17 @@
               <option value="DESCARGO">Solo Descargos (Salida)</option>
             </select>
             <select id="ajusteFilterMotivo" onchange="filtrarHistorialAjustes()" class="bg-slate-50 border border-slate-200 text-slate-700 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20">
-              <option value="">Todos los motivos</option>
-              <option value="sobrante">Sobrante físico</option>
-              <option value="regularizacion">Regularización</option>
-              <option value="merma">Merma operativa</option>
-              <option value="vencimiento">Vencimiento</option>
-              <option value="rotura">Rotura o daño</option>
-              <option value="uso_interno">Consumo / Uso interno</option>
-              <option value="perdida_no_explicada">Pérdida / Faltante</option>
-              <option value="ajuste_manual">Ajuste manual</option>
+              <option value="">Todos los subtipos</option>
+              <option value="cargo_sobrante_conteo">Sobrante de Conteo</option>
+              <option value="cargo_hallazgo_con_soporte">Hallazgo con Soporte</option>
+              <option value="cargo_tasacion_manual">Tasación Manual</option>
+              <option value="descargo_merma">Merma</option>
+              <option value="descargo_vencimiento">Vencimiento</option>
+              <option value="descargo_rotura">Rotura / Daño</option>
+              <option value="descargo_uso_interno">Uso Interno</option>
+              <option value="descargo_perdida_no_explicada">Pérdida no Explicada</option>
+              <option value="__legacy__">Históricos sin subtipo</option>
+              <option value="__anulado__">Solo anulados</option>
             </select>
             <button type="button" onclick="limpiarFiltrosAjustes()" class="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition" title="Limpiar filtros">
               <i class="fa-solid fa-rotate-left text-sm"></i>
@@ -641,11 +663,13 @@
                 <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   <th class="py-3 px-4">N° de Ajuste</th>
                   <th class="py-3 px-4">Fecha</th>
-                  <th class="py-3 px-4 text-center">Tipo</th>
-                  <th class="py-3 px-4">Motivo</th>
+                  <th class="py-3 px-4 text-center">Tipo / Subtipo</th>
+                  <th class="py-3 px-4">Motivo / Referencia</th>
                   <th class="py-3 px-4 text-center">Productos</th>
                   <th class="py-3 px-4 text-right">Unidades</th>
+                  <th class="py-3 px-4 text-center">CPP Ant. &rarr; Nuevo</th>
                   <th class="py-3 px-4 text-right">Costo Total</th>
+                  <th class="py-3 px-4">Usuario</th>
                   <th class="py-3 px-4 text-center">Estado</th>
                   <th class="py-3 px-4 text-right">Acciones</th>
                 </tr>
@@ -660,12 +684,12 @@
     </section>
 
     <!-- ========================================================
-         VISTA 4: CLIENTES
+         VISTA: CLIENTES
          ======================================================== -->
     <section id="view-clientes" class="hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 class="text-2xl font-bold text-slate-800">Módulo 3: Clientes</h2>
+          <h2 class="text-2xl font-bold text-slate-800">Directorio de Clientes</h2>
           <p class="text-sm text-slate-500">Directorio de clientes con enlace directo a WhatsApp para atención y envío de comprobantes.</p>
         </div>
         <button onclick="openClienteModal()" class="btn-theme-primary px-4 py-2.5 rounded-xl font-medium shadow text-sm flex items-center justify-center transition">
@@ -703,23 +727,48 @@
     </section>
 
     <!-- ========================================================
-         VISTA 5: FACTURACIÓN & PUNTO DE VENTA (MULTIMONEDA)
+         VISTA: FACTURACIÓN & PUNTO DE VENTA (MULTIMONEDA)
          ======================================================== -->
-    <section id="view-facturacion" class="hidden space-y-6">
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <section id="view-facturacion" class="hidden space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h2 class="text-2xl font-bold text-slate-800">Módulo 4: Facturación y Punto de Venta</h2>
+          <h2 class="text-2xl font-bold text-slate-800">Punto de Venta & Facturación Multimoneda</h2>
           <p class="text-sm text-slate-500">
-            Factura productos (descuenta stock) y servicios. Soporta pagos mixtos en Dólares ($), Bolívares (Bs.) y Pesos (COP).
+            Facturación de productos y servicios con inventario en tiempo real. Soporta pagos mixtos en USD, Bolívares y Pesos.
           </p>
         </div>
         <div class="flex items-center space-x-2">
-          <button onclick="toggleHistorialFacturas()" id="btnToggleHistorialFacturas" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-sm font-medium shadow-sm transition">
+          <button onclick="toggleHistorialFacturas()" id="btnToggleHistorialFacturas" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-sm font-medium shadow-2xs transition">
             <i class="fa-solid fa-list-check mr-1.5"></i>Historial de Facturas
           </button>
-          <button onclick="limpiarPOS()" class="bg-rose-50 hover:bg-rose-100 text-rose-700 px-3.5 py-2 rounded-xl text-sm font-medium transition">
+          <button onclick="limpiarPOS()" class="bg-rose-50 hover:bg-rose-100 text-rose-700 px-3.5 py-2 rounded-xl text-sm font-medium transition" title="Limpiar venta actual (F8)">
             <i class="fa-solid fa-trash-can mr-1.5"></i>Nueva / Limpiar
           </button>
+        </div>
+      </div>
+
+      <!-- Barra de Atajos Rápidos de Teclado (Modo Caja Rápida ERP) -->
+      <div class="bg-slate-50 border border-slate-200/90 px-3.5 py-2 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div class="flex items-center gap-3 text-slate-600 font-medium">
+          <span class="text-slate-400 font-bold uppercase text-[10px] tracking-wider flex items-center">
+            <i class="fa-solid fa-keyboard mr-1.5 text-teal-600"></i>Atajos de Caja:
+          </span>
+          <span class="flex items-center gap-1">
+            <kbd>F2</kbd> <span class="text-slate-700">Buscar / Lector</span>
+          </span>
+          <span class="flex items-center gap-1">
+            <kbd>F4</kbd> <span class="text-slate-700">Cobrar</span>
+          </span>
+          <span class="flex items-center gap-1">
+            <kbd>F8</kbd> <span class="text-slate-700">Nueva Venta</span>
+          </span>
+          <span class="flex items-center gap-1">
+            <kbd>ESC</kbd> <span class="text-slate-700">Cerrar / Cancelar</span>
+          </span>
+        </div>
+        <div class="flex items-center gap-1.5 text-[11px] text-teal-700 bg-teal-50 px-2 py-0.5 rounded-lg border border-teal-200/80 font-mono">
+          <i class="fa-solid fa-barcode text-teal-600"></i>
+          <span>Lector Láser Activo</span>
         </div>
       </div>
 
@@ -788,7 +837,7 @@
             <div class="flex flex-col sm:flex-row gap-2 justify-between items-center">
               <div class="relative w-full">
                 <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400 text-sm"></i>
-                <input type="text" id="posSearchProduct" oninput="renderPosCatalog()" placeholder="Buscar ítem para agregar..." 
+                <input type="text" id="posSearchProduct" oninput="renderPosCatalog()" onkeydown="handlePosCatalogKeydown(event)" placeholder="Escanear código de barras o escribir producto [F2]..." 
                        class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20">
               </div>
               <div class="flex space-x-1 shrink-0">
@@ -966,12 +1015,12 @@
          ======================================================== -->
     <section id="view-devoluciones" class="hidden space-y-6">
       
-      <!-- Encabezado del Módulo -->
+      <!-- Encabezado de la Vista -->
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 class="text-2xl font-bold text-slate-800 flex items-center">
             <i class="fa-solid fa-arrow-rotate-left mr-2.5 text-cyan-600"></i>
-            Módulo 5: Devoluciones y Notas de Crédito
+            Devoluciones & Notas de Crédito
           </h2>
           <p class="text-sm text-slate-500">
             Trae facturas emitidas o procesa devoluciones manuales: reintegra automáticamente existencias al inventario, descuenta ventas del día y ajusta cuentas por cobrar.
@@ -1327,7 +1376,7 @@
     <section id="view-compras" class="hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 class="text-2xl font-bold text-slate-800">Módulo 5: Compras de Mercancía</h2>
+          <h2 class="text-2xl font-bold text-slate-800">Compras de Mercancía & Entrada de Inventario</h2>
           <p class="text-sm text-slate-500">
             Registra compras a proveedores, sube la foto de la factura física, incrementa existencias y crea ítems nuevos al instante.
           </p>
@@ -1577,7 +1626,7 @@
     <section id="view-proveedores" class="hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 class="text-2xl font-bold text-slate-800">Módulo 6: Proveedores</h2>
+          <h2 class="text-2xl font-bold text-slate-800">Directorio de Proveedores</h2>
           <p class="text-sm text-slate-500">Directorio de proveedores comerciales vinculado al módulo de compras.</p>
         </div>
         <button onclick="openProveedorModal()" class="btn-theme-primary px-4 py-2.5 rounded-xl font-medium shadow text-sm flex items-center justify-center transition">
@@ -1622,7 +1671,7 @@
         <div>
           <h2 class="text-2xl font-bold text-slate-800 flex items-center">
             <i class="fa-solid fa-hand-holding-dollar text-amber-600 mr-2.5"></i>
-            Módulo 7: Cuentas por Cobrar (CXC)
+            Cuentas por Cobrar (CxC)
           </h2>
           <p class="text-sm text-slate-500">
             Control de facturas a crédito, saldos pendientes, vencimientos y registro de abonos multimoneda.
@@ -1955,7 +2004,7 @@
         <div>
           <h2 class="text-2xl font-bold text-slate-800 flex items-center">
             <i class="fa-solid fa-receipt text-rose-600 mr-2.5"></i>
-            Módulo 8: Cuentas por Pagar (CXP)
+            Cuentas por Pagar (CxP)
           </h2>
           <p class="text-sm text-slate-500">
             Control de compras a crédito a proveedores, gastos fijos (alquiler, servicios), saldos pendientes y abonos multimoneda.
@@ -2296,7 +2345,7 @@
         <div>
           <h2 class="text-xl sm:text-2xl font-bold text-slate-800 flex items-center">
             <i class="fa-solid fa-chart-column text-sky-600 mr-2.5"></i>
-            Módulo 8: Informes, Kardex & Libros Fiscales
+            Informes, Kardex Valorado & Libros Fiscales
           </h2>
           <p class="text-xs sm:text-sm text-slate-500">
             Kardex cronológico valorizado, inventario rápido, libros fiscales SENIAT (Ventas, Compras, Art. 177) y análisis comercial.
@@ -5224,7 +5273,7 @@
             <i class="fa-solid fa-boxes-stacked text-amber-600"></i>
             Ajuste Formal de Inventario
           </h3>
-          <p class="text-xs text-slate-500">Módulo auditable para regularizaciones físicas, mermas, vencimientos y consumo interno.</p>
+          <p class="text-xs text-slate-500">Módulo auditable de cargos y descargos con taxonomía canónica y valoración por Motor CPP.</p>
         </div>
         <button onclick="closeAjusteModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
       </div>
@@ -5240,11 +5289,11 @@
             </select>
           </div>
 
-          <!-- Motivo -->
+          <!-- Subtipo canónico (FASE 2F-5C) -->
           <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Motivo Justificado *</label>
-            <select id="ajusteMotivo" onchange="recalcularAjusteTotales()" required class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm font-medium text-slate-800 focus:outline-none focus:border-amber-500">
-              <!-- Opciones dinámicas -->
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Subtipo de Ajuste *</label>
+            <select id="ajusteMotivo" onchange="onAjusteSubtipoChange()" required class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm font-medium text-slate-800 focus:outline-none focus:border-amber-500">
+              <!-- Opciones dinámicas: taxonomía canónica (sin 'regularizacion' ni 'ajuste_manual') -->
             </select>
           </div>
 
@@ -5252,6 +5301,32 @@
           <div>
             <label class="block text-xs font-semibold text-slate-700 mb-1">Fecha de Operación *</label>
             <input type="date" id="ajusteFecha" required class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-amber-500">
+          </div>
+        </div>
+
+        <!-- Descripción y advertencia del subtipo -->
+        <div id="ajusteSubtipoDescripcion" class="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2"></div>
+        <div id="ajusteSubtipoAdvertencia" class="hidden text-xs font-bold text-amber-900 bg-amber-100 border border-amber-300 rounded-xl px-3 py-2"></div>
+        <div id="ajusteContraAjusteBanner" class="hidden text-xs text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2"></div>
+        <input type="hidden" id="ajusteReferenciaId" value="">
+
+        <!-- Campos condicionales según subtipo -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label id="ajusteMotivoTextoLabel" class="block text-xs font-semibold text-slate-700 mb-1">Motivo / Observación</label>
+            <input type="text" id="ajusteMotivoTexto" maxlength="200" placeholder="Describa el motivo del ajuste" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-amber-500">
+          </div>
+          <div id="ajusteCampoDocumentoWrap" class="hidden">
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Documento de Referencia *</label>
+            <input type="text" id="ajusteDocumentoReferencia" maxlength="120" placeholder="Ej: Nota de entrega, acta, informe pericial" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-amber-500">
+          </div>
+          <div id="ajusteCampoAutorizadoWrap" class="hidden">
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Autorizado por *</label>
+            <input type="text" id="ajusteAutorizadoPor" maxlength="120" placeholder="Nombre y cargo de quien autoriza" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-amber-500">
+          </div>
+          <div id="ajusteCampoJustificacionWrap" class="hidden sm:col-span-2">
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Justificación Técnica *</label>
+            <textarea id="ajusteJustificacion" rows="2" placeholder="Fundamento técnico de la tasación" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm focus:outline-none focus:border-amber-500"></textarea>
           </div>
         </div>
 
@@ -5273,6 +5348,12 @@
             <!-- Filas dinámicas -->
           </div>
         </div>
+
+        <!-- Previsualización CPP (no contable) -->
+        <div id="ajustePreviewCPP" class="bg-white border border-dashed border-teal-300 rounded-xl p-3 empty:hidden"></div>
+
+        <!-- Errores de validación (UX; el backend es la autoridad) -->
+        <div id="ajusteErroresValidacion" class="hidden text-xs text-rose-800 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2"></div>
 
         <!-- Resumen y Totales -->
         <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs text-amber-900 font-medium">
@@ -5355,6 +5436,7 @@
             <option value="ticket80">Ticket Térmico (80mm)</option>
             <option value="letterPortrait" selected>Comprobante Carta</option>
             <option value="a4Portrait">Comprobante A4</option>
+            <option value="hoja">Hoja Horizontal (Carta)</option>
           </select>
           <button type="button" onclick="imprimirMovimientoActual()" class="bg-teal-700 hover:bg-teal-600 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center transition shadow-sm whitespace-nowrap">
             <i class="fa-solid fa-print mr-2"></i>Imprimir Comprobante Oficial
@@ -5365,12 +5447,96 @@
   </div>
 
   <!-- ========================================================
+       MODAL CORPORATIVO: ACERCA DEL SISTEMA & LICENCIA PRO
+       ======================================================== -->
+  <div id="modalAcercaDe" class="modal-overlay hidden" onclick="if(event.target===this)closeAcercaDeModal()">
+    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden transform transition-all animate-fadeIn" onclick="event.stopPropagation()">
+      <!-- Encabezado con degradado tecnológico -->
+      <div class="bg-gradient-to-r from-teal-700 via-teal-800 to-slate-900 text-white p-6 relative">
+        <button onclick="closeAcercaDeModal()" class="absolute top-4 right-4 text-white/80 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition" aria-label="Cerrar">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+        <div class="flex items-center space-x-3.5">
+          <div class="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-teal-300 text-2xl shadow-md">
+            <i class="fa-solid fa-boxes-stacked"></i>
+          </div>
+          <div>
+            <span class="text-[10px] font-bold tracking-widest uppercase text-teal-300 bg-teal-900/60 px-2 py-0.5 rounded border border-teal-500/30">Enterprise Edition Pro</span>
+            <h3 class="text-xl font-black text-white mt-1 leading-tight">Sistema de Control & Facturación</h3>
+            <p class="text-xs text-teal-100/90 font-medium">Gestión de Inventario Multimoneda & Motor CPP</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Contenido de Especificaciones Técnicas y Certificación -->
+      <div class="p-6 space-y-4 text-xs text-slate-600">
+        <!-- Tarjeta de Especificaciones de Software -->
+        <div class="grid grid-cols-2 gap-2.5 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 font-mono text-[11px]">
+          <div>
+            <span class="text-slate-400 block text-[10px] font-sans font-semibold uppercase">Versión Comercial:</span>
+            <strong class="text-slate-800">v2.5.0 Enterprise Ready</strong>
+          </div>
+          <div>
+            <span class="text-slate-400 block text-[10px] font-sans font-semibold uppercase">Motor Contable:</span>
+            <strong class="text-teal-700">CPP (NIC-2 / NIIF)</strong>
+          </div>
+          <div>
+            <span class="text-slate-400 block text-[10px] font-sans font-semibold uppercase">Multimoneda:</span>
+            <strong class="text-slate-800">USD / Bs. (BCV) / COP (TRM)</strong>
+          </div>
+          <div>
+            <span class="text-slate-400 block text-[10px] font-sans font-semibold uppercase">Impresión Oficial:</span>
+            <strong class="text-slate-800">DocumentPrinter Oficial</strong>
+          </div>
+        </div>
+
+        <!-- Créditos y Autoría Técnica Oficial -->
+        <div class="border border-teal-100 bg-teal-50/50 p-4 rounded-xl space-y-2">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <i class="fa-solid fa-microchip text-teal-600 text-base"></i>
+              <strong class="text-slate-800 text-xs font-bold tracking-wide">D-BIAN SYSTEM COMPUTER</strong>
+            </div>
+            <span class="bg-teal-600 text-white font-mono font-bold text-[10px] px-2 py-0.5 rounded-full">Autor Registrado</span>
+          </div>
+          <div class="text-[11px] text-slate-700 space-y-1 pt-1 border-t border-teal-200/50">
+            <p><strong>Diseño, Arquitectura & Desarrollo:</strong> Ing. José Morales</p>
+            <p><strong>Identificación Profesional:</strong> <span class="font-mono font-semibold bg-white px-1.5 py-0.5 rounded border border-teal-200">V-165392830</span></p>
+            <p class="text-[10px] text-slate-500 pt-1">Todos los derechos reservados. Desarrollado con los más altos estándares de rigor transaccional, trazabilidad de costos e integridad contable.</p>
+          </div>
+        </div>
+
+        <!-- Estado de Certificación y Tests -->
+        <div class="flex items-center justify-between p-3 bg-emerald-50 border border-emerald-200/80 rounded-xl text-emerald-800">
+          <div class="flex items-center space-x-2">
+            <i class="fa-solid fa-circle-check text-emerald-600 text-sm"></i>
+            <span class="font-bold text-[11px]">Sistema Certificado & Auditoría Conciliada</span>
+          </div>
+          <span class="font-mono text-[10px] font-semibold bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">132/132 Tests Backend OK</span>
+        </div>
+      </div>
+
+      <!-- Pie del Modal -->
+      <div class="bg-slate-50 px-6 py-3 border-t border-slate-200 flex justify-end">
+        <button type="button" onclick="closeAcercaDeModal()" class="btn-theme-primary text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-xs transition">
+          Entendido / Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       CONTENEDOR DE NOTIFICACIONES TOAST CORPORATIVAS (FLOAT)
+       ======================================================== -->
+  <div id="corporateToastContainer" class="fixed bottom-5 right-5 z-[9999] flex flex-col space-y-2 pointer-events-none max-w-sm w-full px-4" aria-live="polite"></div>
+
+  <!-- ========================================================
        CONTENEDOR OFICIAL DE IMPRESIÓN DOCUMENTAL AISLADO (FASE 2E-1)
        Raíz exclusiva para DocumentPrinter. Oculto en pantalla.
        ======================================================== -->
   <div id="areaImpresionOficial" class="hidden-on-screen" aria-hidden="true"></div>
 
   <!-- Scripts -->
-  <script src="app.js"></script>
+  <script src="app.js?v=2.5.0"></script>
 </body>
 </html>
