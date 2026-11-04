@@ -13332,8 +13332,8 @@ function aplicarRolUsuario(rol) {
     if (badgeContainer) {
       badgeContainer.className = 'inline-flex items-center text-[10px] font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200 transition cursor-pointer shadow-2xs';
     }
-    // Si el usuario está en vistas administrativas, dirigir a facturacion
-    if (AppState.currentView === 'reportes' || AppState.currentView === 'cxp') {
+    // Si el usuario está en vistas administrativas exclusivas, dirigir a facturacion
+    if (AppState.currentView === 'reportes') {
       navigate('facturacion');
     }
   } else {

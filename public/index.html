@@ -47,9 +47,9 @@
         <span data-label-key="tab_dashboard">Dashboard</span>
       </button>
 
-      <!-- Sección: Ventas & Mostrador -->
+      <!-- Sección: Ventas & Clientes -->
       <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Ventas & Mostrador</span>
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Ventas & Clientes</span>
       </div>
       <button onclick="navigate('facturacion')" id="nav-facturacion" class="sidebar-nav-btn group">
         <i class="fa-solid fa-cash-register mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
@@ -58,6 +58,10 @@
       <button onclick="navigate('clientes')" id="nav-clientes" class="sidebar-nav-btn group">
         <i class="fa-solid fa-users mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_clientes">Clientes</span>
+      </button>
+      <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn group" title="Cartera de Créditos y Cobros a Clientes">
+        <i class="fa-solid fa-hand-holding-dollar mr-2.5 text-emerald-600 group-hover:scale-110 transition-transform text-sm w-4 text-center"></i>
+        <span data-label-key="tab_cxc">Cuentas por Cobrar (CxC)</span>
       </button>
       <button onclick="navigate('devoluciones')" id="nav-devoluciones" class="sidebar-nav-btn group">
         <i class="fa-solid fa-arrow-rotate-left mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
@@ -89,23 +93,18 @@
         <i class="fa-solid fa-building-user mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_proveedores">Proveedores</span>
       </button>
+      <button onclick="navigate('cxp')" id="nav-cxp" class="sidebar-nav-btn group" title="Control de Pagos y Deudas con Proveedores">
+        <i class="fa-solid fa-receipt mr-2.5 text-amber-600 group-hover:scale-110 transition-transform text-sm w-4 text-center"></i>
+        <span data-label-key="tab_cxp">Cuentas por Pagar (CxP)</span>
+      </button>
 
-      <!-- Sección: Finanzas & Control -->
+      <!-- Sección: Finanzas & Tesorería -->
       <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Finanzas & Control</span>
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Finanzas & Tesorería</span>
       </div>
       <button onclick="navigate('tesoreria')" id="nav-tesoreria" class="sidebar-nav-btn group">
         <i class="fa-solid fa-vault mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_tesoreria">Cajas & Tesorería</span>
-      </button>
-
-      <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-hand-holding-dollar mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_cxc">Cuentas por Cobrar (CxC)</span>
-      </button>
-      <button onclick="navigate('cxp')" id="nav-cxp" class="sidebar-nav-btn group role-admin-only">
-        <i class="fa-solid fa-receipt mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_cxp">Cuentas por Pagar (CxP)</span>
       </button>
       <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn group role-admin-only">
         <i class="fa-solid fa-chart-column mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
@@ -820,9 +819,14 @@
           <h2 class="text-2xl font-bold text-slate-800">Directorio de Clientes</h2>
           <p class="text-sm text-slate-500">Directorio de clientes con enlace directo a WhatsApp para atención y envío de comprobantes.</p>
         </div>
-        <button onclick="openClienteModal()" class="btn-theme-primary px-4 py-2.5 rounded-xl font-medium shadow text-sm flex items-center justify-center transition">
-          <i class="fa-solid fa-user-plus mr-2"></i><span data-label-key="btn_nuevo_cliente">Registrar Cliente</span>
-        </button>
+        <div class="flex items-center space-x-2">
+          <button onclick="navigate('cxc')" class="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl font-semibold shadow-2xs text-xs sm:text-sm flex items-center justify-center transition" title="Ir a Cartera de Cuentas por Cobrar">
+            <i class="fa-solid fa-hand-holding-dollar mr-2 text-emerald-600"></i><span>Cuentas por Cobrar (CxC)</span>
+          </button>
+          <button onclick="openClienteModal()" class="btn-theme-primary px-4 py-2.5 rounded-xl font-medium shadow text-sm flex items-center justify-center transition">
+            <i class="fa-solid fa-user-plus mr-2"></i><span data-label-key="btn_nuevo_cliente">Registrar Cliente</span>
+          </button>
+        </div>
       </div>
 
       <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row gap-3 items-center justify-between">
@@ -1757,9 +1761,14 @@
           <h2 class="text-2xl font-bold text-slate-800">Directorio de Proveedores</h2>
           <p class="text-sm text-slate-500">Directorio de proveedores comerciales vinculado al módulo de compras.</p>
         </div>
-        <button onclick="openProveedorModal()" class="btn-theme-primary px-4 py-2.5 rounded-xl font-medium shadow text-sm flex items-center justify-center transition">
-          <i class="fa-solid fa-building-circle-check mr-2"></i><span data-label-key="btn_nuevo_proveedor">Registrar Proveedor</span>
-        </button>
+        <div class="flex items-center space-x-2">
+          <button onclick="navigate('cxp')" class="px-3.5 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl font-semibold shadow-2xs text-xs sm:text-sm flex items-center justify-center transition" title="Ir a Cuentas por Pagar a Proveedores">
+            <i class="fa-solid fa-receipt mr-2 text-amber-600"></i><span>Cuentas por Pagar (CxP)</span>
+          </button>
+          <button onclick="openProveedorModal()" class="btn-theme-primary px-4 py-2.5 rounded-xl font-medium shadow text-sm flex items-center justify-center transition">
+            <i class="fa-solid fa-building-circle-check mr-2"></i><span data-label-key="btn_nuevo_proveedor">Registrar Proveedor</span>
+          </button>
+        </div>
       </div>
 
       <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row gap-3 items-center justify-between">
@@ -6335,6 +6344,6 @@
   <div id="areaImpresionOficial" class="hidden-on-screen" aria-hidden="true"></div>
 
   <!-- Scripts -->
-  <script src="app.js?v=3.1.0"></script>
+  <script src="app.js?v=3.2.0"></script>
 </body>
 </html>
