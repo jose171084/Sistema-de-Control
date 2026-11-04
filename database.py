@@ -658,15 +658,36 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajuste_det_ajuste ON inventario_ajuste_detalles(ajuste_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajuste_det_prod ON inventario_ajuste_detalles(producto_id)")
 
-    # 8. MOTOR DE COSTO PROMEDIO PONDERADO (CPP) - FASE 2F-1B / 2F-2B / 2F-3B / 2F-4B
+    # 8. MOTOR DE COSTO PROMEDIO PONDERADO (CPP) - FASE 2F-1B / 2F-2B / 2F-3B / 2F-4B / 2F-5B
     add_col_if_missing("productos", "costo_cpp", "REAL DEFAULT 0.0")
     add_col_if_missing("inventario_movimientos", "documento_linea_id", "INTEGER")
+    add_col_if_missing("inventario_movimientos", "subtipo_movimiento", "TEXT")
+    add_col_if_missing("inventario_movimientos", "cpp_anterior", "REAL")
+    add_col_if_missing("inventario_movimientos", "cpp_nuevo", "REAL")
+
+    add_col_if_missing("inventario_ajustes", "subtipo_ajuste", "TEXT")
+    add_col_if_missing("inventario_ajustes", "documento_referencia", "TEXT")
+    add_col_if_missing("inventario_ajustes", "autorizado_por", "TEXT")
+    add_col_if_missing("inventario_ajustes", "estado", "TEXT DEFAULT 'activo'")
+    add_col_if_missing("inventario_ajustes", "idempotency_key", "TEXT")
+    add_col_if_missing("inventario_ajustes", "ajuste_referencia_id", "INTEGER")
+    add_col_if_missing("inventario_ajustes", "motivo_anulacion", "TEXT")
+    add_col_if_missing("inventario_ajustes", "fecha_anulacion", "TEXT")
+    add_col_if_missing("inventario_ajustes", "usuario_anulacion_id", "INTEGER")
+
+    add_col_if_missing("inventario_ajuste_detalles", "subtipo_movimiento", "TEXT")
+    add_col_if_missing("inventario_ajuste_detalles", "cpp_anterior", "REAL")
+    add_col_if_missing("inventario_ajuste_detalles", "cpp_nuevo", "REAL")
+
     add_col_if_missing("factura_detalles", "costo_unitario", "REAL")
     add_col_if_missing("factura_detalles", "costo_total", "REAL")
     add_col_if_missing("devolucion_detalles", "factura_detalle_id", "INTEGER")
     add_col_if_missing("devolucion_detalles", "costo_unitario", "REAL")
     add_col_if_missing("devolucion_detalles", "costo_total", "REAL")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_dev_det_factura_det ON devolucion_detalles(factura_detalle_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajustes_idemp ON inventario_ajustes(idempotency_key)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajustes_estado ON inventario_ajustes(estado)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_subtipo ON inventario_movimientos(subtipo_movimiento)")
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS inventario_saldos_apertura_cpp (
@@ -690,6 +711,262 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_apertura_corte ON inventario_saldos_apertura_cpp(fecha_corte, producto_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_apertura_sku ON inventario_saldos_apertura_cpp(sku)")
+
+    # ========================================================
+    # FASE 2F-6C: MODELO FINANCIERO, PAGOS N:M Y TESORERÍA
+    # ========================================================
+    # 1. Cuentas de Tesorería (Cajas, Bancos, Billeteras)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS cuentas_tesoreria (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT NOT NULL UNIQUE,
+        tipo TEXT NOT NULL CHECK(tipo IN ('caja_efectivo', 'cuenta_bancaria', 'billetera_digital', 'punto_venta')),
+        moneda TEXT NOT NULL CHECK(moneda IN ('USD', 'VES', 'COP', 'EUR')),
+        banco_entidad TEXT,
+        numero_cuenta_enmascarado TEXT,
+        saldo_actual REAL NOT NULL DEFAULT 0.0,
+        activo INTEGER NOT NULL DEFAULT 1,
+        permite_sobregiro INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cuentas_tesoreria_tipo ON cuentas_tesoreria(tipo, moneda)")
+
+    # 2. Historial Inmutable de Tasas de Cambio
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tasas_historial (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        moneda_origen TEXT NOT NULL DEFAULT 'USD',
+        moneda_destino TEXT NOT NULL CHECK(moneda_destino IN ('VES', 'COP', 'EUR')),
+        tasa REAL NOT NULL CHECK(tasa > 0),
+        fecha_vigencia_desde TIMESTAMP NOT NULL,
+        fuente TEXT NOT NULL DEFAULT 'OFICIAL',
+        usuario_id INTEGER DEFAULT 1,
+        motivo_actualizacion TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasas_historial_consulta ON tasas_historial(moneda_destino, fecha_vigencia_desde DESC)")
+
+    # 3. Entidad Central de Pagos y Cobros
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS pagos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_pago TEXT UNIQUE NOT NULL,
+        tipo_operacion TEXT NOT NULL CHECK(tipo_operacion IN ('cobro_cliente', 'pago_proveedor', 'anticipo_cliente', 'anticipo_proveedor')),
+        tercero_tipo TEXT NOT NULL CHECK(tercero_tipo IN ('cliente', 'proveedor', 'otro')),
+        tercero_id INTEGER NOT NULL,
+        fecha_pago TIMESTAMP NOT NULL,
+        concepto TEXT NOT NULL,
+        monto_total_equivalente_usd REAL NOT NULL CHECK(monto_total_equivalente_usd >= 0),
+        monto_aplicado_usd REAL NOT NULL DEFAULT 0.0 CHECK(monto_aplicado_usd >= 0),
+        monto_no_aplicado_usd REAL NOT NULL DEFAULT 0.0 CHECK(monto_no_aplicado_usd >= 0),
+        estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'anulado', 'conciliado')),
+        idempotency_key TEXT UNIQUE,
+        usuario_id INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        anulado_at TIMESTAMP,
+        anulado_by INTEGER,
+        motivo_anulacion TEXT
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pagos_tercero ON pagos(tercero_tipo, tercero_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pagos_fecha ON pagos(fecha_pago)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pagos_idempotency ON pagos(idempotency_key)")
+
+    # 4. Desglose de Monedas del Pago (Líneas Monetarias)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS pago_detalles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pago_id INTEGER NOT NULL,
+        cuenta_tesoreria_id INTEGER NOT NULL,
+        moneda TEXT NOT NULL CHECK(moneda IN ('USD', 'VES', 'COP', 'EUR')),
+        monto_moneda REAL NOT NULL CHECK(monto_moneda > 0),
+        tasa_cambio REAL NOT NULL CHECK(tasa_cambio > 0),
+        equivalente_usd REAL NOT NULL CHECK(equivalente_usd > 0),
+        metodo_pago TEXT NOT NULL,
+        referencia_bancaria TEXT,
+        tasa_sugerida REAL,
+        tasa_override INTEGER DEFAULT 0,
+        motivo_override TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (pago_id) REFERENCES pagos(id) ON DELETE CASCADE,
+        FOREIGN KEY (cuenta_tesoreria_id) REFERENCES cuentas_tesoreria(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pago_detalles_pago ON pago_detalles(pago_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pago_detalles_cuenta ON pago_detalles(cuenta_tesoreria_id)")
+
+    # 5. Matriz de Aplicación N:M a Documentos (Facturas, Compras, Gastos)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS pago_aplicaciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pago_id INTEGER NOT NULL,
+        documento_tipo TEXT NOT NULL CHECK(documento_tipo IN ('factura', 'compra', 'gasto')),
+        documento_id INTEGER NOT NULL,
+        cuenta_por_cobrar_id INTEGER,
+        cuenta_por_pagar_id INTEGER,
+        monto_aplicado_usd REAL NOT NULL CHECK(monto_aplicado_usd > 0),
+        fecha_aplicacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        estado TEXT NOT NULL DEFAULT 'activa' CHECK(estado IN ('activa', 'revertida')),
+        revertido_at TIMESTAMP,
+        revertido_motivo TEXT,
+        FOREIGN KEY (pago_id) REFERENCES pagos(id) ON DELETE CASCADE,
+        FOREIGN KEY (cuenta_por_cobrar_id) REFERENCES cuentas_por_cobrar(id),
+        FOREIGN KEY (cuenta_por_pagar_id) REFERENCES cuentas_por_pagar(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pago_aplicaciones_doc ON pago_aplicaciones(documento_tipo, documento_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pago_aplicaciones_cxc ON pago_aplicaciones(cuenta_por_cobrar_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pago_aplicaciones_cxp ON pago_aplicaciones(cuenta_por_pagar_id)")
+
+    # 6. Anticipos y Saldos a Favor de Clientes y Proveedores
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS anticipos_clientes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tercero_tipo TEXT NOT NULL DEFAULT 'cliente' CHECK(tercero_tipo IN ('cliente', 'proveedor')),
+        tercero_id INTEGER NOT NULL,
+        pago_origen_id INTEGER NOT NULL,
+        monto_original_usd REAL NOT NULL CHECK(monto_original_usd > 0),
+        saldo_disponible_usd REAL NOT NULL CHECK(saldo_disponible_usd >= 0),
+        estado TEXT NOT NULL DEFAULT 'disponible' CHECK(estado IN ('disponible', 'aplicado_parcial', 'agotado', 'reembolsado')),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (pago_origen_id) REFERENCES pagos(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_anticipos_tercero ON anticipos_clientes(tercero_tipo, tercero_id, estado)")
+
+    # 7. Libro Mayor Auxiliar de Tesorería (Kardex Financiero)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tesoreria_movimientos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cuenta_tesoreria_id INTEGER NOT NULL,
+        tipo_movimiento TEXT NOT NULL CHECK(tipo_movimiento IN ('ingreso', 'egreso', 'transferencia_salida', 'transferencia_entrada', 'ajuste_arqueo')),
+        origen_modulo TEXT NOT NULL CHECK(origen_modulo IN ('ventas_pos', 'cobro_cxc', 'compras', 'pago_cxp', 'gasto_operativo', 'caja_arqueo', 'transferencia_interna')),
+        origen_id INTEGER,
+        pago_detalle_id INTEGER,
+        fecha_movimiento TIMESTAMP NOT NULL,
+        descripcion TEXT NOT NULL,
+        monto_moneda REAL NOT NULL CHECK(monto_moneda > 0),
+        saldo_anterior REAL NOT NULL,
+        saldo_nuevo REAL NOT NULL,
+        tasa_cambio REAL NOT NULL,
+        equivalente_usd REAL NOT NULL,
+        usuario_id INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (cuenta_tesoreria_id) REFERENCES cuentas_tesoreria(id),
+        FOREIGN KEY (pago_detalle_id) REFERENCES pago_detalles(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tesoreria_movimientos_cuenta ON tesoreria_movimientos(cuenta_tesoreria_id, fecha_movimiento DESC)")
+
+    # 8. Control de Turnos y Cajas (Aperturas, Arqueos y Cierres)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS caja_aperturas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cuenta_tesoreria_id INTEGER NOT NULL,
+        usuario_id INTEGER NOT NULL,
+        fecha_apertura TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        monto_inicial_usd REAL NOT NULL DEFAULT 0.0,
+        monto_inicial_moneda REAL NOT NULL DEFAULT 0.0,
+        estado TEXT NOT NULL DEFAULT 'abierta' CHECK(estado IN ('abierta', 'cerrada')),
+        notas_apertura TEXT,
+        FOREIGN KEY (cuenta_tesoreria_id) REFERENCES cuentas_tesoreria(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_caja_aperturas_estado ON caja_aperturas(cuenta_tesoreria_id, estado)")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS caja_cierres (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        caja_apertura_id INTEGER NOT NULL,
+        fecha_cierre TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        saldo_teorico_usd REAL NOT NULL,
+        saldo_teorico_moneda REAL NOT NULL,
+        saldo_real_fisico_usd REAL NOT NULL,
+        saldo_real_fisico_moneda REAL NOT NULL,
+        diferencia_usd REAL NOT NULL,
+        diferencia_moneda REAL NOT NULL,
+        estado_arqueo TEXT NOT NULL CHECK(estado_arqueo IN ('cuadrado', 'sobrante', 'faltante')),
+        notas_cierre TEXT,
+        cerrado_by INTEGER NOT NULL,
+        FOREIGN KEY (caja_apertura_id) REFERENCES caja_aperturas(id)
+    )
+    """)
+
+    # 9. Gastos Operativos Desacoplados de Proveedores de Inventario
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS gastos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_gasto TEXT UNIQUE NOT NULL,
+        categoria_gasto TEXT NOT NULL,
+        beneficiario TEXT NOT NULL,
+        beneficiario_rif TEXT,
+        tipo_pago TEXT NOT NULL CHECK(tipo_pago IN ('contado', 'credito')),
+        moneda TEXT NOT NULL CHECK(moneda IN ('USD', 'VES', 'COP')),
+        monto_total_moneda REAL NOT NULL CHECK(monto_total_moneda > 0),
+        tasa_cambio REAL NOT NULL CHECK(tasa_cambio > 0),
+        monto_total_usd REAL NOT NULL CHECK(monto_total_usd > 0),
+        numero_factura_fiscal TEXT,
+        numero_control TEXT,
+        concepto TEXT NOT NULL,
+        cuenta_tesoreria_id INTEGER,
+        cuenta_por_pagar_id INTEGER,
+        usuario_id INTEGER NOT NULL DEFAULT 1,
+        fecha_emision TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'anulado')),
+        FOREIGN KEY (cuenta_tesoreria_id) REFERENCES cuentas_tesoreria(id),
+        FOREIGN KEY (cuenta_por_pagar_id) REFERENCES cuentas_por_pagar(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_gastos_fecha ON gastos(fecha_emision)")
+
+    # 10. Auditoría de Diferencias Cambiarias
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS diferencial_cambiario_movimientos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pago_id INTEGER NOT NULL,
+        factura_id INTEGER,
+        monto_usd_amortizado REAL NOT NULL,
+        tasa_facturacion REAL NOT NULL,
+        tasa_pago REAL NOT NULL,
+        diferencial_ves REAL NOT NULL,
+        tipo_diferencial TEXT NOT NULL CHECK(tipo_diferencial IN ('ganancia_cambiaria', 'perdida_cambiaria')),
+        fecha_operacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (pago_id) REFERENCES pagos(id),
+        FOREIGN KEY (factura_id) REFERENCES facturas(id)
+    )
+    """)
+
+    # 11. Períodos Financieros
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS periodos_financieros (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        codigo_periodo TEXT UNIQUE NOT NULL,
+        fecha_inicio DATE NOT NULL,
+        fecha_fin DATE NOT NULL,
+        estado TEXT NOT NULL DEFAULT 'abierto' CHECK(estado IN ('abierto', 'cerrado')),
+        cerrado_at TIMESTAMP,
+        cerrado_by INTEGER,
+        motivo_reapertura TEXT
+    )
+    """)
+
+    # Sembrar Cuentas de Tesorería por Defecto si está vacío
+    cursor.execute("SELECT COUNT(*) FROM cuentas_tesoreria")
+    if cursor.fetchone()[0] == 0:
+        cursor.executemany("""
+        INSERT INTO cuentas_tesoreria (nombre, tipo, moneda, banco_entidad, saldo_actual, activo)
+        VALUES (?, ?, ?, ?, 0.0, 1)
+        """, [
+            ('Caja Principal USD (Efectivo)', 'caja_efectivo', 'USD', 'Efectivo en Caja'),
+            ('Caja Mostrador Bs. (Efectivo)', 'caja_efectivo', 'VES', 'Efectivo en Caja'),
+            ('Banco Cuenta Corriente Bs. (Pago Móvil / Transf)', 'cuenta_bancaria', 'VES', 'Banco Nacional'),
+            ('Caja Pesos COP (Efectivo)', 'caja_efectivo', 'COP', 'Efectivo en Caja')
+        ])
 
     conn.commit()
 
@@ -1155,7 +1432,7 @@ def init_db():
     """)
 
     # ==========================================
-    # TABLAS DE AJUSTES DE INVENTARIO (FASE 2C)
+    # TABLAS DE AJUSTES DE INVENTARIO (FASE 2C / FASE 2F-5B)
     # ==========================================
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS inventario_ajustes (
@@ -1165,6 +1442,15 @@ def init_db():
         tipo_ajuste TEXT NOT NULL CHECK(tipo_ajuste IN ('CARGO', 'DESCARGO')),
         motivo TEXT NOT NULL,
         observaciones TEXT,
+        subtipo_ajuste TEXT,
+        documento_referencia TEXT,
+        autorizado_por TEXT,
+        estado TEXT DEFAULT 'activo',
+        idempotency_key TEXT,
+        ajuste_referencia_id INTEGER,
+        motivo_anulacion TEXT,
+        fecha_anulacion TEXT,
+        usuario_anulacion_id INTEGER,
         usuario_id INTEGER DEFAULT 1,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -1181,6 +1467,9 @@ def init_db():
         stock_anterior REAL NOT NULL DEFAULT 0.0,
         stock_nuevo REAL NOT NULL DEFAULT 0.0,
         motivo_detalle TEXT,
+        subtipo_movimiento TEXT,
+        cpp_anterior REAL,
+        cpp_nuevo REAL,
         FOREIGN KEY (ajuste_id) REFERENCES inventario_ajustes(id) ON DELETE CASCADE,
         FOREIGN KEY (producto_id) REFERENCES productos(id)
     )
@@ -1215,6 +1504,262 @@ def init_db():
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_apertura_corte ON inventario_saldos_apertura_cpp(fecha_corte, producto_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_apertura_sku ON inventario_saldos_apertura_cpp(sku)")
+
+    # ========================================================
+    # FASE 2F-6C: MODELO FINANCIERO, PAGOS N:M Y TESORERÍA
+    # ========================================================
+    # 1. Cuentas de Tesorería (Cajas, Bancos, Billeteras)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS cuentas_tesoreria (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT NOT NULL UNIQUE,
+        tipo TEXT NOT NULL CHECK(tipo IN ('caja_efectivo', 'cuenta_bancaria', 'billetera_digital', 'punto_venta')),
+        moneda TEXT NOT NULL CHECK(moneda IN ('USD', 'VES', 'COP', 'EUR')),
+        banco_entidad TEXT,
+        numero_cuenta_enmascarado TEXT,
+        saldo_actual REAL NOT NULL DEFAULT 0.0,
+        activo INTEGER NOT NULL DEFAULT 1,
+        permite_sobregiro INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_cuentas_tesoreria_tipo ON cuentas_tesoreria(tipo, moneda)")
+
+    # 2. Historial Inmutable de Tasas de Cambio
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tasas_historial (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        moneda_origen TEXT NOT NULL DEFAULT 'USD',
+        moneda_destino TEXT NOT NULL CHECK(moneda_destino IN ('VES', 'COP', 'EUR')),
+        tasa REAL NOT NULL CHECK(tasa > 0),
+        fecha_vigencia_desde TIMESTAMP NOT NULL,
+        fuente TEXT NOT NULL DEFAULT 'OFICIAL',
+        usuario_id INTEGER DEFAULT 1,
+        motivo_actualizacion TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasas_historial_consulta ON tasas_historial(moneda_destino, fecha_vigencia_desde DESC)")
+
+    # 3. Entidad Central de Pagos y Cobros
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS pagos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_pago TEXT UNIQUE NOT NULL,
+        tipo_operacion TEXT NOT NULL CHECK(tipo_operacion IN ('cobro_cliente', 'pago_proveedor', 'anticipo_cliente', 'anticipo_proveedor')),
+        tercero_tipo TEXT NOT NULL CHECK(tercero_tipo IN ('cliente', 'proveedor', 'otro')),
+        tercero_id INTEGER NOT NULL,
+        fecha_pago TIMESTAMP NOT NULL,
+        concepto TEXT NOT NULL,
+        monto_total_equivalente_usd REAL NOT NULL CHECK(monto_total_equivalente_usd >= 0),
+        monto_aplicado_usd REAL NOT NULL DEFAULT 0.0 CHECK(monto_aplicado_usd >= 0),
+        monto_no_aplicado_usd REAL NOT NULL DEFAULT 0.0 CHECK(monto_no_aplicado_usd >= 0),
+        estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'anulado', 'conciliado')),
+        idempotency_key TEXT UNIQUE,
+        usuario_id INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        anulado_at TIMESTAMP,
+        anulado_by INTEGER,
+        motivo_anulacion TEXT
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pagos_tercero ON pagos(tercero_tipo, tercero_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pagos_fecha ON pagos(fecha_pago)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pagos_idempotency ON pagos(idempotency_key)")
+
+    # 4. Desglose de Monedas del Pago (Líneas Monetarias)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS pago_detalles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pago_id INTEGER NOT NULL,
+        cuenta_tesoreria_id INTEGER NOT NULL,
+        moneda TEXT NOT NULL CHECK(moneda IN ('USD', 'VES', 'COP', 'EUR')),
+        monto_moneda REAL NOT NULL CHECK(monto_moneda > 0),
+        tasa_cambio REAL NOT NULL CHECK(tasa_cambio > 0),
+        equivalente_usd REAL NOT NULL CHECK(equivalente_usd > 0),
+        metodo_pago TEXT NOT NULL,
+        referencia_bancaria TEXT,
+        tasa_sugerida REAL,
+        tasa_override INTEGER DEFAULT 0,
+        motivo_override TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (pago_id) REFERENCES pagos(id) ON DELETE CASCADE,
+        FOREIGN KEY (cuenta_tesoreria_id) REFERENCES cuentas_tesoreria(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pago_detalles_pago ON pago_detalles(pago_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pago_detalles_cuenta ON pago_detalles(cuenta_tesoreria_id)")
+
+    # 5. Matriz de Aplicación N:M a Documentos (Facturas, Compras, Gastos)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS pago_aplicaciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pago_id INTEGER NOT NULL,
+        documento_tipo TEXT NOT NULL CHECK(documento_tipo IN ('factura', 'compra', 'gasto')),
+        documento_id INTEGER NOT NULL,
+        cuenta_por_cobrar_id INTEGER,
+        cuenta_por_pagar_id INTEGER,
+        monto_aplicado_usd REAL NOT NULL CHECK(monto_aplicado_usd > 0),
+        fecha_aplicacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        estado TEXT NOT NULL DEFAULT 'activa' CHECK(estado IN ('activa', 'revertida')),
+        revertido_at TIMESTAMP,
+        revertido_motivo TEXT,
+        FOREIGN KEY (pago_id) REFERENCES pagos(id) ON DELETE CASCADE,
+        FOREIGN KEY (cuenta_por_cobrar_id) REFERENCES cuentas_por_cobrar(id),
+        FOREIGN KEY (cuenta_por_pagar_id) REFERENCES cuentas_por_pagar(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pago_aplicaciones_doc ON pago_aplicaciones(documento_tipo, documento_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pago_aplicaciones_cxc ON pago_aplicaciones(cuenta_por_cobrar_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pago_aplicaciones_cxp ON pago_aplicaciones(cuenta_por_pagar_id)")
+
+    # 6. Anticipos y Saldos a Favor de Clientes y Proveedores
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS anticipos_clientes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tercero_tipo TEXT NOT NULL DEFAULT 'cliente' CHECK(tercero_tipo IN ('cliente', 'proveedor')),
+        tercero_id INTEGER NOT NULL,
+        pago_origen_id INTEGER NOT NULL,
+        monto_original_usd REAL NOT NULL CHECK(monto_original_usd > 0),
+        saldo_disponible_usd REAL NOT NULL CHECK(saldo_disponible_usd >= 0),
+        estado TEXT NOT NULL DEFAULT 'disponible' CHECK(estado IN ('disponible', 'aplicado_parcial', 'agotado', 'reembolsado')),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (pago_origen_id) REFERENCES pagos(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_anticipos_tercero ON anticipos_clientes(tercero_tipo, tercero_id, estado)")
+
+    # 7. Libro Mayor Auxiliar de Tesorería (Kardex Financiero)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tesoreria_movimientos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cuenta_tesoreria_id INTEGER NOT NULL,
+        tipo_movimiento TEXT NOT NULL CHECK(tipo_movimiento IN ('ingreso', 'egreso', 'transferencia_salida', 'transferencia_entrada', 'ajuste_arqueo')),
+        origen_modulo TEXT NOT NULL CHECK(origen_modulo IN ('ventas_pos', 'cobro_cxc', 'compras', 'pago_cxp', 'gasto_operativo', 'caja_arqueo', 'transferencia_interna')),
+        origen_id INTEGER,
+        pago_detalle_id INTEGER,
+        fecha_movimiento TIMESTAMP NOT NULL,
+        descripcion TEXT NOT NULL,
+        monto_moneda REAL NOT NULL CHECK(monto_moneda > 0),
+        saldo_anterior REAL NOT NULL,
+        saldo_nuevo REAL NOT NULL,
+        tasa_cambio REAL NOT NULL,
+        equivalente_usd REAL NOT NULL,
+        usuario_id INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (cuenta_tesoreria_id) REFERENCES cuentas_tesoreria(id),
+        FOREIGN KEY (pago_detalle_id) REFERENCES pago_detalles(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tesoreria_movimientos_cuenta ON tesoreria_movimientos(cuenta_tesoreria_id, fecha_movimiento DESC)")
+
+    # 8. Control de Turnos y Cajas (Aperturas, Arqueos y Cierres)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS caja_aperturas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cuenta_tesoreria_id INTEGER NOT NULL,
+        usuario_id INTEGER NOT NULL,
+        fecha_apertura TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        monto_inicial_usd REAL NOT NULL DEFAULT 0.0,
+        monto_inicial_moneda REAL NOT NULL DEFAULT 0.0,
+        estado TEXT NOT NULL DEFAULT 'abierta' CHECK(estado IN ('abierta', 'cerrada')),
+        notas_apertura TEXT,
+        FOREIGN KEY (cuenta_tesoreria_id) REFERENCES cuentas_tesoreria(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_caja_aperturas_estado ON caja_aperturas(cuenta_tesoreria_id, estado)")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS caja_cierres (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        caja_apertura_id INTEGER NOT NULL,
+        fecha_cierre TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        saldo_teorico_usd REAL NOT NULL,
+        saldo_teorico_moneda REAL NOT NULL,
+        saldo_real_fisico_usd REAL NOT NULL,
+        saldo_real_fisico_moneda REAL NOT NULL,
+        diferencia_usd REAL NOT NULL,
+        diferencia_moneda REAL NOT NULL,
+        estado_arqueo TEXT NOT NULL CHECK(estado_arqueo IN ('cuadrado', 'sobrante', 'faltante')),
+        notas_cierre TEXT,
+        cerrado_by INTEGER NOT NULL,
+        FOREIGN KEY (caja_apertura_id) REFERENCES caja_aperturas(id)
+    )
+    """)
+
+    # 9. Gastos Operativos Desacoplados de Proveedores de Inventario
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS gastos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_gasto TEXT UNIQUE NOT NULL,
+        categoria_gasto TEXT NOT NULL,
+        beneficiario TEXT NOT NULL,
+        beneficiario_rif TEXT,
+        tipo_pago TEXT NOT NULL CHECK(tipo_pago IN ('contado', 'credito')),
+        moneda TEXT NOT NULL CHECK(moneda IN ('USD', 'VES', 'COP')),
+        monto_total_moneda REAL NOT NULL CHECK(monto_total_moneda > 0),
+        tasa_cambio REAL NOT NULL CHECK(tasa_cambio > 0),
+        monto_total_usd REAL NOT NULL CHECK(monto_total_usd > 0),
+        numero_factura_fiscal TEXT,
+        numero_control TEXT,
+        concepto TEXT NOT NULL,
+        cuenta_tesoreria_id INTEGER,
+        cuenta_por_pagar_id INTEGER,
+        usuario_id INTEGER NOT NULL DEFAULT 1,
+        fecha_emision TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'anulado')),
+        FOREIGN KEY (cuenta_tesoreria_id) REFERENCES cuentas_tesoreria(id),
+        FOREIGN KEY (cuenta_por_pagar_id) REFERENCES cuentas_por_pagar(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_gastos_fecha ON gastos(fecha_emision)")
+
+    # 10. Auditoría de Diferencias Cambiarias
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS diferencial_cambiario_movimientos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pago_id INTEGER NOT NULL,
+        factura_id INTEGER,
+        monto_usd_amortizado REAL NOT NULL,
+        tasa_facturacion REAL NOT NULL,
+        tasa_pago REAL NOT NULL,
+        diferencial_ves REAL NOT NULL,
+        tipo_diferencial TEXT NOT NULL CHECK(tipo_diferencial IN ('ganancia_cambiaria', 'perdida_cambiaria')),
+        fecha_operacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (pago_id) REFERENCES pagos(id),
+        FOREIGN KEY (factura_id) REFERENCES facturas(id)
+    )
+    """)
+
+    # 11. Períodos Financieros
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS periodos_financieros (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        codigo_periodo TEXT UNIQUE NOT NULL,
+        fecha_inicio DATE NOT NULL,
+        fecha_fin DATE NOT NULL,
+        estado TEXT NOT NULL DEFAULT 'abierto' CHECK(estado IN ('abierto', 'cerrado')),
+        cerrado_at TIMESTAMP,
+        cerrado_by INTEGER,
+        motivo_reapertura TEXT
+    )
+    """)
+
+    # Sembrar Cuentas de Tesorería por Defecto si está vacío
+    cursor.execute("SELECT COUNT(*) FROM cuentas_tesoreria")
+    if cursor.fetchone()[0] == 0:
+        cursor.executemany("""
+        INSERT INTO cuentas_tesoreria (nombre, tipo, moneda, banco_entidad, saldo_actual, activo)
+        VALUES (?, ?, ?, ?, 0.0, 1)
+        """, [
+            ('Caja Principal USD (Efectivo)', 'caja_efectivo', 'USD', 'Efectivo en Caja'),
+            ('Caja Mostrador Bs. (Efectivo)', 'caja_efectivo', 'VES', 'Efectivo en Caja'),
+            ('Banco Cuenta Corriente Bs. (Pago Móvil / Transf)', 'cuenta_bancaria', 'VES', 'Banco Nacional'),
+            ('Caja Pesos COP (Efectivo)', 'caja_efectivo', 'COP', 'Efectivo en Caja')
+        ])
 
     # Sembrar configuración inicial si no existe
     cursor.execute("SELECT COUNT(*) FROM configuracion")
@@ -1325,18 +1870,21 @@ def registrar_movimiento_inventario(
     documento_numero=None,
     motivo=None,
     usuario_id=1,
-    documento_linea_id=None
+    documento_linea_id=None,
+    subtipo_movimiento=None,
+    cpp_anterior=None,
+    cpp_nuevo=None
 ):
     """
-    Función central para registrar movimientos en el libro mayor persistente (FASE 2B / 2F-2B).
+    Función central para registrar movimientos en el libro mayor persistente (FASE 2B / 2F-2B / 2F-5B).
     - Valida producto y tipo (omite servicios según Regla 22).
     - Valida cantidad > 0.
     - Valida sentido ('ENTRADA' o 'SALIDA').
     - Valida tipo_movimiento.
     - Idempotencia / Protección contra duplicados (Sección 8 / Fase 2F-2B):
-      Si viene documento_linea_id, valida exactitud por línea física de compra.
+      Si viene documento_linea_id, valida exactitud por línea física de documento.
       Si no viene, valida por (documento_tipo, documento_id, producto_id, tipo_movimiento).
-    - Inserta el registro inmutable en inventario_movimientos.
+    - Inserta el registro inmutable en inventario_movimientos incluyendo subtipo_movimiento y trazabilidad CPP si las columnas existen.
     - No realiza commit directo: opera dentro de la transacción activa del llamador (Principio de Atomicidad).
     """
     cursor.execute("SELECT id, tipo, stock, costo FROM productos WHERE id = ?", (producto_id,))
@@ -1389,19 +1937,53 @@ def registrar_movimiento_inventario(
     stk_nue = float(stock_nuevo)
     fec = str(fecha) if fecha else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    cursor.execute("""
-        INSERT INTO inventario_movimientos (
-            fecha, producto_id, tipo_movimiento, sentido, cantidad,
-            costo_unitario, costo_total, stock_anterior, stock_nuevo,
+    cursor.execute("PRAGMA table_info(inventario_movimientos)")
+    cols_mov = {r[1] for r in cursor.fetchall()}
+
+    if "subtipo_movimiento" in cols_mov and "cpp_anterior" in cols_mov and "cpp_nuevo" in cols_mov:
+        cursor.execute("""
+            INSERT INTO inventario_movimientos (
+                fecha, producto_id, tipo_movimiento, sentido, cantidad,
+                costo_unitario, costo_total, stock_anterior, stock_nuevo,
+                documento_tipo, documento_id, documento_numero, motivo, usuario_id,
+                documento_linea_id, subtipo_movimiento, cpp_anterior, cpp_nuevo
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            fec, producto_id, tipo_movimiento, sent, cant,
+            c_unit, c_tot, stk_ant, stk_nue,
+            documento_tipo, documento_id, documento_numero, motivo, usuario_id,
+            documento_linea_id, subtipo_movimiento,
+            float(cpp_anterior) if cpp_anterior is not None else None,
+            float(cpp_nuevo) if cpp_nuevo is not None else None
+        ))
+    elif "subtipo_movimiento" in cols_mov:
+        cursor.execute("""
+            INSERT INTO inventario_movimientos (
+                fecha, producto_id, tipo_movimiento, sentido, cantidad,
+                costo_unitario, costo_total, stock_anterior, stock_nuevo,
+                documento_tipo, documento_id, documento_numero, motivo, usuario_id,
+                documento_linea_id, subtipo_movimiento
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            fec, producto_id, tipo_movimiento, sent, cant,
+            c_unit, c_tot, stk_ant, stk_nue,
+            documento_tipo, documento_id, documento_numero, motivo, usuario_id,
+            documento_linea_id, subtipo_movimiento
+        ))
+    else:
+        cursor.execute("""
+            INSERT INTO inventario_movimientos (
+                fecha, producto_id, tipo_movimiento, sentido, cantidad,
+                costo_unitario, costo_total, stock_anterior, stock_nuevo,
+                documento_tipo, documento_id, documento_numero, motivo, usuario_id,
+                documento_linea_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            fec, producto_id, tipo_movimiento, sent, cant,
+            c_unit, c_tot, stk_ant, stk_nue,
             documento_tipo, documento_id, documento_numero, motivo, usuario_id,
             documento_linea_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        fec, producto_id, tipo_movimiento, sent, cant,
-        c_unit, c_tot, stk_ant, stk_nue,
-        documento_tipo, documento_id, documento_numero, motivo, usuario_id,
-        documento_linea_id
-    ))
+        ))
     return cursor.lastrowid
 
 def migrar_historico_inventario(conn=None, cursor=None, fecha_corte=None):
@@ -1773,6 +2355,26 @@ class ErrorInconsistenciaCPP(ValueError):
     """Excepción lanzada cuando un producto tiene stock positivo pero costo_cpp nulo, cero o inválido."""
     pass
 
+class ErrorAnulacionAjusteConMovimientosPosteriores(ValueError):
+    """Excepción lanzada cuando se intenta anular directamente un ajuste que tiene movimientos posteriores o pertenece a un período cerrado."""
+    pass
+
+SUBTIPOS_AJUSTE_CARGO = (
+    'CARGO_SOBRANTE_CONTEO',
+    'CARGO_HALLAZGO_CON_SOPORTE',
+    'CARGO_TASACION_MANUAL',
+)
+
+SUBTIPOS_AJUSTE_DESCARGO = (
+    'DESCARGO_MERMA',
+    'DESCARGO_VENCIMIENTO',
+    'DESCARGO_ROTURA',
+    'DESCARGO_USO_INTERNO',
+    'DESCARGO_PERDIDA_NO_EXPLICADA',
+)
+
+SUBTIPOS_AJUSTE_CANONICOS = SUBTIPOS_AJUSTE_CARGO + SUBTIPOS_AJUSTE_DESCARGO
+
 CPP_TIPOS_ENTRADA_PONDERADA = {
     'compra',
     'devolucion_cliente',
@@ -1781,7 +2383,9 @@ CPP_TIPOS_ENTRADA_PONDERADA = {
     'tasacion_manual',
     'produccion_interna',
     'traspaso_entrada',
-    'inventario_inicial'
+    'inventario_inicial',
+    'CARGO_HALLAZGO_CON_SOPORTE',
+    'CARGO_TASACION_MANUAL',
 }
 
 CPP_TIPOS_SALIDA = {
@@ -1791,13 +2395,105 @@ CPP_TIPOS_SALIDA = {
     'descargo_merma',
     'descargo_vencimiento',
     'descargo_rotura',
-    'descargo_uso_interno'
+    'descargo_uso_interno',
+    'devolucion_proveedor',
+    'DESCARGO_MERMA',
+    'DESCARGO_VENCIMIENTO',
+    'DESCARGO_ROTURA',
+    'DESCARGO_USO_INTERNO',
+    'DESCARGO_PERDIDA_NO_EXPLICADA',
 }
 
 CPP_TIPOS_ENTRADA_INVARIANTE = {
     'sobrante_conteo',
-    'cargo_ajuste_sobrante'
+    'cargo_ajuste_sobrante',
+    'CARGO_SOBRANTE_CONTEO',
 }
+
+def resolver_subtipo_ajuste_canonico(tipo_ajuste, subtipo_ajuste=None, motivo=None):
+    """
+    Resuelve y valida determinísticamente el subtipo canónico de un ajuste de inventario (FASE 2F-5B).
+    Prohíbe explícitamente mapear 'regularizacion' o 'ajuste_manual' a sobrante sin un subtipo canónico explícito.
+    Si no existe un subtipo válido, lanza ValueError con código 'SUBTIPO_AJUSTE_OBLIGATORIO'.
+    """
+    tipo = (tipo_ajuste or "").strip().upper()
+    if tipo not in ("CARGO", "DESCARGO"):
+        raise ValueError("SUBTIPO_AJUSTE_OBLIGATORIO: tipo_ajuste debe ser 'CARGO' o 'DESCARGO'")
+
+    sub_raw = (subtipo_ajuste or "").strip().upper()
+    mot_raw = (motivo or "").strip()
+    mot_low = mot_raw.lower()
+
+    # 1. Si se envió subtipo_ajuste explícito, validarlo estrictamente contra la taxonomía del tipo_ajuste
+    if sub_raw:
+        if tipo == "CARGO":
+            if sub_raw in ("CARGO_SOBRANTE_CONTEO", "SOBRANTE_CONTEO", "SOBRANTE"):
+                return "CARGO_SOBRANTE_CONTEO"
+            if sub_raw in ("CARGO_HALLAZGO_CON_SOPORTE", "HALLAZGO_CON_SOPORTE", "HALLAZGO"):
+                return "CARGO_HALLAZGO_CON_SOPORTE"
+            if sub_raw in ("CARGO_TASACION_MANUAL", "TASACION_MANUAL", "TASACION"):
+                return "CARGO_TASACION_MANUAL"
+            raise ValueError(
+                f"SUBTIPO_AJUSTE_OBLIGATORIO: Subtipo '{subtipo_ajuste}' no es válido para CARGO. "
+                f"Permitidos: {', '.join(SUBTIPOS_AJUSTE_CARGO)}"
+            )
+        else:
+            if sub_raw in ("DESCARGO_MERMA", "MERMA"):
+                return "DESCARGO_MERMA"
+            if sub_raw in ("DESCARGO_VENCIMIENTO", "VENCIMIENTO"):
+                return "DESCARGO_VENCIMIENTO"
+            if sub_raw in ("DESCARGO_ROTURA", "ROTURA", "DANO", "DAÑO", "AVERIA"):
+                return "DESCARGO_ROTURA"
+            if sub_raw in ("DESCARGO_USO_INTERNO", "USO_INTERNO", "CONSUMO_INTERNO"):
+                return "DESCARGO_USO_INTERNO"
+            if sub_raw in ("DESCARGO_PERDIDA_NO_EXPLICADA", "PERDIDA_NO_EXPLICADA", "FALTANTE", "ROBO", "HURTO"):
+                return "DESCARGO_PERDIDA_NO_EXPLICADA"
+            raise ValueError(
+                f"SUBTIPO_AJUSTE_OBLIGATORIO: Subtipo '{subtipo_ajuste}' no es válido para DESCARGO. "
+                f"Permitidos: {', '.join(SUBTIPOS_AJUSTE_DESCARGO)}"
+            )
+
+    # 2. Si no se envió subtipo_ajuste, prohibir motivos genéricos ambiguos ('regularizacion', 'ajuste_manual')
+    if not mot_raw or mot_low in (
+        "regularizacion", "regularización",
+        "ajuste_manual", "ajuste manual",
+        "general", "otro", "otros", "ajuste"
+    ):
+        raise ValueError(
+            f"SUBTIPO_AJUSTE_OBLIGATORIO: El motivo '{mot_raw}' es ambiguo y no puede convertirse silenciosamente. "
+            "Debe especificar un subtipo_ajuste canónico explícito."
+        )
+
+    # 3. Mapear motivos específicos no ambiguos a su subtipo canónico exacto
+    mot_up = mot_raw.upper()
+    if tipo == "CARGO":
+        if mot_up in SUBTIPOS_AJUSTE_CARGO:
+            return mot_up
+        if mot_low in ("sobrante", "sobrante_conteo", "cargo_sobrante_conteo", "sobrante fisico", "sobrante físico") or mot_low.startswith("sobrante"):
+            return "CARGO_SOBRANTE_CONTEO"
+        if mot_low in ("hallazgo", "hallazgo_con_soporte", "cargo_hallazgo_con_soporte", "hallazgo_mercancia") or mot_low.startswith("hallazgo"):
+            return "CARGO_HALLAZGO_CON_SOPORTE"
+        if mot_low in ("tasacion", "tasacion_manual", "tasación_manual", "cargo_tasacion_manual", "tasación") or mot_low.startswith("tasac"):
+            return "CARGO_TASACION_MANUAL"
+        raise ValueError(
+            f"SUBTIPO_AJUSTE_OBLIGATORIO: No se pudo determinar un subtipo canónico válido para CARGO con motivo '{mot_raw}'."
+        )
+    else:
+        if mot_up in SUBTIPOS_AJUSTE_DESCARGO:
+            return mot_up
+        if mot_low in ("merma", "descargo_merma", "merma operativa") or mot_low.startswith("merma"):
+            return "DESCARGO_MERMA"
+        if mot_low in ("vencimiento", "descargo_vencimiento", "caducidad", "vencido") or "vencimiento" in mot_low or "caduc" in mot_low:
+            return "DESCARGO_VENCIMIENTO"
+        if mot_low in ("rotura", "descargo_rotura", "dano", "daño", "averia", "avería", "rotura o daño") or any(k in mot_low for k in ("rotura", "daño", "dano", "averia")):
+            return "DESCARGO_ROTURA"
+        if mot_low in ("uso_interno", "descargo_uso_interno", "consumo_interno", "uso interno", "consumo interno") or any(k in mot_low for k in ("uso_interno", "uso interno", "consumo_interno", "consumo interno")):
+            return "DESCARGO_USO_INTERNO"
+        if mot_low in ("perdida_no_explicada", "descargo_perdida_no_explicada", "pérdida_no_explicada", "faltante", "faltante_conteo", "perdida", "pérdida", "robo", "hurto", "extravio", "extravío") or any(k in mot_low for k in ("perdida_no_explicada", "pérdida", "perdida", "faltante", "robo", "hurto")):
+            return "DESCARGO_PERDIDA_NO_EXPLICADA"
+        raise ValueError(
+            f"SUBTIPO_AJUSTE_OBLIGATORIO: No se pudo determinar un subtipo canónico válido para DESCARGO con motivo '{mot_raw}'."
+        )
 
 def validar_stock_no_negativo(stock_actual, cantidad_salida):
     """
@@ -1886,10 +2582,39 @@ def calcular_cpp_entrada(stock_anterior, cpp_anterior, cantidad_entrada, costo_e
 def validar_movimiento_no_retroactivo(cursor, producto_id, fecha_movimiento):
     """
     Valida que la fecha del movimiento no sea anterior al último movimiento registrado
-    para el producto_id. Lanza ErrorMovimientoRetroactivoNoPermitido si viola la secuencia temporal.
+    para el producto_id ni pertenezca a un período cerrado / anterior al corte certificado CPP.
+    Lanza ErrorMovimientoRetroactivoNoPermitido si viola la secuencia temporal (fecha ASC, id ASC).
     """
     if not fecha_movimiento:
         return True
+    f_mov_str = str(fecha_movimiento).strip()
+
+    # 1. Bloquear períodos históricos cerrados (anteriores o iguales al corte certificado de apertura CPP)
+    try:
+        cursor.execute("""
+            SELECT fecha_corte FROM inventario_saldos_apertura_cpp
+            WHERE producto_id = ?
+            ORDER BY id DESC LIMIT 1
+        """, (producto_id,))
+        ap_row = cursor.fetchone()
+        if ap_row:
+            fecha_corte = ap_row["fecha_corte"] if isinstance(ap_row, sqlite3.Row) else ap_row[0]
+            if f_mov_str <= str(fecha_corte).strip():
+                raise ErrorMovimientoRetroactivoNoPermitido(
+                    f"PERIODO_CERRADO_BLOQUEADO: La fecha del movimiento ({f_mov_str}) "
+                    f"pertenece a un período histórico cerrado (<= {fecha_corte}) para el producto ID {producto_id}."
+                )
+    except ErrorMovimientoRetroactivoNoPermitido:
+        raise
+    except Exception:
+        pass
+
+    if f_mov_str <= "2026-04-11 23:59:59":
+        raise ErrorMovimientoRetroactivoNoPermitido(
+            f"PERIODO_CERRADO_BLOQUEADO: La fecha del movimiento ({f_mov_str}) pertenece a un período cerrado."
+        )
+
+    # 2. Bloquear retroactividad frente al último movimiento físico del SKU
     cursor.execute("""
         SELECT fecha, id FROM inventario_movimientos
         WHERE producto_id = ?
@@ -1899,9 +2624,9 @@ def validar_movimiento_no_retroactivo(cursor, producto_id, fecha_movimiento):
     row = cursor.fetchone()
     if row:
         ultima_fecha = row["fecha"] if isinstance(row, sqlite3.Row) else row[0]
-        if str(fecha_movimiento) < str(ultima_fecha):
+        if f_mov_str < str(ultima_fecha):
             raise ErrorMovimientoRetroactivoNoPermitido(
-                f"MOVIMIENTO_RETROACTIVO_BLOQUEADO: La fecha del movimiento ({fecha_movimiento}) "
+                f"MOVIMIENTO_RETROACTIVO_BLOQUEADO: La fecha del movimiento ({f_mov_str}) "
                 f"es anterior al último movimiento registrado ({ultima_fecha}) para el producto ID {producto_id}."
             )
     return True
@@ -2123,6 +2848,7 @@ def reconstruir_cpp_desde_apertura(cursor, producto_id, fecha_corte="2026-10-23 
     Reconstrucción determinística del CPP a partir del saldo certificado de apertura
     y los movimientos posteriores con id > ultimo_mov_id ordenados por (fecha ASC, id ASC).
     El ID de corte es la frontera primaria obligatoria.
+    No utiliza un 'else' genérico que convierta silenciosamente un tipo desconocido en entrada ponderada.
     """
     cursor.execute("""
         SELECT stock_apertura, costo_unitario_apertura, valor_apertura, sku, checksum
@@ -2142,9 +2868,19 @@ def reconstruir_cpp_desde_apertura(cursor, producto_id, fecha_corte="2026-10-23 
     cpp_acum = Decimal(str(ap["costo_unitario_apertura"]))
     valor_acum = Decimal(str(ap["valor_apertura"]))
 
-    # Traer movimientos posteriores al corte (id > ultimo_mov_id)
-    cursor.execute("""
-        SELECT id, fecha, tipo_movimiento, sentido, cantidad, costo_unitario, costo_total, documento_tipo, documento_id, motivo
+    cursor.execute("PRAGMA table_info(inventario_movimientos)")
+    cols_mov = {r[1] for r in cursor.fetchall()}
+    has_subtipo = "subtipo_movimiento" in cols_mov
+    has_cpp_cols = "cpp_anterior" in cols_mov and "cpp_nuevo" in cols_mov
+
+    select_cols = "id, fecha, tipo_movimiento, sentido, cantidad, costo_unitario, costo_total, documento_tipo, documento_id, documento_linea_id, motivo"
+    if has_subtipo:
+        select_cols += ", subtipo_movimiento"
+    if has_cpp_cols:
+        select_cols += ", cpp_anterior, cpp_nuevo"
+
+    cursor.execute(f"""
+        SELECT {select_cols}
         FROM inventario_movimientos
         WHERE producto_id = ? AND id > ?
         ORDER BY fecha ASC, id ASC
@@ -2153,36 +2889,99 @@ def reconstruir_cpp_desde_apertura(cursor, producto_id, fecha_corte="2026-10-23 
     movs = cursor.fetchall()
     procesados = 0
 
-    for m in movs:
+    for r_m in movs:
+        m = dict(r_m)
         procesados += 1
         m_id = m["id"]
-        tipo = m["tipo_movimiento"]
-        sentido = m["sentido"]
+        tipo = str(m.get("tipo_movimiento") or "").strip()
+        subtipo = str(m.get("subtipo_movimiento") or "").strip().upper()
+        sentido = str(m.get("sentido") or "").strip().upper()
         cant = Decimal(str(m["cantidad"]))
         c_u = Decimal(str(m["costo_unitario"]))
-        motivo_m = str(m["motivo"] or "").lower()
+        motivo_m = str(m.get("motivo") or "").strip().lower()
+        doc_tipo = str(m.get("documento_tipo") or "").strip().upper()
 
-        if sentido == 'ENTRADA':
-            es_invariante = (
-                tipo in CPP_TIPOS_ENTRADA_INVARIANTE or
-                (tipo == 'cargo_ajuste' and any(k in motivo_m for k in ['sobrante', 'conteo', 'regularizacion', 'invariante']))
-            )
-            if es_invariante:
-                # Entrada que no altera el CPP (sobrante fisico)
-                stock_acum = stock_acum + cant
-                valor_acum = (stock_acum * cpp_acum).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+        # Caso especial: Reversión por anulación directa LIFO de ajuste
+        if subtipo == "ANULACION_AJUSTE" or doc_tipo == "ANULACION_AJUSTE":
+            if sentido == "SALIDA":
+                validar_stock_no_negativo(stock_acum, cant)
+                stock_acum = (stock_acum - cant).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            elif sentido == "ENTRADA":
+                stock_acum = (stock_acum + cant).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
             else:
-                # Entrada ponderada (compra, devolucion_cliente, cargo_ajuste_hallazgo, etc.)
+                raise ValueError(f"SENTIDO_INVALIDO: Sentido '{sentido}' no reconocido en movimiento ID {m_id}")
+
+            if m.get("cpp_nuevo") is not None:
+                cpp_acum = Decimal(str(m["cpp_nuevo"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            elif m.get("documento_linea_id"):
+                cursor.execute("SELECT cpp_anterior FROM inventario_ajuste_detalles WHERE id = ?", (m["documento_linea_id"],))
+                det_row = cursor.fetchone()
+                if det_row and det_row[0] is not None:
+                    cpp_acum = Decimal(str(det_row[0])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            valor_acum = (stock_acum * cpp_acum).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            continue
+
+        if sentido == "ENTRADA":
+            if subtipo:
+                if subtipo == "CARGO_SOBRANTE_CONTEO":
+                    es_invariante = True
+                    es_ponderada = False
+                elif subtipo in ("CARGO_HALLAZGO_CON_SOPORTE", "CARGO_TASACION_MANUAL"):
+                    es_invariante = False
+                    es_ponderada = True
+                else:
+                    raise ValueError(
+                        f"SUBTIPO_MOVIMIENTO_NO_RECONOCIDO: Subtipo de entrada '{subtipo}' desconocido en movimiento ID {m_id}"
+                    )
+            else:
+                es_invariante = (
+                    tipo in CPP_TIPOS_ENTRADA_INVARIANTE or
+                    (tipo == "cargo_ajuste" and any(k in motivo_m for k in ("sobrante", "conteo", "invariante")))
+                )
+                es_ponderada = (
+                    not es_invariante and (
+                        tipo in CPP_TIPOS_ENTRADA_PONDERADA or
+                        (tipo == "cargo_ajuste" and any(k in motivo_m for k in ("hallazgo", "tasacion", "tasación")))
+                    )
+                )
+                if not es_invariante and not es_ponderada:
+                    raise ValueError(
+                        f"TIPO_MOVIMIENTO_NO_RECONOCIDO: Entrada con tipo_movimiento='{tipo}' y motivo='{motivo_m}' "
+                        f"no reconocida determinísticamente en movimiento ID {m_id}"
+                    )
+
+            if es_invariante:
+                if stock_acum < Decimal("0"):
+                    raise ErrorStockNegativo(f"STOCK_NEGATIVO en reconstrucción CPP (movimiento ID {m_id})")
+                if cpp_acum is None or cpp_acum <= Decimal("0"):
+                    raise ErrorInconsistenciaCPP(f"INCONSISTENCIA_CPP en entrada invariante (movimiento ID {m_id})")
+                stock_acum = (stock_acum + cant).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                valor_acum = (stock_acum * cpp_acum).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            elif es_ponderada:
                 res_ent = calcular_cpp_entrada(stock_acum, cpp_acum, cant, c_u)
-                stock_acum = Decimal(str(res_ent['stock_nuevo']))
-                cpp_acum = Decimal(str(res_ent['cpp_nuevo']))
-                valor_acum = Decimal(str(res_ent['valor_nuevo']))
-        elif sentido == 'SALIDA':
+                stock_acum = Decimal(str(res_ent["stock_nuevo"]))
+                cpp_acum = Decimal(str(res_ent["cpp_nuevo"]))
+                valor_acum = Decimal(str(res_ent["valor_nuevo"]))
+
+        elif sentido == "SALIDA":
+            if subtipo:
+                if subtipo not in SUBTIPOS_AJUSTE_DESCARGO:
+                    raise ValueError(
+                        f"SUBTIPO_MOVIMIENTO_NO_RECONOCIDO: Subtipo de salida '{subtipo}' desconocido en movimiento ID {m_id}"
+                    )
+            else:
+                if tipo not in CPP_TIPOS_SALIDA:
+                    raise ValueError(
+                        f"TIPO_MOVIMIENTO_NO_RECONOCIDO: Salida con tipo_movimiento='{tipo}' no reconocida en movimiento ID {m_id}"
+                    )
+
             validar_stock_no_negativo(stock_acum, cant)
             res_sal = calcular_valor_salida_cpp(cant, cpp_acum, stock_acum)
             stock_acum = Decimal(str(res_sal["stock_nuevo"]))
             valor_acum = Decimal(str(res_sal["valor_remanente"]))
-            # Salidas no alteran cpp_acum
+            # Salidas no alteran cpp_acum (incluso si stock_acum llega a 0)
+        else:
+            raise ValueError(f"SENTIDO_MOVIMIENTO_INVALIDO: '{sentido}' en movimiento ID {m_id}")
 
     return {
         "producto_id": producto_id,
@@ -2192,6 +2991,706 @@ def reconstruir_cpp_desde_apertura(cursor, producto_id, fecha_corte="2026-10-23 
         "valor_reconstruido": float(valor_acum.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
         "movimientos_procesados": procesados
     }
+
+
+def _obtener_ajuste_existente_dict(cursor, ajuste_id, mensaje_idempotencia):
+    """Auxiliar para devolver la representación completa de un ajuste previamente procesado (Idempotencia)."""
+    cursor.execute("SELECT * FROM inventario_ajustes WHERE id = ?", (ajuste_id,))
+    row = cursor.fetchone()
+    if not row:
+        return None
+    aj = dict(row)
+    cursor.execute("""
+        SELECT d.*, p.codigo as producto_codigo, p.nombre as producto_nombre
+        FROM inventario_ajuste_detalles d
+        LEFT JOIN productos p ON d.producto_id = p.id
+        WHERE d.ajuste_id = ?
+        ORDER BY d.id ASC
+    """, (ajuste_id,))
+    dets = [dict(r) for r in cursor.fetchall()]
+    return {
+        "success": True,
+        "duplicado_ignorado": True,
+        "id": aj["id"],
+        "ajuste_id": aj["id"],
+        "numero_ajuste": aj["numero_ajuste"],
+        "tipo_ajuste": aj["tipo_ajuste"],
+        "subtipo_ajuste": aj.get("subtipo_ajuste"),
+        "motivo": aj["motivo"],
+        "fecha": aj["fecha"],
+        "estado": aj.get("estado") or "activo",
+        "documento_referencia": aj.get("documento_referencia"),
+        "autorizado_por": aj.get("autorizado_por"),
+        "idempotency_key": aj.get("idempotency_key"),
+        "ajuste_referencia_id": aj.get("ajuste_referencia_id"),
+        "total_items": len(dets),
+        "detalles": dets,
+        "message": mensaje_idempotencia
+    }
+
+
+def procesar_ajuste_inventario_cpp(cursor, payload, conn=None, auto_commit=True):
+    """
+    Ejecuta atómicamente un Ajuste de Inventario (CARGO o DESCARGO) bajo las reglas
+    del Motor CPP (FASE 2F-5B):
+      1. Validar payload y taxonomía canónica (bloquea 'regularizacion'/'ajuste_manual' sin subtipo canónico).
+      2. Validar idempotencia por idempotency_key / client_tx_id / numero_ajuste.
+      3. Prohibir repetición del mismo producto_id dentro del mismo ajuste (SKU_DUPLICADO_EN_AJUSTE).
+      4. Validar producto (existencia, excluir servicios), stock, CPP y retroactividad.
+      5. Iniciar transacción BEGIN IMMEDIATE.
+      6. Insertar encabezado en inventario_ajustes.
+      7. Calcular CPP con Decimal + ROUND_HALF_UP (4 decimales).
+      8. Insertar detalle en inventario_ajuste_detalles con subtipo_movimiento, cpp_anterior y cpp_nuevo.
+      9. Insertar movimiento en inventario_movimientos con documento_linea_id = detalle.id y subtipo_movimiento.
+     10. Actualizar productos.stock y productos.costo_cpp.
+     11. Commit atómico o Rollback total ante cualquier excepción.
+    """
+    if conn is None:
+        conn = getattr(cursor, "connection", None)
+
+    # Asegurar que las columnas aditivas de Fase 2F-5B existan en la conexión activa
+    cursor.execute("PRAGMA table_info(inventario_ajustes)")
+    cols_aj = {r[1] for r in cursor.fetchall()}
+    if "subtipo_ajuste" not in cols_aj:
+        auditar_y_migrar_db(conn, cursor)
+
+    tipo_ajuste = (payload.get("tipo_ajuste") or "").strip().upper()
+    if tipo_ajuste not in ("CARGO", "DESCARGO"):
+        raise ValueError("SUBTIPO_AJUSTE_OBLIGATORIO: tipo_ajuste debe ser 'CARGO' o 'DESCARGO'")
+
+    motivo_raw = (payload.get("motivo") or "").strip()
+    subtipo_input = (payload.get("subtipo_ajuste") or payload.get("subtipo_movimiento") or "").strip()
+
+    if not motivo_raw and not subtipo_input:
+        raise ValueError("SUBTIPO_AJUSTE_OBLIGATORIO: El motivo y/o subtipo_ajuste del ajuste es obligatorio")
+
+    # Resolver subtipo canónico estricto (bloquea regularizacion y ajuste_manual ambiguos)
+    subtipo_canonico = resolver_subtipo_ajuste_canonico(
+        tipo_ajuste=tipo_ajuste,
+        subtipo_ajuste=subtipo_input,
+        motivo=motivo_raw
+    )
+    motivo = motivo_raw if motivo_raw else subtipo_canonico
+
+    detalles = payload.get("detalles") or payload.get("items") or []
+    if not isinstance(detalles, list) or len(detalles) == 0:
+        raise ValueError("DETALLES_VACIOS: Debe incluir al menos un producto en el ajuste (lista 'detalles')")
+
+    observaciones = (payload.get("observaciones") or payload.get("justificacion_tecnica") or "").strip()
+    justificacion_header = (payload.get("justificacion_tecnica") or payload.get("observaciones") or "").strip()
+    documento_referencia = (payload.get("documento_referencia") or "").strip()
+    autorizado_por = (payload.get("autorizado_por") or "").strip()
+    usuario_id = int(payload.get("usuario_id") or 1)
+    numero_ajuste = (payload.get("numero_ajuste") or "").strip()
+    idempotency_key = (payload.get("idempotency_key") or payload.get("client_tx_id") or "").strip()
+    ajuste_referencia_id = payload.get("ajuste_referencia_id")
+    if ajuste_referencia_id is not None and str(ajuste_referencia_id).strip() != "":
+        ajuste_referencia_id = int(ajuste_referencia_id)
+    else:
+        ajuste_referencia_id = None
+
+    # Validación preliminar de Idempotencia antes de abrir candado de escritura
+    if numero_ajuste:
+        cursor.execute("SELECT id FROM inventario_ajustes WHERE numero_ajuste = ?", (numero_ajuste,))
+        ex_num = cursor.fetchone()
+        if ex_num:
+            return _obtener_ajuste_existente_dict(
+                cursor, ex_num[0],
+                f"Ajuste {numero_ajuste} ya procesado previamente (idempotencia garantizada)"
+            )
+
+    if idempotency_key:
+        cursor.execute(
+            "SELECT id FROM inventario_ajustes WHERE idempotency_key = ? OR observaciones LIKE ?",
+            (idempotency_key, f"%[IDEMPOTENCY:{idempotency_key}]%")
+        )
+        ex_key = cursor.fetchone()
+        if ex_key:
+            return _obtener_ajuste_existente_dict(
+                cursor, ex_key[0],
+                "Ajuste ya procesado previamente con idempotency_key"
+            )
+
+    # Iniciar transacción atómica BEGIN IMMEDIATE
+    started_tx = False
+    if conn is not None and not conn.in_transaction:
+        cursor.execute("BEGIN IMMEDIATE")
+        started_tx = True
+    elif conn is None:
+        try:
+            cursor.execute("BEGIN IMMEDIATE")
+            started_tx = True
+        except sqlite3.OperationalError:
+            pass
+
+    try:
+        # Re-verificar idempotencia dentro de BEGIN IMMEDIATE (protección contra condición de carrera concurrente)
+        if numero_ajuste:
+            cursor.execute("SELECT id FROM inventario_ajustes WHERE numero_ajuste = ?", (numero_ajuste,))
+            ex_num = cursor.fetchone()
+            if ex_num:
+                if started_tx and conn is not None and conn.in_transaction:
+                    conn.rollback()
+                return _obtener_ajuste_existente_dict(
+                    cursor, ex_num[0],
+                    f"Ajuste {numero_ajuste} ya procesado previamente (idempotencia garantizada)"
+                )
+
+        if idempotency_key:
+            cursor.execute(
+                "SELECT id FROM inventario_ajustes WHERE idempotency_key = ? OR observaciones LIKE ?",
+                (idempotency_key, f"%[IDEMPOTENCY:{idempotency_key}]%")
+            )
+            ex_key = cursor.fetchone()
+            if ex_key:
+                if started_tx and conn is not None and conn.in_transaction:
+                    conn.rollback()
+                return _obtener_ajuste_existente_dict(
+                    cursor, ex_key[0],
+                    "Ajuste ya procesado previamente con idempotency_key"
+                )
+
+        # Normalización de fecha de operación
+        fecha_input = payload.get("fecha")
+        es_fecha_solo_dia = False
+        if fecha_input and str(fecha_input).strip():
+            f_str = str(fecha_input).strip()
+            if len(f_str) == 10:
+                es_fecha_solo_dia = True
+                fecha_ajuste = f"{f_str} {datetime.now().strftime('%H:%M:%S')}"
+            else:
+                fecha_ajuste = f_str
+        else:
+            fecha_ajuste = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # 1. Validar líneas, prohibir SKU duplicado en el mismo ajuste y validar productos / retroactividad
+        vistos_sku = set()
+        productos_info = {}
+
+        for idx, det in enumerate(detalles):
+            p_id_raw = det.get("producto_id")
+            if not p_id_raw:
+                raise ValueError(f"Detalle #{idx+1}: 'producto_id' es requerido")
+            try:
+                p_id = int(p_id_raw)
+                cant_str = str(det.get("cantidad", "0"))
+                cant_dec_val = Decimal(cant_str)
+            except Exception:
+                raise ValueError(f"Detalle #{idx+1}: 'producto_id' y 'cantidad' deben ser numéricos válidos")
+
+            if cant_dec_val <= Decimal("0"):
+                raise ValueError(f"Detalle #{idx+1}: la cantidad debe ser mayor a 0 (recibido: {cant_str})")
+
+            # Regla 9: Prohibición estricta de repetir el mismo producto_id dentro del mismo ajuste
+            if p_id in vistos_sku:
+                raise ValueError(
+                    f"SKU_DUPLICADO_EN_AJUSTE: El producto ID {p_id} se encuentra duplicado en el mismo ajuste. "
+                    "Consolide la cantidad en una sola línea por SKU."
+                )
+            vistos_sku.add(p_id)
+
+            cursor.execute("SELECT id, codigo, nombre, tipo, stock, costo_cpp, costo, activo FROM productos WHERE id = ?", (p_id,))
+            prod = cursor.fetchone()
+            if not prod:
+                raise LookupError(f"PRODUCTO_NO_ENCONTRADO: Producto ID {p_id} no existe")
+            prod_data = dict(prod)
+            if prod_data.get("tipo") == "servicio":
+                raise ValueError(f"SERVICIO_NO_INVENTARIABLE: No se pueden realizar ajustes de inventario sobre servicios ('{prod_data['nombre']}')")
+
+            productos_info[p_id] = prod_data
+
+            # Si el usuario envió solo 'YYYY-MM-DD' y coincide exactamente con el día del último movimiento del SKU,
+            # asegurar que la hora asignada no quede detrás de la hora del último movimiento de ese mismo día.
+            if es_fecha_solo_dia:
+                cursor.execute("""
+                    SELECT fecha FROM inventario_movimientos
+                    WHERE producto_id = ?
+                    ORDER BY fecha DESC, id DESC LIMIT 1
+                """, (p_id,))
+                ult_mov = cursor.fetchone()
+                if ult_mov:
+                    ult_f = str(ult_mov[0])
+                    if ult_f[:10] == fecha_ajuste[:10] and fecha_ajuste < ult_f:
+                        fecha_ajuste = ult_f
+
+            # Regla 8: Validar no retroactividad y períodos cerrados
+            validar_movimiento_no_retroactivo(cursor, p_id, fecha_ajuste)
+
+        # Generar número correlativo de ajuste si no fue provisto
+        if not numero_ajuste:
+            prefix = "CAR" if tipo_ajuste == "CARGO" else "DES"
+            cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM inventario_ajustes")
+            next_id = cursor.fetchone()[0]
+            numero_ajuste = f"{prefix}-{next_id:06d}"
+
+        observaciones_final = observaciones
+        if idempotency_key and f"[IDEMPOTENCY:{idempotency_key}]" not in observaciones_final:
+            observaciones_final = f"{observaciones_final} [IDEMPOTENCY:{idempotency_key}]".strip()
+
+        # Insertar encabezado en inventario_ajustes
+        cursor.execute("""
+            INSERT INTO inventario_ajustes (
+                numero_ajuste, fecha, tipo_ajuste, subtipo_ajuste, motivo, observaciones,
+                documento_referencia, autorizado_por, estado, idempotency_key,
+                ajuste_referencia_id, usuario_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)
+        """, (
+            numero_ajuste, fecha_ajuste, tipo_ajuste, subtipo_canonico, motivo, observaciones_final,
+            documento_referencia or None, autorizado_por or None, idempotency_key or None,
+            ajuste_referencia_id, usuario_id
+        ))
+        ajuste_id = cursor.lastrowid
+
+        # Mapear tipo_movimiento compatible con el CHECK de inventario_movimientos
+        sentido = "ENTRADA" if tipo_ajuste == "CARGO" else "SALIDA"
+        if tipo_ajuste == "CARGO":
+            tipo_mov_sql = "cargo_ajuste"
+        else:
+            if subtipo_canonico == "DESCARGO_VENCIMIENTO":
+                tipo_mov_sql = "descargo_vencimiento"
+            elif subtipo_canonico == "DESCARGO_ROTURA":
+                tipo_mov_sql = "descargo_rotura"
+            elif subtipo_canonico == "DESCARGO_USO_INTERNO":
+                tipo_mov_sql = "descargo_uso_interno"
+            else:
+                # DESCARGO_MERMA y DESCARGO_PERDIDA_NO_EXPLICADA
+                tipo_mov_sql = "descargo_merma"
+
+        detalles_procesados = []
+
+        for idx, det in enumerate(detalles):
+            p_id = int(det["producto_id"])
+            cant_dec = Decimal(str(det["cantidad"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            motivo_detalle = (det.get("motivo_detalle") or det.get("justificacion_tecnica") or "").strip()
+
+            # Permitir que una línea especifique su propio subtipo si pertenece al mismo sentido, o herede el del encabezado
+            sub_det_raw = (det.get("subtipo_movimiento") or det.get("subtipo_ajuste") or "").strip()
+            if sub_det_raw:
+                subtipo_linea = resolver_subtipo_ajuste_canonico(tipo_ajuste, subtipo_ajuste=sub_det_raw, motivo=motivo_detalle or motivo)
+            else:
+                subtipo_linea = subtipo_canonico
+
+            cursor.execute("SELECT id, codigo, nombre, stock, costo_cpp, costo FROM productos WHERE id = ?", (p_id,))
+            prod_row = dict(cursor.fetchone())
+            stk_ant_dec = Decimal(str(prod_row.get("stock") or 0.0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            cpp_ant_raw = prod_row.get("costo_cpp")
+            sku_cod = prod_row.get("codigo")
+
+            # Regla 7: Bloqueo absoluto de stock actual negativo
+            if stk_ant_dec < Decimal("0"):
+                raise ErrorStockNegativo(
+                    f"STOCK_NEGATIVO: Producto {sku_cod} posee stock negativo ({stk_ant_dec}). Operación bloqueada."
+                )
+
+            if tipo_ajuste == "DESCARGO":
+                # Regla 4: DESCARGOS (Merma, Vencimiento, Rotura, Uso Interno, Pérdida No Explicada)
+                validar_stock_no_negativo(stk_ant_dec, cant_dec)
+                if cpp_ant_raw is None or Decimal(str(cpp_ant_raw)) <= Decimal("0"):
+                    raise ErrorInconsistenciaCPP(
+                        f"INCONSISTENCIA_CPP: Producto {sku_cod} tiene stock {stk_ant_dec} pero costo_cpp inválido ({cpp_ant_raw}). "
+                        "Operación bloqueada. Prohibido usar productos.costo como sustituto."
+                    )
+                cpp_ant_dec = Decimal(str(cpp_ant_raw)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                res_sal = calcular_valor_salida_cpp(cant_dec, cpp_ant_dec, stk_ant_dec)
+                costo_u_dec = Decimal(str(res_sal["costo_unitario"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                costo_tot_dec = Decimal(str(res_sal["valor_salida"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                stock_nuevo_dec = Decimal(str(res_sal["stock_nuevo"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                # Si el movimiento deja stock en cero, NO poner CPP en cero; conservar el último CPP válido
+                cpp_nuevo_dec = cpp_ant_dec
+
+            else:
+                # ENTRADAS (CARGO)
+                if subtipo_linea == "CARGO_SOBRANTE_CONTEO":
+                    # Regla 3.1: CARGO_SOBRANTE_CONTEO
+                    # Tanto con stock > 0 como con stock == 0, exige CPP certificado > 0
+                    if cpp_ant_raw is None or Decimal(str(cpp_ant_raw)) <= Decimal("0"):
+                        raise ErrorInconsistenciaCPP(
+                            f"INCONSISTENCIA_CPP: Producto {sku_cod} no posee costo_cpp certificado > 0 ({cpp_ant_raw}) "
+                            "para realizar CARGO_SOBRANTE_CONTEO."
+                        )
+                    cpp_ant_dec = Decimal(str(cpp_ant_raw)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+                    # Si el payload intenta enviar un costo diferente al CPP vigente -> HTTP 400 SOBRANTE_NO_ADMITE_COSTO_EXTERNO
+                    if "costo_unitario" in det and det.get("costo_unitario") is not None and str(det.get("costo_unitario")).strip() != "":
+                        try:
+                            costo_enviado_dec = Decimal(str(det.get("costo_unitario"))).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                        except Exception:
+                            raise ValueError("SOBRANTE_NO_ADMITE_COSTO_EXTERNO: Costo unitario inválido en CARGO_SOBRANTE_CONTEO")
+                        if costo_enviado_dec != cpp_ant_dec:
+                            raise ValueError(
+                                f"SOBRANTE_NO_ADMITE_COSTO_EXTERNO: CARGO_SOBRANTE_CONTEO utiliza exclusivamente el CPP vigente "
+                                f"({cpp_ant_dec}) y no admite un costo externo diferente ({costo_enviado_dec})."
+                            )
+
+                    costo_u_dec = cpp_ant_dec
+                    cpp_nuevo_dec = cpp_ant_dec
+                    stock_nuevo_dec = (stk_ant_dec + cant_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                    costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+                elif subtipo_linea == "CARGO_HALLAZGO_CON_SOPORTE":
+                    # Regla 3.2: CARGO_HALLAZGO_CON_SOPORTE
+                    doc_ref_linea = (det.get("documento_referencia") or documento_referencia or "").strip()
+                    costo_in = det.get("costo_unitario")
+                    if not doc_ref_linea:
+                        raise ValueError(
+                            "HALLAZGO_REQUIERE_COSTO_Y_SOPORTE: CARGO_HALLAZGO_CON_SOPORTE requiere obligatoriamente 'documento_referencia'."
+                        )
+                    if costo_in is None or str(costo_in).strip() == "":
+                        raise ValueError(
+                            "HALLAZGO_REQUIERE_COSTO_Y_SOPORTE: CARGO_HALLAZGO_CON_SOPORTE requiere obligatoriamente 'costo_unitario > 0'."
+                        )
+                    try:
+                        costo_u_dec = Decimal(str(costo_in)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                    except Exception:
+                        raise ValueError("HALLAZGO_REQUIERE_COSTO_Y_SOPORTE: 'costo_unitario' debe ser numérico válido.")
+                    if costo_u_dec <= Decimal("0"):
+                        raise ValueError(
+                            f"HALLAZGO_REQUIERE_COSTO_Y_SOPORTE: 'costo_unitario' debe ser > 0 (recibido: {costo_u_dec}). "
+                            "Prohibido usar productos.costo o 0 como fallback."
+                        )
+
+                    if stk_ant_dec == Decimal("0"):
+                        cpp_ant_dec = Decimal(str(cpp_ant_raw or 0.0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                        res_calc = calcular_cpp_entrada(stk_ant_dec, cpp_ant_dec, cant_dec, costo_u_dec)
+                    else:
+                        if cpp_ant_raw is None or Decimal(str(cpp_ant_raw)) <= Decimal("0"):
+                            raise ErrorInconsistenciaCPP(
+                                f"INCONSISTENCIA_CPP: Producto {sku_cod} tiene stock positivo ({stk_ant_dec}) pero costo_cpp inválido ({cpp_ant_raw})."
+                            )
+                        cpp_ant_dec = Decimal(str(cpp_ant_raw)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                        res_calc = calcular_cpp_entrada(stk_ant_dec, cpp_ant_dec, cant_dec, costo_u_dec)
+
+                    stock_nuevo_dec = Decimal(str(res_calc["stock_nuevo"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                    cpp_nuevo_dec = Decimal(str(res_calc["cpp_nuevo"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                    costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+                elif subtipo_linea == "CARGO_TASACION_MANUAL":
+                    # Regla 3.3: CARGO_TASACION_MANUAL
+                    doc_ref_linea = (det.get("documento_referencia") or documento_referencia or "").strip()
+                    aut_por_linea = (det.get("autorizado_por") or autorizado_por or "").strip()
+                    just_linea = (det.get("justificacion_tecnica") or justificacion_header or motivo_detalle or "").strip()
+                    costo_in = det.get("costo_unitario")
+
+                    if not doc_ref_linea or not aut_por_linea or not just_linea or costo_in is None or str(costo_in).strip() == "":
+                        raise ValueError(
+                            "TASACION_MANUAL_INCOMPLETA: CARGO_TASACION_MANUAL requiere obligatoriamente "
+                            "'costo_unitario > 0', 'justificacion_tecnica', 'documento_referencia' y 'autorizado_por'."
+                        )
+                    try:
+                        costo_u_dec = Decimal(str(costo_in)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                    except Exception:
+                        raise ValueError("TASACION_MANUAL_INCOMPLETA: 'costo_unitario' debe ser numérico válido.")
+                    if costo_u_dec <= Decimal("0"):
+                        raise ValueError(
+                            f"TASACION_MANUAL_INCOMPLETA: 'costo_unitario' en tasación manual debe ser > 0 (recibido: {costo_u_dec})."
+                        )
+
+                    if stk_ant_dec == Decimal("0"):
+                        cpp_ant_dec = Decimal(str(cpp_ant_raw or 0.0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                        res_calc = calcular_cpp_entrada(stk_ant_dec, cpp_ant_dec, cant_dec, costo_u_dec)
+                    else:
+                        if cpp_ant_raw is None or Decimal(str(cpp_ant_raw)) <= Decimal("0"):
+                            raise ErrorInconsistenciaCPP(
+                                f"INCONSISTENCIA_CPP: Producto {sku_cod} tiene stock positivo ({stk_ant_dec}) pero costo_cpp inválido ({cpp_ant_raw})."
+                            )
+                        cpp_ant_dec = Decimal(str(cpp_ant_raw)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                        res_calc = calcular_cpp_entrada(stk_ant_dec, cpp_ant_dec, cant_dec, costo_u_dec)
+
+                    stock_nuevo_dec = Decimal(str(res_calc["stock_nuevo"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                    cpp_nuevo_dec = Decimal(str(res_calc["cpp_nuevo"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                    costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                else:
+                    raise ValueError(f"SUBTIPO_AJUSTE_OBLIGATORIO: Subtipo no soportado '{subtipo_linea}'")
+
+            # Insertar detalle con trazabilidad CPP (cpp_anterior, cpp_nuevo, subtipo_movimiento)
+            cursor.execute("""
+                INSERT INTO inventario_ajuste_detalles (
+                    ajuste_id, producto_id, cantidad, costo_unitario, costo_total,
+                    stock_anterior, stock_nuevo, motivo_detalle,
+                    subtipo_movimiento, cpp_anterior, cpp_nuevo
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                ajuste_id, p_id, float(cant_dec), float(costo_u_dec), float(costo_tot_dec),
+                float(stk_ant_dec), float(stock_nuevo_dec), motivo_detalle,
+                subtipo_linea, float(cpp_ant_dec), float(cpp_nuevo_dec)
+            ))
+            ajuste_det_id = cursor.lastrowid
+
+            # Registrar movimiento en inventario_movimientos con documento_linea_id = inventario_ajuste_detalles.id
+            mov_id = registrar_movimiento_inventario(
+                cursor=cursor,
+                producto_id=p_id,
+                fecha=fecha_ajuste,
+                tipo_movimiento=tipo_mov_sql,
+                sentido=sentido,
+                cantidad=float(cant_dec),
+                costo_unitario=float(costo_u_dec),
+                costo_total=float(costo_tot_dec),
+                stock_anterior=float(stk_ant_dec),
+                stock_nuevo=float(stock_nuevo_dec),
+                documento_tipo="INVENTARIO_AJUSTE",
+                documento_id=ajuste_id,
+                documento_linea_id=ajuste_det_id,
+                documento_numero=numero_ajuste,
+                motivo=motivo_detalle or motivo,
+                usuario_id=usuario_id,
+                subtipo_movimiento=subtipo_linea,
+                cpp_anterior=float(cpp_ant_dec),
+                cpp_nuevo=float(cpp_nuevo_dec)
+            )
+
+            # Actualizar productos.stock y productos.costo_cpp (sin usar productos.costo)
+            cursor.execute("""
+                UPDATE productos
+                SET stock = ?, costo_cpp = ?
+                WHERE id = ?
+            """, (float(stock_nuevo_dec), float(cpp_nuevo_dec), p_id))
+
+            # Hook opcional de prueba para verificar atomicidad / rollback ante fallo intermedio
+            if det.get("_forzar_fallo_post_detalle") or payload.get("_forzar_fallo_transaccional"):
+                raise RuntimeError("FALLO_SIMULADO_POST_MOVIMIENTO: Prueba de rollback atómico")
+
+            detalles_procesados.append({
+                "id": ajuste_det_id,
+                "producto_id": p_id,
+                "cantidad": float(cant_dec),
+                "costo_unitario": float(costo_u_dec),
+                "costo_total": float(costo_tot_dec),
+                "stock_anterior": float(stk_ant_dec),
+                "stock_nuevo": float(stock_nuevo_dec),
+                "cpp_anterior": float(cpp_ant_dec),
+                "cpp_nuevo": float(cpp_nuevo_dec),
+                "costo_cpp_nuevo": float(cpp_nuevo_dec),
+                "subtipo_movimiento": subtipo_linea,
+                "documento_linea_id": ajuste_det_id,
+                "movimiento_id": mov_id
+            })
+
+        if auto_commit and conn is not None and conn.in_transaction:
+            conn.commit()
+
+        return {
+            "success": True,
+            "duplicado_ignorado": False,
+            "id": ajuste_id,
+            "ajuste_id": ajuste_id,
+            "numero_ajuste": numero_ajuste,
+            "tipo_ajuste": tipo_ajuste,
+            "subtipo_ajuste": subtipo_canonico,
+            "motivo": motivo,
+            "fecha": fecha_ajuste,
+            "estado": "activo",
+            "documento_referencia": documento_referencia or None,
+            "autorizado_por": autorizado_por or None,
+            "idempotency_key": idempotency_key or None,
+            "ajuste_referencia_id": ajuste_referencia_id,
+            "total_items": len(detalles_procesados),
+            "detalles": detalles_procesados,
+            "message": f"Ajuste {tipo_ajuste} ({subtipo_canonico}) {numero_ajuste} procesado exitosamente"
+        }
+    except Exception:
+        if conn is not None and conn.in_transaction:
+            conn.rollback()
+        raise
+
+
+def anular_ajuste_inventario(cursor, ajuste_id, motivo="Anulación directa de ajuste de inventario", usuario_id=1, conn=None, auto_commit=True):
+    """
+    Anula directamente un ajuste de inventario bajo regla estricta LIFO por SKU (FASE 2F-5B Sección 14):
+      1. Verifica que el ajuste exista y esté en estado 'activo'.
+      2. Verifica que pertenezca a un período abierto (fecha > '2026-10-23 23:59:59' y movimientos con id > 108).
+      3. Verifica que NINGUNO de los SKUs afectados tenga movimientos posteriores en inventario_movimientos
+         (regla Tope de Pila / LIFO por SKU). Si existe cualquier movimiento posterior -> lanza
+         ErrorAnulacionAjusteConMovimientosPosteriores.
+      4. Invierte el stock físicamente, restaura exactamente cpp_anterior en productos.costo_cpp,
+         inserta el movimiento de reversión con subtipo_movimiento='ANULACION_AJUSTE' y documento_linea_id,
+         y marca inventario_ajustes.estado = 'anulado'.
+    """
+    if conn is None:
+        conn = getattr(cursor, "connection", None)
+
+    ajuste_id = int(ajuste_id)
+    started_tx = False
+    if conn is not None and not conn.in_transaction:
+        cursor.execute("BEGIN IMMEDIATE")
+        started_tx = True
+
+    try:
+        cursor.execute("SELECT * FROM inventario_ajustes WHERE id = ?", (ajuste_id,))
+        aj_row = cursor.fetchone()
+        if not aj_row:
+            raise LookupError(f"AJUSTE_NO_ENCONTRADO: Ajuste de inventario ID {ajuste_id} no existe.")
+        aj = dict(aj_row)
+
+        estado_actual = str(aj.get("estado") or "activo").strip().lower()
+        if estado_actual == "anulado":
+            raise ValueError(f"AJUSTE_YA_ANULADO: El ajuste {aj['numero_ajuste']} ya fue anulado previamente.")
+
+        if str(aj.get("fecha") or "") <= "2026-10-23 23:59:59":
+            raise ErrorAnulacionAjusteConMovimientosPosteriores(
+                f"PERIODO_CERRADO: El ajuste {aj['numero_ajuste']} pertenece al período histórico certificado cerrado. "
+                "Prohibido anular ajustes históricos; utilice un Contra-Ajuste compensatorio."
+            )
+
+        cursor.execute("""
+            SELECT * FROM inventario_ajuste_detalles
+            WHERE ajuste_id = ?
+            ORDER BY id ASC
+        """, (ajuste_id,))
+        detalles = [dict(r) for r in cursor.fetchall()]
+        if not detalles:
+            raise ValueError(f"El ajuste {aj['numero_ajuste']} no posee líneas de detalle para anular.")
+
+        # Validar regla LIFO por SKU en inventario_movimientos
+        movimientos_originales = {}
+        for det in detalles:
+            p_id = int(det["producto_id"])
+            det_id = int(det["id"])
+            cursor.execute("""
+                SELECT id, fecha, tipo_movimiento
+                FROM inventario_movimientos
+                WHERE documento_tipo = 'INVENTARIO_AJUSTE'
+                  AND documento_id = ?
+                  AND producto_id = ?
+                  AND (documento_linea_id = ? OR documento_linea_id IS NULL)
+                ORDER BY id DESC LIMIT 1
+            """, (ajuste_id, p_id, det_id))
+            mov_orig = cursor.fetchone()
+            if not mov_orig:
+                raise ValueError(
+                    f"No se encontró asiento en inventario_movimientos para el ajuste {aj['numero_ajuste']} (producto ID {p_id})."
+                )
+            mov_orig_dict = dict(mov_orig)
+            if int(mov_orig_dict["id"]) <= 108:
+                raise ErrorAnulacionAjusteConMovimientosPosteriores(
+                    f"PERIODO_CERRADO: El movimiento ID {mov_orig_dict['id']} pertenece al corte histórico inmutable (id <= 108)."
+                )
+            movimientos_originales[det_id] = mov_orig_dict
+
+            # Buscar si existe cualquier movimiento posterior para este SKU
+            cursor.execute("""
+                SELECT id, fecha, tipo_movimiento, documento_tipo, documento_numero
+                FROM inventario_movimientos
+                WHERE producto_id = ?
+                  AND (fecha > ? OR (fecha = ? AND id > ?))
+                ORDER BY fecha ASC, id ASC
+                LIMIT 1
+            """, (p_id, mov_orig_dict["fecha"], mov_orig_dict["fecha"], mov_orig_dict["id"]))
+            mov_post = cursor.fetchone()
+            if mov_post:
+                mp = dict(mov_post)
+                raise ErrorAnulacionAjusteConMovimientosPosteriores(
+                    f"ANULACION_BLOQUEADA_MOVIMIENTOS_POSTERIORES: No se puede anular directamente el ajuste "
+                    f"{aj['numero_ajuste']} porque el producto ID {p_id} registra movimientos posteriores "
+                    f"(Movimiento ID {mp['id']}, tipo '{mp['tipo_movimiento']}', fecha {mp['fecha']}). "
+                    "Para preservar el CPP histórico de operaciones posteriores, emita un Contra-Ajuste compensatorio."
+                )
+
+        fecha_anulacion = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        tipo_ajuste = str(aj["tipo_ajuste"]).strip().upper()
+        lineas_revertidas = []
+
+        for det in detalles:
+            p_id = int(det["producto_id"])
+            det_id = int(det["id"])
+            mov_orig_dict = movimientos_originales[det_id]
+            # Asegurar que la fecha del movimiento de reversión no sea anterior al movimiento original
+            fecha_rev = max(fecha_anulacion, str(mov_orig_dict["fecha"]))
+
+            cursor.execute("SELECT id, codigo, nombre, stock, costo_cpp FROM productos WHERE id = ?", (p_id,))
+            prod_row = dict(cursor.fetchone())
+            stk_actual_dec = Decimal(str(prod_row.get("stock") or 0.0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            cpp_actual_dec = Decimal(str(prod_row.get("costo_cpp") or 0.0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            cant_dec = Decimal(str(det["cantidad"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            costo_u_dec = Decimal(str(det["costo_unitario"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            costo_tot_dec = Decimal(str(det["costo_total"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+            cpp_restaurado_val = det.get("cpp_anterior")
+            if cpp_restaurado_val is not None:
+                cpp_restaurado_dec = Decimal(str(cpp_restaurado_val)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            else:
+                cpp_restaurado_dec = cpp_actual_dec
+
+            if tipo_ajuste == "CARGO":
+                # Anular un CARGO requiere retirar las unidades ingresadas
+                validar_stock_no_negativo(stk_actual_dec, cant_dec)
+                stk_nuevo_dec = (stk_actual_dec - cant_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                sentido_rev = "SALIDA"
+                tipo_mov_rev = "descargo_merma"
+            else:
+                # Anular un DESCARGO reintegra las unidades retiradas
+                stk_nuevo_dec = (stk_actual_dec + cant_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                sentido_rev = "ENTRADA"
+                tipo_mov_rev = "cargo_ajuste"
+
+            # Actualizar producto restaurando stock y cpp_anterior exacto
+            cursor.execute("""
+                UPDATE productos
+                SET stock = ?, costo_cpp = ?
+                WHERE id = ?
+            """, (float(stk_nuevo_dec), float(cpp_restaurado_dec), p_id))
+
+            mov_rev_id = registrar_movimiento_inventario(
+                cursor=cursor,
+                producto_id=p_id,
+                fecha=fecha_rev,
+                tipo_movimiento=tipo_mov_rev,
+                sentido=sentido_rev,
+                cantidad=float(cant_dec),
+                costo_unitario=float(costo_u_dec),
+                costo_total=float(costo_tot_dec),
+                stock_anterior=float(stk_actual_dec),
+                stock_nuevo=float(stk_nuevo_dec),
+                documento_tipo="ANULACION_AJUSTE",
+                documento_id=ajuste_id,
+                documento_linea_id=det_id,
+                documento_numero=aj["numero_ajuste"],
+                motivo=f"Anulación directa de Ajuste #{aj['numero_ajuste']}: {motivo}",
+                usuario_id=usuario_id,
+                subtipo_movimiento="ANULACION_AJUSTE",
+                cpp_anterior=float(cpp_actual_dec),
+                cpp_nuevo=float(cpp_restaurado_dec)
+            )
+
+            lineas_revertidas.append({
+                "detalle_id": det_id,
+                "producto_id": p_id,
+                "cantidad_revertida": float(cant_dec),
+                "stock_anterior": float(stk_actual_dec),
+                "stock_restaurado": float(stk_nuevo_dec),
+                "cpp_anterior_anulacion": float(cpp_actual_dec),
+                "cpp_restaurado": float(cpp_restaurado_dec),
+                "movimiento_reversion_id": mov_rev_id
+            })
+
+        cursor.execute("""
+            UPDATE inventario_ajustes
+            SET estado = 'anulado',
+                motivo_anulacion = ?,
+                fecha_anulacion = ?,
+                usuario_anulacion_id = ?
+            WHERE id = ?
+        """, (motivo, fecha_anulacion, int(usuario_id), ajuste_id))
+
+        if auto_commit and conn is not None and conn.in_transaction:
+            conn.commit()
+
+        return {
+            "success": True,
+            "id": ajuste_id,
+            "numero_ajuste": aj["numero_ajuste"],
+            "tipo_ajuste": tipo_ajuste,
+            "subtipo_ajuste": aj.get("subtipo_ajuste"),
+            "estado": "anulado",
+            "motivo_anulacion": motivo,
+            "fecha_anulacion": fecha_anulacion,
+            "lineas_revertidas": lineas_revertidas,
+            "message": f"Ajuste #{aj['numero_ajuste']} anulado exitosamente. Stock y CPP restaurados a su estado previo."
+        }
+    except Exception:
+        if conn is not None and conn.in_transaction:
+            conn.rollback()
+        raise
 
 
 
@@ -3700,6 +5199,868 @@ def obtener_estado_cuenta_proveedor_cxp(cursor, proveedor_id, tipo_filtro=None, 
         "total_movimientos_filtrados": len(movs_filtrados),
         "cuentas": cuentas
     }
+
+# ========================================================
+# FASE 2F-6C: MOTOR FINANCIERO, PAGOS N:M Y TESORERÍA
+# ========================================================
+
+def obtener_cuentas_tesoreria(solo_activas=True, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        query = "SELECT id, nombre, tipo, moneda, banco_entidad, numero_cuenta_enmascarado, saldo_actual, activo, permite_sobregiro FROM cuentas_tesoreria"
+        if solo_activas:
+            query += " WHERE activo = 1"
+        query += " ORDER BY id ASC"
+        cur.execute(query)
+        rows = cur.fetchall()
+        cols = ['id', 'nombre', 'tipo', 'moneda', 'banco_entidad', 'numero_cuenta_enmascarado', 'saldo_actual', 'activo', 'permite_sobregiro']
+        return [dict(zip(cols, r)) for r in rows]
+    finally:
+        if close_after:
+            conn.close()
+
+def obtener_resumen_tesoreria(conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cuentas = obtener_cuentas_tesoreria(solo_activas=False, conn=conn)
+        
+        cur.execute("""
+        SELECT a.id, a.cuenta_tesoreria_id, a.fecha_apertura, a.monto_inicial_usd, a.monto_inicial_moneda,
+               c.nombre as cuenta_nombre, c.moneda
+        FROM caja_aperturas a
+        JOIN cuentas_tesoreria c ON a.cuenta_tesoreria_id = c.id
+        WHERE a.estado = 'abierta'
+        """)
+        aperturas = [dict(zip(['id', 'cuenta_tesoreria_id', 'fecha_apertura', 'monto_inicial_usd', 'monto_inicial_moneda', 'cuenta_nombre', 'moneda'], r)) for r in cur.fetchall()]
+
+        totales = {'USD': 0.0, 'VES': 0.0, 'COP': 0.0}
+        for c in cuentas:
+            m = c['moneda']
+            if m in totales:
+                totales[m] = round(totales[m] + float(c['saldo_actual']), 2)
+
+        return {
+            'cuentas': cuentas,
+            'cajas_abiertas': aperturas,
+            'totales_moneda': totales,
+            'total_cuentas': len(cuentas)
+        }
+    finally:
+        if close_after:
+            conn.close()
+
+def registrar_pago_financiero(datos, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        idempotency_key = datos.get('idempotency_key')
+        if idempotency_key:
+            cur.execute("SELECT id, numero_pago, monto_total_equivalente_usd, monto_aplicado_usd, monto_no_aplicado_usd, estado FROM pagos WHERE idempotency_key = ?", (idempotency_key,))
+            existing = cur.fetchone()
+            if existing:
+                return {
+                    'id': existing[0],
+                    'numero_pago': existing[1],
+                    'monto_total_equivalente_usd': existing[2],
+                    'monto_aplicado_usd': existing[3],
+                    'monto_no_aplicado_usd': existing[4],
+                    'estado': existing[5],
+                    'duplicado_ignorado': True
+                }
+
+        tercero_tipo = datos.get('tercero_tipo', 'cliente')
+        tercero_id = datos.get('tercero_id', 1)
+        tipo_operacion = datos.get('tipo_operacion', 'cobro_cliente')
+        concepto = datos.get('concepto', 'Cobro / Pago comercial')
+        fecha_pago = datos.get('fecha_pago') or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        usuario_id = datos.get('usuario_id', 1)
+
+        detalles_monetarios = datos.get('detalles_monetarios') or datos.get('detalles') or []
+        aplicaciones = datos.get('aplicaciones', [])
+
+        if not detalles_monetarios and not aplicaciones:
+            raise ValueError("El pago debe contener al menos un detalle monetario o una aplicación válida.")
+
+        total_equivalente_usd = 0.0
+        detalles_calculados = []
+        for d in detalles_monetarios:
+            moneda = d.get('moneda', 'USD')
+            monto_moneda = float(d.get('monto_moneda', 0.0))
+            tasa_cambio = float(d.get('tasa_cambio', 1.0))
+            if tasa_cambio <= 0:
+                tasa_cambio = 1.0
+
+            if moneda == 'USD':
+                eq_usd = round(monto_moneda, 2)
+            else:
+                eq_usd = round(monto_moneda / tasa_cambio, 2)
+
+            total_equivalente_usd = round(total_equivalente_usd + eq_usd, 2)
+
+            cuenta_id = d.get('cuenta_tesoreria_id')
+            if not cuenta_id:
+                cur.execute("SELECT id FROM cuentas_tesoreria WHERE moneda = ? AND activo = 1 ORDER BY id ASC LIMIT 1", (moneda,))
+                row_c = cur.fetchone()
+                cuenta_id = row_c[0] if row_c else 1
+
+            detalles_calculados.append({
+                'cuenta_tesoreria_id': cuenta_id,
+                'moneda': moneda,
+                'monto_moneda': monto_moneda,
+                'tasa_cambio': tasa_cambio,
+                'equivalente_usd': eq_usd,
+                'metodo_pago': d.get('metodo_pago', 'efectivo'),
+                'referencia_bancaria': d.get('referencia_bancaria')
+            })
+
+        total_aplicado_usd = 0.0
+        aplicaciones_validadas = []
+        for a in aplicaciones:
+            monto_app = round(float(a.get('monto_aplicado_usd', 0.0)), 2)
+            if monto_app <= 0:
+                continue
+
+            doc_tipo = a.get('documento_tipo', 'factura')
+            doc_id = a.get('documento_id')
+            cxc_id = a.get('cuenta_por_cobrar_id')
+            cxp_id = a.get('cuenta_por_pagar_id')
+
+            if doc_tipo == 'factura':
+                if cxc_id:
+                    cur.execute("SELECT id, saldo_pendiente, monto_pagado FROM cuentas_por_cobrar WHERE id = ?", (cxc_id,))
+                else:
+                    cur.execute("SELECT id, saldo_pendiente, monto_pagado FROM cuentas_por_cobrar WHERE factura_id = ?", (doc_id,))
+                cxc = cur.fetchone()
+                if cxc:
+                    cxc_id = cxc[0]
+                    saldo_pendiente = float(cxc[1])
+                    if monto_app > saldo_pendiente + 0.005:
+                        raise ValueError(f"MONTO_SUPERA_SALDO: El monto a aplicar (${monto_app:.2f}) supera el saldo pendiente (${saldo_pendiente:.2f})")
+                else:
+                    cxc_id = None
+
+            total_aplicado_usd = round(total_aplicado_usd + monto_app, 2)
+            aplicaciones_validadas.append({
+                'documento_tipo': doc_tipo,
+                'documento_id': doc_id,
+                'cuenta_por_cobrar_id': cxc_id,
+                'cuenta_por_pagar_id': cxp_id,
+                'monto_aplicado_usd': monto_app
+            })
+
+        if total_aplicado_usd > total_equivalente_usd + 0.005:
+            raise ValueError(f"MONTO_SUPERA_SALDO: El monto aplicado (${total_aplicado_usd:.2f}) supera el total pagado (${total_equivalente_usd:.2f})")
+
+        monto_no_aplicado_usd = max(0.0, round(total_equivalente_usd - total_aplicado_usd, 2))
+
+        prefix = 'COB' if tipo_operacion in ('cobro_cliente', 'anticipo_cliente') else 'PAG'
+        ym = datetime.now().strftime('%Y%m')
+        cur.execute("SELECT COUNT(*) FROM pagos WHERE numero_pago LIKE ?", (f"{prefix}-{ym}-%",))
+        seq = cur.fetchone()[0] + 1
+        numero_pago = f"{prefix}-{ym}-{seq:06d}"
+
+        cur.execute("""
+        INSERT INTO pagos (
+            numero_pago, tipo_operacion, tercero_tipo, tercero_id, fecha_pago, concepto,
+            monto_total_equivalente_usd, monto_aplicado_usd, monto_no_aplicado_usd,
+            estado, idempotency_key, usuario_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)
+        """, (
+            numero_pago, tipo_operacion, tercero_tipo, tercero_id, fecha_pago, concepto,
+            total_equivalente_usd, total_aplicado_usd, monto_no_aplicado_usd,
+            idempotency_key, usuario_id
+        ))
+        pago_id = cur.lastrowid
+
+        detalles_guardados = []
+        for d in detalles_calculados:
+            cur.execute("""
+            INSERT INTO pago_detalles (
+                pago_id, cuenta_tesoreria_id, moneda, monto_moneda, tasa_cambio, equivalente_usd,
+                metodo_pago, referencia_bancaria
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                pago_id, d['cuenta_tesoreria_id'], d['moneda'], d['monto_moneda'], d['tasa_cambio'], d['equivalente_usd'],
+                d['metodo_pago'], d['referencia_bancaria']
+            ))
+            pago_det_id = cur.lastrowid
+            d['id'] = pago_det_id
+            detalles_guardados.append(d)
+
+            es_ingreso = tipo_operacion in ('cobro_cliente', 'anticipo_cliente')
+            tipo_mov = 'ingreso' if es_ingreso else 'egreso'
+            origen_mod = 'cobro_cxc' if es_ingreso else 'pago_cxp'
+
+            cur.execute("SELECT saldo_actual FROM cuentas_tesoreria WHERE id = ?", (d['cuenta_tesoreria_id'],))
+            row_s = cur.fetchone()
+            saldo_ant = float(row_s[0]) if row_s else 0.0
+            saldo_nue = round(saldo_ant + d['monto_moneda'], 2) if es_ingreso else round(saldo_ant - d['monto_moneda'], 2)
+
+            cur.execute("UPDATE cuentas_tesoreria SET saldo_actual = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (saldo_nue, d['cuenta_tesoreria_id']))
+
+            cur.execute("""
+            INSERT INTO tesoreria_movimientos (
+                cuenta_tesoreria_id, tipo_movimiento, origen_modulo, origen_id, pago_detalle_id,
+                fecha_movimiento, descripcion, monto_moneda, saldo_anterior, saldo_nuevo,
+                tasa_cambio, equivalente_usd, usuario_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                d['cuenta_tesoreria_id'], tipo_mov, origen_mod, pago_id, pago_det_id,
+                fecha_pago, f"{concepto} ({d['metodo_pago']})", d['monto_moneda'], saldo_ant, saldo_nue,
+                d['tasa_cambio'], d['equivalente_usd'], usuario_id
+            ))
+
+        for a in aplicaciones_validadas:
+            cur.execute("""
+            INSERT INTO pago_aplicaciones (
+                pago_id, documento_tipo, documento_id, cuenta_por_cobrar_id, cuenta_por_pagar_id,
+                monto_aplicado_usd, estado
+            ) VALUES (?, ?, ?, ?, ?, ?, 'activa')
+            """, (
+                pago_id, a['documento_tipo'], a['documento_id'], a['cuenta_por_cobrar_id'], a['cuenta_por_pagar_id'],
+                a['monto_aplicado_usd']
+            ))
+
+            if a['cuenta_por_cobrar_id']:
+                cur.execute("SELECT monto_pagado, saldo_pendiente FROM cuentas_por_cobrar WHERE id = ?", (a['cuenta_por_cobrar_id'],))
+                row_c = cur.fetchone()
+                if row_c:
+                    monto_pagado_nuevo = round(float(row_c[0]) + a['monto_aplicado_usd'], 2)
+                    saldo_pendiente_nuevo = max(0.0, round(float(row_c[1]) - a['monto_aplicado_usd'], 2))
+                    estado_nuevo = 'pagada' if saldo_pendiente_nuevo <= 0.005 else 'pendiente'
+                    cur.execute("""
+                    UPDATE cuentas_por_cobrar 
+                    SET monto_pagado = ?, saldo_pendiente = ?, estado = ?
+                    WHERE id = ?
+                    """, (monto_pagado_nuevo, saldo_pendiente_nuevo, estado_nuevo, a['cuenta_por_cobrar_id']))
+
+            if a['cuenta_por_pagar_id']:
+                cur.execute("SELECT monto_pagado, saldo_pendiente FROM cuentas_por_pagar WHERE id = ?", (a['cuenta_por_pagar_id'],))
+                row_cp = cur.fetchone()
+                if row_cp:
+                    monto_pagado_nuevo = round(float(row_cp[0]) + a['monto_aplicado_usd'], 2)
+                    saldo_pendiente_nuevo = max(0.0, round(float(row_cp[1]) - a['monto_aplicado_usd'], 2))
+                    estado_nuevo = 'pagada' if saldo_pendiente_nuevo <= 0.005 else 'pendiente'
+                    cur.execute("""
+                    UPDATE cuentas_por_pagar 
+                    SET monto_pagado = ?, saldo_pendiente = ?, estado = ?
+                    WHERE id = ?
+                    """, (monto_pagado_nuevo, saldo_pendiente_nuevo, estado_nuevo, a['cuenta_por_pagar_id']))
+
+        anticipo_creado = None
+        if monto_no_aplicado_usd > 0.005:
+            cur.execute("""
+            INSERT INTO anticipos_clientes (
+                tercero_tipo, tercero_id, pago_origen_id, monto_original_usd, saldo_disponible_usd, estado
+            ) VALUES (?, ?, ?, ?, ?, 'disponible')
+            """, (tercero_tipo, tercero_id, pago_id, monto_no_aplicado_usd, monto_no_aplicado_usd))
+            anticipo_creado = {
+                'id': cur.lastrowid,
+                'saldo_disponible_usd': monto_no_aplicado_usd,
+                'estado': 'disponible'
+            }
+
+        conn.commit()
+
+        return {
+            'id': pago_id,
+            'numero_pago': numero_pago,
+            'tipo_operacion': tipo_operacion,
+            'concepto': concepto,
+            'monto_total_equivalente_usd': total_equivalente_usd,
+            'monto_aplicado_usd': total_aplicado_usd,
+            'monto_no_aplicado_usd': monto_no_aplicado_usd,
+            'estado': 'activo',
+            'detalles': detalles_guardados,
+            'aplicaciones': aplicaciones_validadas,
+            'anticipo': anticipo_creado,
+            'duplicado_ignorado': False
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+def anular_pago_financiero(pago_id, usuario_id=1, motivo="", conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        cur.execute("SELECT id, estado, concepto FROM pagos WHERE id = ?", (pago_id,))
+        p = cur.fetchone()
+        if not p:
+            raise ValueError(f"Pago {pago_id} no encontrado")
+        if p[1] == 'anulado':
+            raise ValueError(f"El pago {pago_id} ya se encuentra anulado")
+
+        cur.execute("SELECT id, documento_tipo, documento_id, cuenta_por_cobrar_id, cuenta_por_pagar_id, monto_aplicado_usd FROM pago_aplicaciones WHERE pago_id = ? AND estado = 'activa'", (pago_id,))
+        apps = cur.fetchall()
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        for app in apps:
+            app_id, doc_tipo, doc_id, cxc_id, cxp_id, monto_app = app
+            monto_app = float(monto_app)
+
+            if cxc_id:
+                cur.execute("SELECT monto_pagado, saldo_pendiente FROM cuentas_por_cobrar WHERE id = ?", (cxc_id,))
+                row_c = cur.fetchone()
+                if row_c:
+                    monto_pagado_nuevo = max(0.0, round(float(row_c[0]) - monto_app, 2))
+                    saldo_pendiente_nuevo = round(float(row_c[1]) + monto_app, 2)
+                    cur.execute("UPDATE cuentas_por_cobrar SET monto_pagado = ?, saldo_pendiente = ?, estado = 'pendiente' WHERE id = ?", (monto_pagado_nuevo, saldo_pendiente_nuevo, cxc_id))
+
+            if cxp_id:
+                cur.execute("SELECT monto_pagado, saldo_pendiente FROM cuentas_por_pagar WHERE id = ?", (cxp_id,))
+                row_cp = cur.fetchone()
+                if row_cp:
+                    monto_pagado_nuevo = max(0.0, round(float(row_cp[0]) - monto_app, 2))
+                    saldo_pendiente_nuevo = round(float(row_cp[1]) + monto_app, 2)
+                    cur.execute("UPDATE cuentas_por_pagar SET monto_pagado = ?, saldo_pendiente = ?, estado = 'pendiente' WHERE id = ?", (monto_pagado_nuevo, saldo_pendiente_nuevo, cxp_id))
+
+            cur.execute("UPDATE pago_aplicaciones SET estado = 'revertida', revertido_at = ?, revertido_motivo = ? WHERE id = ?", (now_str, motivo, app_id))
+
+        cur.execute("SELECT id, monto_original_usd, saldo_disponible_usd FROM anticipos_clientes WHERE pago_origen_id = ?", (pago_id,))
+        ant = cur.fetchone()
+        if ant:
+            orig = float(ant[1])
+            disp = float(ant[2])
+            if disp < orig - 0.005:
+                raise ValueError("No se puede anular el pago: el saldo a favor generado ya fue consumido en facturas posteriores.")
+            cur.execute("UPDATE anticipos_clientes SET estado = 'reembolsado', saldo_disponible_usd = 0.0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (ant[0],))
+
+        cur.execute("SELECT id, cuenta_tesoreria_id, moneda, monto_moneda, tasa_cambio, equivalente_usd, metodo_pago FROM pago_detalles WHERE pago_id = ?", (pago_id,))
+        detalles = cur.fetchall()
+
+        for d in detalles:
+            det_id, cuenta_id, moneda, monto_moneda, tasa, eq_usd, metodo = d
+            monto_moneda = float(monto_moneda)
+            tasa = float(tasa)
+            eq_usd = float(eq_usd)
+
+            cur.execute("SELECT saldo_actual FROM cuentas_tesoreria WHERE id = ?", (cuenta_id,))
+            saldo_ant = float(cur.fetchone()[0])
+            saldo_nue = round(saldo_ant - monto_moneda, 2)
+            cur.execute("UPDATE cuentas_tesoreria SET saldo_actual = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (saldo_nue, cuenta_id))
+
+            cur.execute("""
+            INSERT INTO tesoreria_movimientos (
+                cuenta_tesoreria_id, tipo_movimiento, origen_modulo, origen_id, pago_detalle_id,
+                fecha_movimiento, descripcion, monto_moneda, saldo_anterior, saldo_nuevo,
+                tasa_cambio, equivalente_usd, usuario_id
+            ) VALUES (?, 'egreso', 'cobro_cxc', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cuenta_id, pago_id, det_id, now_str, f"ANULACIÓN PAGO #{pago_id}: {motivo}",
+                monto_moneda, saldo_ant, saldo_nue, tasa, eq_usd, usuario_id
+            ))
+
+        cur.execute("""
+        UPDATE pagos 
+        SET estado = 'anulado', anulado_at = ?, anulado_by = ?, motivo_anulacion = ?
+        WHERE id = ?
+        """, (now_str, usuario_id, motivo, pago_id))
+
+        conn.commit()
+        return {'id': pago_id, 'estado': 'anulado', 'anulado_at': now_str}
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+def aplicar_anticipo_cliente(anticipo_id, aplicaciones, usuario_id=1, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        cur.execute("SELECT id, pago_origen_id, saldo_disponible_usd, estado FROM anticipos_clientes WHERE id = ?", (anticipo_id,))
+        ant = cur.fetchone()
+        if not ant:
+            raise ValueError(f"Anticipo {anticipo_id} no encontrado")
+        if ant[3] not in ('disponible', 'aplicado_parcial'):
+            raise ValueError("El anticipo no tiene saldo disponible.")
+
+        pago_origen_id = ant[1]
+        saldo_disp = float(ant[2])
+
+        total_aplicar = sum(float(a.get('monto_aplicado_usd', 0.0)) for a in aplicaciones)
+        if total_aplicar > saldo_disp + 0.005:
+            raise ValueError(f"El monto a aplicar (${total_aplicar:.2f}) supera el saldo disponible (${saldo_disp:.2f})")
+
+        for a in aplicaciones:
+            monto_app = round(float(a.get('monto_aplicado_usd', 0.0)), 2)
+            if monto_app <= 0:
+                continue
+
+            cxc_id = a.get('cuenta_por_cobrar_id')
+            doc_id = a.get('documento_id')
+
+            if cxc_id:
+                cur.execute("SELECT id, saldo_pendiente, monto_pagado FROM cuentas_por_cobrar WHERE id = ?", (cxc_id,))
+            else:
+                cur.execute("SELECT id, saldo_pendiente, monto_pagado FROM cuentas_por_cobrar WHERE factura_id = ?", (doc_id,))
+            cxc = cur.fetchone()
+            if not cxc:
+                continue
+
+            cxc_id = cxc[0]
+            saldo_pend = float(cxc[1])
+            if monto_app > saldo_pend + 0.005:
+                raise ValueError("Monto excede saldo pendiente de factura.")
+
+            cur.execute("""
+            INSERT INTO pago_aplicaciones (
+                pago_id, documento_tipo, documento_id, cuenta_por_cobrar_id, monto_aplicado_usd, estado
+            ) VALUES (?, 'factura', ?, ?, ?, 'activa')
+            """, (pago_origen_id, doc_id, cxc_id, monto_app))
+
+            monto_pagado_nuevo = round(float(cxc[2]) + monto_app, 2)
+            saldo_pend_nuevo = max(0.0, round(saldo_pend - monto_app, 2))
+            estado_nuevo = 'pagada' if saldo_pend_nuevo <= 0.005 else 'pendiente'
+
+            cur.execute("UPDATE cuentas_por_cobrar SET monto_pagado = ?, saldo_pendiente = ?, estado = ? WHERE id = ?", (monto_pagado_nuevo, saldo_pend_nuevo, estado_nuevo, cxc_id))
+
+        saldo_restante = max(0.0, round(saldo_disp - total_aplicar, 2))
+        estado_ant = 'agotado' if saldo_restante <= 0.005 else 'aplicado_parcial'
+
+        cur.execute("UPDATE anticipos_clientes SET saldo_disponible_usd = ?, estado = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (saldo_restante, estado_ant, anticipo_id))
+
+        cur.execute("""
+        UPDATE pagos 
+        SET monto_aplicado_usd = round(monto_aplicado_usd + ?, 2),
+            monto_no_aplicado_usd = round(monto_no_aplicado_usd - ?, 2)
+        WHERE id = ?
+        """, (total_aplicar, total_aplicar, pago_origen_id))
+
+        conn.commit()
+        return {
+            'anticipo_id': anticipo_id,
+            'monto_aplicado_usd': total_aplicar,
+            'saldo_disponible_restante_usd': saldo_restante,
+            'estado_anticipo': estado_ant
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+def abrir_caja_turno(cuenta_tesoreria_id, usuario_id=1, monto_inicial_usd=0.0, monto_inicial_moneda=0.0, notas="", conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        cur.execute("SELECT id FROM caja_aperturas WHERE cuenta_tesoreria_id = ? AND estado = 'abierta'", (cuenta_tesoreria_id,))
+        if cur.fetchone():
+            raise ValueError(f"La cuenta {cuenta_tesoreria_id} ya posee un turno de caja abierto.")
+
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        cur.execute("""
+        INSERT INTO caja_aperturas (
+            cuenta_tesoreria_id, usuario_id, fecha_apertura, monto_inicial_usd, monto_inicial_moneda, estado, notas_apertura
+        ) VALUES (?, ?, ?, ?, ?, 'abierta', ?)
+        """, (cuenta_tesoreria_id, usuario_id, now_str, monto_inicial_usd, monto_inicial_moneda, notas))
+        apertura_id = cur.lastrowid
+
+        if monto_inicial_moneda > 0:
+            cur.execute("UPDATE cuentas_tesoreria SET saldo_actual = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (monto_inicial_moneda, cuenta_tesoreria_id))
+
+        conn.commit()
+        return {'id': apertura_id, 'cuenta_tesoreria_id': cuenta_tesoreria_id, 'estado': 'abierta', 'monto_inicial_usd': monto_inicial_usd}
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+def cerrar_caja_turno(caja_apertura_id, usuario_id=1, saldo_real_fisico_usd=0.0, saldo_real_fisico_moneda=0.0, notas="", conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        cur.execute("SELECT id, cuenta_tesoreria_id, fecha_apertura, monto_inicial_usd, monto_inicial_moneda, estado FROM caja_aperturas WHERE id = ?", (caja_apertura_id,))
+        ap = cur.fetchone()
+        if not ap:
+            raise ValueError(f"Turno de apertura {caja_apertura_id} no encontrado")
+        if ap[5] != 'abierta':
+            raise ValueError("El turno de caja ya se encuentra cerrado.")
+
+        cuenta_id = ap[1]
+        fecha_ape = ap[2]
+        monto_ini_usd = float(ap[3])
+        monto_ini_moneda = float(ap[4])
+
+        cur.execute("""
+        SELECT 
+            COALESCE(SUM(CASE WHEN tipo_movimiento = 'ingreso' THEN monto_moneda ELSE 0 END), 0.0) as ingresos,
+            COALESCE(SUM(CASE WHEN tipo_movimiento = 'egreso' THEN monto_moneda ELSE 0 END), 0.0) as egresos
+        FROM tesoreria_movimientos
+        WHERE cuenta_tesoreria_id = ? AND fecha_movimiento > ?
+        """, (cuenta_id, fecha_ape))
+        movs = cur.fetchone()
+        ingresos = float(movs[0])
+        egresos = float(movs[1])
+
+        saldo_teorico_moneda = round(monto_ini_moneda + ingresos - egresos, 2)
+        cur.execute("SELECT moneda FROM cuentas_tesoreria WHERE id = ?", (cuenta_id,))
+        moneda = cur.fetchone()[0]
+
+        diferencia_moneda = round(saldo_real_fisico_moneda - saldo_teorico_moneda, 2)
+        diferencia_usd = diferencia_moneda if moneda == 'USD' else round(diferencia_moneda, 2)
+
+        if abs(diferencia_moneda) <= 0.01:
+            estado_arqueo = 'cuadrado'
+        elif diferencia_moneda > 0:
+            estado_arqueo = 'sobrante'
+        else:
+            estado_arqueo = 'faltante'
+
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        cur.execute("""
+        INSERT INTO caja_cierres (
+            caja_apertura_id, fecha_cierre, saldo_teorico_usd, saldo_teorico_moneda,
+            saldo_real_fisico_usd, saldo_real_fisico_moneda, diferencia_usd, diferencia_moneda,
+            estado_arqueo, notas_cierre, cerrado_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            caja_apertura_id, now_str, saldo_teorico_moneda, saldo_teorico_moneda,
+            saldo_real_fisico_usd, saldo_real_fisico_moneda, diferencia_usd, diferencia_moneda,
+            estado_arqueo, notas, usuario_id
+        ))
+        cierre_id = cur.lastrowid
+
+        if abs(diferencia_moneda) > 0.01:
+            cur.execute("UPDATE cuentas_tesoreria SET saldo_actual = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (saldo_real_fisico_moneda, cuenta_id))
+            cur.execute("""
+            INSERT INTO tesoreria_movimientos (
+                cuenta_tesoreria_id, tipo_movimiento, origen_modulo, origen_id,
+                fecha_movimiento, descripcion, monto_moneda, saldo_anterior, saldo_nuevo,
+                tasa_cambio, equivalente_usd, usuario_id
+            ) VALUES (?, 'ajuste_arqueo', 'caja_arqueo', ?, ?, ?, ?, ?, ?, 1.0, ?, ?)
+            """, (
+                cuenta_id, cierre_id, now_str, f"ARQUEO CAJA #{caja_apertura_id}: {estado_arqueo.upper()}",
+                abs(diferencia_moneda), saldo_teorico_moneda, saldo_real_fisico_moneda, abs(diferencia_usd), usuario_id
+            ))
+
+        cur.execute("UPDATE caja_aperturas SET estado = 'cerrada' WHERE id = ?", (caja_apertura_id,))
+        conn.commit()
+
+        return {
+            'id': cierre_id,
+            'caja_apertura_id': caja_apertura_id,
+            'estado_arqueo': estado_arqueo,
+            'saldo_teorico_usd': saldo_teorico_moneda,
+            'saldo_real_fisico_usd': saldo_real_fisico_usd,
+            'diferencia_usd': diferencia_usd,
+            'diferencia_moneda': diferencia_moneda
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+def registrar_gasto_operativo(datos, usuario_id=1, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        categoria = datos.get('categoria_gasto') or datos.get('categoria') or 'Operativo'
+        beneficiario = datos.get('beneficiario', 'Proveedor de Servicios')
+        rif = datos.get('beneficiario_rif')
+        tipo_pago = datos.get('tipo_pago', 'contado')
+        moneda = datos.get('moneda', 'USD')
+        monto_moneda = float(datos.get('monto_total_moneda') or datos.get('monto_moneda') or datos.get('monto') or 0.0)
+        tasa = float(datos.get('tasa_cambio', 1.0))
+        if tasa <= 0: tasa = 1.0
+        monto_usd = round(monto_moneda if moneda == 'USD' else monto_moneda / tasa, 2)
+        concepto = datos.get('concepto') or datos.get('descripcion') or 'Gasto operativo'
+        cuenta_id = datos.get('cuenta_tesoreria_id')
+        fecha_emision = datos.get('fecha_emision') or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        ym = datetime.now().strftime('%Y%m')
+        cur.execute("SELECT COUNT(*) FROM gastos WHERE numero_gasto LIKE ?", (f"GAS-{ym}-%",))
+        seq = cur.fetchone()[0] + 1
+        numero_gasto = f"GAS-{ym}-{seq:06d}"
+
+        cxp_id = None
+        if tipo_pago == 'credito':
+            cur.execute("""
+            INSERT INTO cuentas_por_pagar (
+                concepto, monto_total, saldo_pendiente, fecha_vencimiento, estado
+            ) VALUES (?, ?, ?, date('now', '+30 days'), 'pendiente')
+            """, (f"Gasto: {concepto} ({beneficiario})", monto_usd, monto_usd))
+            cxp_id = cur.lastrowid
+
+        cur.execute("""
+        INSERT INTO gastos (
+            numero_gasto, categoria_gasto, beneficiario, beneficiario_rif, tipo_pago,
+            moneda, monto_total_moneda, tasa_cambio, monto_total_usd, concepto,
+            cuenta_tesoreria_id, cuenta_por_pagar_id, usuario_id, fecha_emision, estado
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo')
+        """, (
+            numero_gasto, categoria, beneficiario, rif, tipo_pago,
+            moneda, monto_moneda, tasa, monto_usd, concepto,
+            cuenta_id, cxp_id, usuario_id, fecha_emision
+        ))
+        gasto_id = cur.lastrowid
+
+        if tipo_pago == 'contado' and cuenta_id:
+            cur.execute("SELECT saldo_actual FROM cuentas_tesoreria WHERE id = ?", (cuenta_id,))
+            row_s = cur.fetchone()
+            saldo_ant = float(row_s[0]) if row_s else 0.0
+            saldo_nue = round(saldo_ant - monto_moneda, 2)
+            cur.execute("UPDATE cuentas_tesoreria SET saldo_actual = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (saldo_nue, cuenta_id))
+
+            cur.execute("""
+            INSERT INTO tesoreria_movimientos (
+                cuenta_tesoreria_id, tipo_movimiento, origen_modulo, origen_id,
+                fecha_movimiento, descripcion, monto_moneda, saldo_anterior, saldo_nuevo,
+                tasa_cambio, equivalente_usd, usuario_id
+            ) VALUES (?, 'egreso', 'gasto_operativo', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cuenta_id, gasto_id, fecha_emision, f"GASTO #{numero_gasto}: {concepto}",
+                monto_moneda, saldo_ant, saldo_nue, tasa, monto_usd, usuario_id
+            ))
+
+        conn.commit()
+        return {
+            'id': gasto_id,
+            'numero_gasto': numero_gasto,
+            'monto_total_usd': monto_usd,
+            'estado': 'activo',
+            'cuenta_por_pagar_id': cxp_id
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+def transferir_entre_cuentas_tesoreria(cuenta_origen_id, cuenta_destino_id, monto_origen, monto_destino, tasa_cambio, usuario_id=1, notas="", conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        cur.execute("SELECT id, moneda, saldo_actual FROM cuentas_tesoreria WHERE id = ?", (cuenta_origen_id,))
+        orig = cur.fetchone()
+        cur.execute("SELECT id, moneda, saldo_actual FROM cuentas_tesoreria WHERE id = ?", (cuenta_destino_id,))
+        dest = cur.fetchone()
+
+        if not orig or not dest:
+            raise ValueError("Cuenta de origen o destino no encontrada")
+
+        saldo_orig_ant = float(orig[2])
+        saldo_dest_ant = float(dest[2])
+
+        saldo_orig_nue = round(saldo_orig_ant - float(monto_origen), 2)
+        saldo_dest_nue = round(saldo_dest_ant + float(monto_destino), 2)
+
+        cur.execute("UPDATE cuentas_tesoreria SET saldo_actual = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (saldo_orig_nue, cuenta_origen_id))
+        cur.execute("UPDATE cuentas_tesoreria SET saldo_actual = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (saldo_dest_nue, cuenta_destino_id))
+
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        cur.execute("""
+        INSERT INTO tesoreria_movimientos (
+            cuenta_tesoreria_id, tipo_movimiento, origen_modulo,
+            fecha_movimiento, descripcion, monto_moneda, saldo_anterior, saldo_nuevo,
+            tasa_cambio, equivalente_usd, usuario_id
+        ) VALUES (?, 'transferencia_salida', 'transferencia_interna', ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            cuenta_origen_id, now_str, f"Transferencia hacia cuenta #{cuenta_destino_id} ({notas})",
+            float(monto_origen), saldo_orig_ant, saldo_orig_nue, float(tasa_cambio), float(monto_origen), usuario_id
+        ))
+
+        cur.execute("""
+        INSERT INTO tesoreria_movimientos (
+            cuenta_tesoreria_id, tipo_movimiento, origen_modulo,
+            fecha_movimiento, descripcion, monto_moneda, saldo_anterior, saldo_nuevo,
+            tasa_cambio, equivalente_usd, usuario_id
+        ) VALUES (?, 'transferencia_entrada', 'transferencia_interna', ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            cuenta_destino_id, now_str, f"Transferencia recibida de cuenta #{cuenta_origen_id} ({notas})",
+            float(monto_destino), saldo_dest_ant, saldo_dest_nue, float(tasa_cambio), float(monto_origen), usuario_id
+        ))
+
+        conn.commit()
+        return {
+            'cuenta_origen_id': cuenta_origen_id,
+            'saldo_origen_nuevo': saldo_orig_nue,
+            'cuenta_destino_id': cuenta_destino_id,
+            'saldo_destino_nuevo': saldo_dest_nue
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+def obtener_historial_pagos(filtros=None, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        query = """
+        SELECT p.id, p.numero_pago, p.tipo_operacion, p.tercero_tipo, p.tercero_id, p.fecha_pago,
+               p.concepto, p.monto_total_equivalente_usd, p.monto_aplicado_usd, p.monto_no_aplicado_usd,
+               p.estado, p.created_at, p.motivo_anulacion,
+               CASE WHEN p.tercero_tipo = 'cliente' THEN c.nombre ELSE pr.nombre END as tercero_nombre
+        FROM pagos p
+        LEFT JOIN clientes c ON p.tercero_tipo = 'cliente' AND p.tercero_id = c.id
+        LEFT JOIN proveedores pr ON p.tercero_tipo = 'proveedor' AND p.tercero_id = pr.id
+        WHERE 1=1
+        """
+        params = []
+        if filtros:
+            if filtros.get('tercero_id'):
+                query += " AND p.tercero_id = ?"
+                params.append(filtros['tercero_id'])
+            if filtros.get('estado'):
+                query += " AND p.estado = ?"
+                params.append(filtros['estado'])
+            if filtros.get('tipo_operacion'):
+                query += " AND p.tipo_operacion = ?"
+                params.append(filtros['tipo_operacion'])
+
+        query += " ORDER BY p.id DESC LIMIT 100"
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cols = ['id', 'numero_pago', 'tipo_operacion', 'tercero_tipo', 'tercero_id', 'fecha_pago',
+                'concepto', 'monto_total_equivalente_usd', 'monto_aplicado_usd', 'monto_no_aplicado_usd',
+                'estado', 'created_at', 'motivo_anulacion', 'tercero_nombre']
+        
+        resultado = []
+        for r in rows:
+            p_dict = dict(zip(cols, r))
+            cur.execute("""
+            SELECT pd.id, pd.cuenta_tesoreria_id, pd.moneda, pd.monto_moneda, pd.tasa_cambio, pd.equivalente_usd,
+                   pd.metodo_pago, pd.referencia_bancaria, ct.nombre as cuenta_nombre
+            FROM pago_detalles pd
+            LEFT JOIN cuentas_tesoreria ct ON pd.cuenta_tesoreria_id = ct.id
+            WHERE pd.pago_id = ?
+            """, (p_dict['id'],))
+            p_dict['detalles'] = [dict(zip(['id', 'cuenta_tesoreria_id', 'moneda', 'monto_moneda', 'tasa_cambio', 'equivalente_usd', 'metodo_pago', 'referencia_bancaria', 'cuenta_nombre'], dr)) for dr in cur.fetchall()]
+            
+            cur.execute("""
+            SELECT pa.id, pa.documento_tipo, pa.documento_id, pa.monto_aplicado_usd, pa.estado,
+                   f.numero_factura
+            FROM pago_aplicaciones pa
+            LEFT JOIN facturas f ON pa.documento_tipo = 'factura' AND pa.documento_id = f.id
+            WHERE pa.pago_id = ?
+            """, (p_dict['id'],))
+            p_dict['aplicaciones'] = [dict(zip(['id', 'documento_tipo', 'documento_id', 'monto_aplicado_usd', 'estado', 'numero_factura'], ar)) for ar in cur.fetchall()]
+
+            resultado.append(p_dict)
+
+        return resultado
+    finally:
+        if close_after:
+            conn.close()
+
+def obtener_anticipos_cliente(cliente_id, solo_disponibles=True, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        query = """
+        SELECT a.id, a.tercero_tipo, a.tercero_id, a.pago_origen_id, a.monto_original_usd,
+               a.saldo_disponible_usd, a.estado, a.created_at, p.numero_pago
+        FROM anticipos_clientes a
+        JOIN pagos p ON a.pago_origen_id = p.id
+        WHERE a.tercero_tipo = 'cliente' AND a.tercero_id = ?
+        """
+        params = [cliente_id]
+        if solo_disponibles:
+            query += " AND a.saldo_disponible_usd > 0 AND a.estado IN ('disponible', 'aplicado_parcial')"
+        query += " ORDER BY a.id ASC"
+        cur.execute(query, params)
+        cols = ['id', 'tercero_tipo', 'tercero_id', 'pago_origen_id', 'monto_original_usd', 'saldo_disponible_usd', 'estado', 'created_at', 'numero_pago']
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        if close_after:
+            conn.close()
+
+def obtener_gastos_operativos(filtros=None, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        query = """
+        SELECT g.id, g.numero_gasto, g.categoria_gasto, g.beneficiario, g.beneficiario_rif, g.tipo_pago,
+               g.moneda, g.monto_total_moneda, g.tasa_cambio, g.monto_total_usd, g.numero_factura_fiscal,
+               g.numero_control, g.concepto, g.cuenta_tesoreria_id, g.cuenta_por_pagar_id, g.fecha_emision,
+               g.estado, ct.nombre as cuenta_nombre
+        FROM gastos g
+        LEFT JOIN cuentas_tesoreria ct ON g.cuenta_tesoreria_id = ct.id
+        WHERE 1=1
+        """
+        params = []
+        if filtros and filtros.get('estado'):
+            query += " AND g.estado = ?"
+            params.append(filtros['estado'])
+        query += " ORDER BY g.id DESC LIMIT 100"
+        cur.execute(query, params)
+        cols = ['id', 'numero_gasto', 'categoria_gasto', 'beneficiario', 'beneficiario_rif', 'tipo_pago',
+                'moneda', 'monto_total_moneda', 'tasa_cambio', 'monto_total_usd', 'numero_factura_fiscal',
+                'numero_control', 'concepto', 'cuenta_tesoreria_id', 'cuenta_por_pagar_id', 'fecha_emision',
+                'estado', 'cuenta_nombre']
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        if close_after:
+            conn.close()
+
 
 if __name__ == "__main__":
     init_db()

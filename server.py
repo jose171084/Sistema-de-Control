@@ -31,8 +31,18 @@ from database import (
     calcular_cpp_entrada, calcular_valor_salida_cpp, validar_stock_no_negativo,
     validar_movimiento_no_retroactivo, ErrorStockNegativo, 
     ErrorMovimientoRetroactivoNoPermitido, ErrorInconsistenciaCPP,
-    ErrorCostoHistoricoNoRecuperable, ErrorCantidadDevolucionExcedeDisponible
+    ErrorCostoHistoricoNoRecuperable, ErrorCantidadDevolucionExcedeDisponible,
+    ErrorAnulacionAjusteConMovimientosPosteriores,
+    procesar_ajuste_inventario_cpp, anular_ajuste_inventario,
+    resolver_subtipo_ajuste_canonico, SUBTIPOS_AJUSTE_CANONICOS,
+    obtener_cuentas_tesoreria, obtener_resumen_tesoreria,
+    registrar_pago_financiero, anular_pago_financiero,
+    aplicar_anticipo_cliente, abrir_caja_turno, cerrar_caja_turno,
+    registrar_gasto_operativo, transferir_entre_cuentas_tesoreria,
+    obtener_historial_pagos, obtener_anticipos_cliente, obtener_gastos_operativos
 )
+from inventario_ia import diagnosticar_inventario_organico, simular_impacto_precio
+import cfo_copilot
 
 PORT = int(os.environ.get("PORT", 8000))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2293,6 +2303,62 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     }
                 })
 
+            # --- FASE 2F-6C: MODELO FINANCIERO & TESORERÍA (GET) ---
+            elif path == "/api/tesoreria/cuentas":
+                solo_activas = query.get("solo_activas", ["true"])[0].lower() != "false"
+                cuentas = obtener_cuentas_tesoreria(solo_activas=solo_activas, conn=conn)
+                self.send_json({"success": True, "data": cuentas})
+                return
+
+            elif path == "/api/tesoreria/resumen":
+                resumen = obtener_resumen_tesoreria(conn=conn)
+                self.send_json({"success": True, "data": resumen})
+                return
+
+            elif path == "/api/pagos":
+                filtros = {k: v[0] for k, v in query.items()}
+                pagos = obtener_historial_pagos(filtros=filtros, conn=conn)
+                self.send_json({"success": True, "data": pagos})
+                return
+
+            elif path.startswith("/api/anticipos/cliente/"):
+                parts = path.split("/")
+                cliente_id = int(parts[-1])
+                solo_disp = query.get("solo_disponibles", ["true"])[0].lower() != "false"
+                anticipos = obtener_anticipos_cliente(cliente_id, solo_disponibles=solo_disp, conn=conn)
+                self.send_json({"success": True, "data": anticipos})
+                return
+
+            elif path == "/api/gastos":
+                filtros = {k: v[0] for k, v in query.items()}
+                gastos = obtener_gastos_operativos(filtros=filtros, conn=conn)
+                self.send_json({"success": True, "data": gastos})
+                return
+
+            # --- FASE 3A: INTELIGENCIA ARTIFICIAL ORGÁNICA DE INVENTARIOS ---
+            elif path == "/api/ia/inventario/diagnostico":
+                diag = diagnosticar_inventario_organico(conn=conn)
+                self.send_json(diag)
+                return
+
+            elif path == "/api/ia/inventario/alertas":
+                diag = diagnosticar_inventario_organico(conn=conn)
+                self.send_json({
+                    "success": True,
+                    "alertas": diag.get("alertas_gerenciales", []),
+                    "resumen": diag.get("resumen_patrimonial", {})
+                })
+                return
+
+            # --- FASE 3B: CFO COPILOT GERENCIAL - SUGERENCIAS RÁPIDAS ---
+            elif path == "/api/ia/copilot/sugerencias":
+                sug = cfo_copilot.obtener_sugerencias_copilot()
+                self.send_json({
+                    "success": True,
+                    "sugerencias": sug
+                })
+                return
+
             else:
                 self.send_error_json("Endpoint no reconocido", 404)
 
@@ -4045,333 +4111,49 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             # 11. Ajustes de Inventario (FASE 2C / FASE 2F-5B CPP: Cargos y Descargos Transaccionales)
             elif path in ("/api/inventario/ajustes", "/api/inventario/cargos", "/api/inventario/descargos"):
-                tipo_ajuste = (body.get("tipo_ajuste") or "").strip().upper()
+                payload_aj = dict(body)
                 if path == "/api/inventario/cargos":
-                    tipo_ajuste = "CARGO"
+                    payload_aj["tipo_ajuste"] = "CARGO"
                 elif path == "/api/inventario/descargos":
-                    tipo_ajuste = "DESCARGO"
+                    payload_aj["tipo_ajuste"] = "DESCARGO"
 
-                if tipo_ajuste not in ("CARGO", "DESCARGO"):
-                    self.send_error_json("tipo_ajuste debe ser 'CARGO' o 'DESCARGO'", 400)
+                res = procesar_ajuste_inventario_cpp(
+                    cursor=cursor,
+                    payload=payload_aj,
+                    conn=conn,
+                    auto_commit=True
+                )
+
+                if res.get("duplicado_ignorado"):
+                    self.send_json(res, 200)
                     return
-
-                motivo = (body.get("motivo") or "").strip()
-                if not motivo:
-                    self.send_error_json("El motivo del ajuste es obligatorio", 400)
-                    return
-
-                detalles = body.get("detalles") or body.get("items") or []
-                if not isinstance(detalles, list) or len(detalles) == 0:
-                    self.send_error_json("Debe incluir al menos un producto en el ajuste (lista 'detalles')", 400)
-                    return
-
-                fecha_input = body.get("fecha")
-                if fecha_input and str(fecha_input).strip():
-                    f_str = str(fecha_input).strip()
-                    if len(f_str) == 10:
-                        fecha_ajuste = f"{f_str} {datetime.now().strftime('%H:%M:%S')}"
-                    else:
-                        fecha_ajuste = f_str
-                else:
-                    fecha_ajuste = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                observaciones = (body.get("observaciones") or "").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
-                numero_ajuste = (body.get("numero_ajuste") or "").strip()
-                idempotency_key = (body.get("idempotency_key") or body.get("client_tx_id") or "").strip()
-
-                # PASO 10: Deteccion y proteccion contra duplicados (Idempotencia)
-                if numero_ajuste:
-                    cursor.execute("SELECT id, numero_ajuste, tipo_ajuste, motivo FROM inventario_ajustes WHERE numero_ajuste = ?", (numero_ajuste,))
-                    existente = cursor.fetchone()
-                    if existente:
-                        self.send_json({
-                            "id": existente[0],
-                            "numero_ajuste": existente[1],
-                            "tipo_ajuste": existente[2],
-                            "success": True,
-                            "duplicado_ignorado": True,
-                            "message": f"Ajuste {existente[1]} ya procesado previamente (idempotencia garantizada)"
-                        }, 200)
-                        return
-
-                if idempotency_key:
-                    cursor.execute("""
-                        SELECT id, numero_ajuste, tipo_ajuste, motivo 
-                        FROM inventario_ajustes 
-                        WHERE observaciones LIKE ?
-                    """, (f"%[IDEMPOTENCY:{idempotency_key}]%",))
-                    existente_key = cursor.fetchone()
-                    if existente_key:
-                        self.send_json({
-                            "id": existente_key[0],
-                            "numero_ajuste": existente_key[1],
-                            "tipo_ajuste": existente_key[2],
-                            "success": True,
-                            "duplicado_ignorado": True,
-                            "message": f"Ajuste {existente_key[1]} ya procesado previamente con idempotency_key"
-                        }, 200)
-                        return
-
-                # Deteccion de duplicado por reenvio identico en ventana de tiempo reciente
-                cursor.execute("""
-                    SELECT id, numero_ajuste, tipo_ajuste, motivo, created_at 
-                    FROM inventario_ajustes 
-                    WHERE tipo_ajuste = ? AND motivo = ? 
-                    ORDER BY id DESC LIMIT 1
-                """, (tipo_ajuste, motivo))
-                ultimo_ajuste = cursor.fetchone()
-                if ultimo_ajuste:
-                    ult_id = ultimo_ajuste[0]
-                    cursor.execute("""
-                        SELECT producto_id, cantidad 
-                        FROM inventario_ajuste_detalles 
-                        WHERE ajuste_id = ? ORDER BY producto_id
-                    """, (ult_id,))
-                    ult_detalles = [(r[0], r[1]) for r in cursor.fetchall()]
-                    nuevos_detalles = sorted([(int(d.get("producto_id", 0)), float(d.get("cantidad", 0))) for d in detalles])
-                    if ult_detalles == nuevos_detalles:
-                        try:
-                            created_time = datetime.strptime(str(ultimo_ajuste[4])[:19], "%Y-%m-%d %H:%M:%S")
-                            if abs((datetime.now() - created_time).total_seconds()) < 15:
-                                self.send_json({
-                                    "id": ult_id,
-                                    "numero_ajuste": ultimo_ajuste[1],
-                                    "tipo_ajuste": ultimo_ajuste[2],
-                                    "success": True,
-                                    "duplicado_ignorado": True,
-                                    "message": f"Ajuste {ultimo_ajuste[1]} ya registrado previamente (proteccion contra doble envio)"
-                                }, 200)
-                                return
-                        except Exception:
-                            pass
-
-                # BEGIN IMMEDIATE: Candado exclusivo transaccional para aislar lecturas y escrituras de stock y CPP
-                cursor.execute("BEGIN IMMEDIATE")
-
-                # Prevalidacion exhaustiva de productos y existencias
-                productos_info = {}
-                cantidades_acumuladas = {}
-                for idx, det in enumerate(detalles):
-                    p_id = det.get("producto_id")
-                    if not p_id:
-                        self.send_error_json(f"Detalle #{idx+1}: 'producto_id' es requerido", 400)
-                        return
-                    try:
-                        p_id = int(p_id)
-                        cant_val = float(det.get("cantidad", 0.0))
-                    except (ValueError, TypeError):
-                        self.send_error_json(f"Detalle #{idx+1}: 'cantidad' y 'producto_id' deben ser numericos", 400)
-                        return
-
-                    if cant_val <= 0:
-                        self.send_error_json(f"Detalle #{idx+1}: la cantidad debe ser mayor a 0 (recibido: {cant_val})", 400)
-                        return
-
-                    if p_id not in productos_info:
-                        cursor.execute("SELECT id, codigo, nombre, tipo, stock, costo_cpp, costo, activo FROM productos WHERE id = ?", (p_id,))
-                        prod = cursor.fetchone()
-                        if not prod:
-                            self.send_error_json(f"Producto ID {p_id} no existe", 404)
-                            return
-                        productos_info[p_id] = dict(prod)
-                        cantidades_acumuladas[p_id] = Decimal("0")
-
-                    prod_data = productos_info[p_id]
-                    if prod_data.get("tipo") == "servicio":
-                        self.send_error_json(f"No se pueden realizar ajustes de inventario sobre servicios ('{prod_data['nombre']}')", 400)
-                        return
-
-                    # Control temporal estricto anti-retroactividad
-                    validar_movimiento_no_retroactivo(cursor, p_id, fecha_ajuste)
-
-                    cantidades_acumuladas[p_id] += Decimal(str(cant_val))
-
-                # Para DESCARGO: validar que la cantidad acumulada no supere el stock disponible
-                if tipo_ajuste == "DESCARGO":
-                    for p_id, cant_total_dec in cantidades_acumuladas.items():
-                        prod_data = productos_info[p_id]
-                        stk_act_dec = Decimal(str(prod_data.get("stock") or 0.0))
-                        validar_stock_no_negativo(stk_act_dec, cant_total_dec)
-
-                # Generar consecutivo oficial de ajuste si no fue provisto
-                if not numero_ajuste:
-                    prefix = "CAR" if tipo_ajuste == "CARGO" else "DES"
-                    cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM inventario_ajustes")
-                    next_id = cursor.fetchone()[0]
-                    numero_ajuste = f"{prefix}-{next_id:06d}"
-
-                observaciones_final = observaciones
-                if idempotency_key and f"[IDEMPOTENCY:{idempotency_key}]" not in observaciones_final:
-                    observaciones_final = f"{observaciones_final} [IDEMPOTENCY:{idempotency_key}]".strip()
-
-                # INSERTAR CABECERA (inventario_ajustes)
-                cursor.execute("""
-                    INSERT INTO inventario_ajustes (numero_ajuste, fecha, tipo_ajuste, motivo, observaciones, usuario_id)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (numero_ajuste, fecha_ajuste, tipo_ajuste, motivo, observaciones_final, usuario_id))
-                ajuste_id = cursor.lastrowid
-
-                # Mapear tipo_movimiento exacto para inventario_movimientos
-                sentido = "ENTRADA" if tipo_ajuste == "CARGO" else "SALIDA"
-                motivo_lower = motivo.lower()
-
-                if tipo_ajuste == "CARGO":
-                    tipo_movimiento = "cargo_ajuste"
-                else:
-                    if "vencimiento" in motivo_lower or "venc" in motivo_lower:
-                        tipo_movimiento = "descargo_vencimiento"
-                    elif "rotura" in motivo_lower or "dan" in motivo_lower:
-                        tipo_movimiento = "descargo_rotura"
-                    elif "uso_interno" in motivo_lower or "interno" in motivo_lower:
-                        tipo_movimiento = "descargo_uso_interno"
-                    else:
-                        tipo_movimiento = "descargo_merma"
-
-                # PROCESAR CADA DETALLE BAJO MOTOR CPP DENTRO DE LA MISMA TRANSACCION ATOMICA
-                detalles_procesados = []
-                for det in detalles:
-                    p_id = int(det["producto_id"])
-                    cant_dec = Decimal(str(det["cantidad"]))
-                    motivo_detalle = (det.get("motivo_detalle") or "").strip()
-
-                    cursor.execute("SELECT id, codigo, nombre, stock, costo_cpp, costo FROM productos WHERE id = ?", (p_id,))
-                    prod_row = dict(cursor.fetchone())
-                    stk_ant_dec = Decimal(str(prod_row.get("stock") or 0.0))
-                    cpp_ant_val = prod_row.get("costo_cpp")
-                    costo_cat_val = prod_row.get("costo")
-                    sku_cod = prod_row.get("codigo")
-
-                    if tipo_ajuste == "DESCARGO":
-                        validar_stock_no_negativo(stk_ant_dec, cant_dec)
-                        if cpp_ant_val is None or Decimal(str(cpp_ant_val)) <= Decimal("0"):
-                            raise ErrorInconsistenciaCPP(
-                                f"INCONSISTENCIA_CPP: Producto {sku_cod} tiene stock {stk_ant_dec} pero costo_cpp invalido ({cpp_ant_val}). "
-                                "Operacion bloqueada. Prohibido usar productos.costo como sustituto."
-                            )
-                        costo_u_dec = Decimal(str(cpp_ant_val)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                        costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                        costo_cpp_nuevo_dec = costo_u_dec
-                        stock_nuevo_dec = (stk_ant_dec - cant_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-
-                    else:
-                        # CARGO
-                        m_eval = (motivo_detalle.lower() if motivo_detalle else motivo_lower)
-                        es_sobrante = any(k in m_eval for k in ['sobrante', 'conteo', 'regularizacion'])
-
-                        if es_sobrante:
-                            if stk_ant_dec < Decimal("0"):
-                                raise ErrorStockNegativo(f"STOCK_NEGATIVO: Stock {stk_ant_dec} no permite operar.")
-                            if stk_ant_dec == Decimal("0"):
-                                if cpp_ant_val is not None and Decimal(str(cpp_ant_val)) > Decimal("0"):
-                                    costo_u_dec = Decimal(str(cpp_ant_val)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                                elif det.get("costo_unitario") and float(det.get("costo_unitario")) > 0:
-                                    costo_u_dec = Decimal(str(det.get("costo_unitario"))).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                                else:
-                                    costo_u_dec = Decimal(str(costo_cat_val or 0.0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                                costo_cpp_nuevo_dec = costo_u_dec
-                                stock_nuevo_dec = cant_dec.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                                costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                            else:
-                                if cpp_ant_val is None or Decimal(str(cpp_ant_val)) <= Decimal("0"):
-                                    raise ErrorInconsistenciaCPP(
-                                        f"INCONSISTENCIA_CPP: Producto {sku_cod} tiene stock {stk_ant_dec} pero costo_cpp invalido ({cpp_ant_val}). "
-                                        "Operacion bloqueada. Prohibido usar productos.costo como sustituto."
-                                    )
-                                costo_u_dec = Decimal(str(cpp_ant_val)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                                costo_cpp_nuevo_dec = costo_u_dec
-                                stock_nuevo_dec = (stk_ant_dec + cant_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                                costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                        else:
-                            # Hallazgo de mercancia o tasacion manual con recalculo ponderado
-                            costo_in = det.get("costo_unitario")
-                            if costo_in is not None and float(costo_in) > 0:
-                                costo_u_dec = Decimal(str(costo_in)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                            else:
-                                if stk_ant_dec > Decimal("0") and cpp_ant_val and Decimal(str(cpp_ant_val)) > Decimal("0"):
-                                    costo_u_dec = Decimal(str(cpp_ant_val)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                                else:
-                                    costo_u_dec = Decimal(str(costo_cat_val or 0.0)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-
-                            if stk_ant_dec == Decimal("0"):
-                                costo_cpp_nuevo_dec = costo_u_dec
-                                stock_nuevo_dec = cant_dec.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                                costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-                            else:
-                                if cpp_ant_val is None or Decimal(str(cpp_ant_val)) <= Decimal("0"):
-                                    raise ErrorInconsistenciaCPP(
-                                        f"INCONSISTENCIA_CPP: Producto {sku_cod} tiene stock {stk_ant_dec} pero costo_cpp invalido ({cpp_ant_val})."
-                                    )
-                                cpp_ant_dec = Decimal(str(cpp_ant_val))
-                                res_calc = calcular_cpp_entrada(stk_ant_dec, cpp_ant_dec, cant_dec, costo_u_dec)
-                                stock_nuevo_dec = Decimal(str(res_calc["stock_nuevo"]))
-                                costo_cpp_nuevo_dec = Decimal(str(res_calc["cpp_nuevo"]))
-                                costo_tot_dec = (cant_dec * costo_u_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-
-                    # Actualizar saldo materializado y costo_cpp en productos
-                    cursor.execute("""
-                        UPDATE productos 
-                        SET stock = ?, costo_cpp = ? 
-                        WHERE id = ?
-                    """, (float(stock_nuevo_dec), float(costo_cpp_nuevo_dec), p_id))
-
-                    # Insertar detalle de ajuste
-                    cursor.execute("""
-                        INSERT INTO inventario_ajuste_detalles 
-                        (ajuste_id, producto_id, cantidad, costo_unitario, costo_total, stock_anterior, stock_nuevo, motivo_detalle)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (ajuste_id, p_id, float(cant_dec), float(costo_u_dec), float(costo_tot_dec), float(stk_ant_dec), float(stock_nuevo_dec), motivo_detalle))
-                    ajuste_det_id = cursor.lastrowid
-
-                    # Registrar movimiento oficial en el libro mayor persistente con trazabilidad total
-                    mov_id = registrar_movimiento_inventario(
-                        cursor=cursor,
-                        producto_id=p_id,
-                        fecha=fecha_ajuste,
-                        tipo_movimiento=tipo_movimiento,
-                        sentido=sentido,
-                        cantidad=float(cant_dec),
-                        costo_unitario=float(costo_u_dec),
-                        costo_total=float(costo_tot_dec),
-                        stock_anterior=float(stk_ant_dec),
-                        stock_nuevo=float(stock_nuevo_dec),
-                        documento_tipo="INVENTARIO_AJUSTE",
-                        documento_id=ajuste_id,
-                        documento_linea_id=ajuste_det_id,
-                        documento_numero=numero_ajuste,
-                        motivo=motivo_detalle or motivo,
-                        usuario_id=usuario_id
-                    )
-
-                    detalles_procesados.append({
-                        "id": ajuste_det_id,
-                        "producto_id": p_id,
-                        "cantidad": float(cant_dec),
-                        "costo_unitario": float(costo_u_dec),
-                        "costo_total": float(costo_tot_dec),
-                        "stock_anterior": float(stk_ant_dec),
-                        "stock_nuevo": float(stock_nuevo_dec),
-                        "costo_cpp_nuevo": float(costo_cpp_nuevo_dec),
-                        "movimiento_id": mov_id
-                    })
-
-                conn.commit()
 
                 # Sincronizacion asincrona segura
                 schedule_cloud_sync()
+                self.send_json(res, 201)
+                return
 
-                self.send_json({
-                    "success": True,
-                    "id": ajuste_id,
-                    "ajuste_id": ajuste_id,
-                    "numero_ajuste": numero_ajuste,
-                    "tipo_ajuste": tipo_ajuste,
-                    "motivo": motivo,
-                    "fecha": fecha_ajuste,
-                    "total_items": len(detalles_procesados),
-                    "detalles": detalles_procesados,
-                    "message": f"Ajuste {tipo_ajuste} {numero_ajuste} procesado exitosamente"
-                }, 201)
+            # Anulación Directa LIFO de Ajuste de Inventario (FASE 2F-5B)
+            elif path.startswith("/api/inventario/ajustes/") and path.endswith("/anular"):
+                parts = path.split("/")
+                try:
+                    aj_id = int(parts[4])
+                except (IndexError, ValueError):
+                    self.send_error_json("ID de ajuste inválido", 400)
+                    return
+                motivo = (body.get("motivo") or "Anulación directa de ajuste de inventario").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_ajuste_inventario(
+                    cursor=cursor,
+                    ajuste_id=aj_id,
+                    motivo=motivo,
+                    usuario_id=usuario_id,
+                    conn=conn,
+                    auto_commit=True
+                )
+                schedule_cloud_sync()
+                self.send_json(res, 200)
+                return
 
             # --- ENDPOINTS TRANSACCIONALES DE ANULACIÓN (FASE 4) ---
 
@@ -4473,11 +4255,127 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 })
                 return
 
+            # --- FASE 2F-6C: MODELO FINANCIERO & TESORERÍA (POST) ---
+            elif path == "/api/pagos":
+                res = registrar_pago_financiero(body, conn=conn)
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Pago {res['numero_pago']} procesado exitosamente por ${res['monto_total_equivalente_usd']:.2f} USD.",
+                    "data": res
+                }, status=201)
+                return
+
+            elif path.startswith("/api/pagos/") and path.endswith("/anular"):
+                parts = path.split("/")
+                pago_id = int(parts[3])
+                motivo = (body.get("motivo") or "Anulacin de pago financiero").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = anular_pago_financiero(pago_id, usuario_id=usuario_id, motivo=motivo, conn=conn)
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Pago #{pago_id} anulado exitosamente.",
+                    "data": res
+                })
+                return
+
+            elif path == "/api/anticipos/aplicar":
+                anticipo_id = int(body.get("anticipo_id"))
+                aplicaciones = body.get("aplicaciones", [])
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = aplicar_anticipo_cliente(anticipo_id, aplicaciones, usuario_id=usuario_id, conn=conn)
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Anticipo #{anticipo_id} aplicado exitosamente. Saldo disponible: ${res['saldo_restante_usd']:.2f} USD.",
+                    "data": res
+                })
+                return
+
+            elif path == "/api/tesoreria/cajas/apertura":
+                cuenta_id = int(body.get("cuenta_tesoreria_id"))
+                usuario_id = int(body.get("usuario_id") or 1)
+                monto_usd = float(body.get("monto_inicial_usd") or 0.0)
+                monto_mon = float(body.get("monto_inicial_moneda") or 0.0)
+                notas = (body.get("notas") or body.get("notas_apertura") or "").strip()
+                res = abrir_caja_turno(cuenta_id, usuario_id=usuario_id, monto_inicial_usd=monto_usd, monto_inicial_moneda=monto_mon, notas=notas, conn=conn)
+                self.send_json({
+                    "success": True,
+                    "message": f"Turno de caja #{res['id']} abierto exitosamente.",
+                    "data": res
+                }, status=201)
+                return
+
+            elif path == "/api/tesoreria/cajas/cierre":
+                apertura_id = int(body.get("caja_apertura_id"))
+                usuario_id = int(body.get("usuario_id") or 1)
+                saldo_usd = float(body.get("saldo_real_fisico_usd") or 0.0)
+                saldo_mon = float(body.get("saldo_real_fisico_moneda") or 0.0)
+                notas = (body.get("notas") or body.get("notas_cierre") or "").strip()
+                res = cerrar_caja_turno(apertura_id, usuario_id=usuario_id, saldo_real_fisico_usd=saldo_usd, saldo_real_fisico_moneda=saldo_mon, notas=notas, conn=conn)
+                self.send_json({
+                    "success": True,
+                    "message": f"Cierre de caja #{res['id']} completado. Arqueo: {res['estado_arqueo']} (Diferencia: ${res['diferencia_usd']:.2f} USD).",
+                    "data": res
+                })
+                return
+
+            elif path == "/api/tesoreria/transferencias":
+                origen_id = int(body.get("cuenta_origen_id"))
+                destino_id = int(body.get("cuenta_destino_id"))
+                monto_origen = float(body.get("monto_origen") or 0.0)
+                monto_destino = float(body.get("monto_destino") or 0.0)
+                tasa = float(body.get("tasa_cambio") or 1.0)
+                usuario_id = int(body.get("usuario_id") or 1)
+                notas = (body.get("notas") or "").strip()
+                res = transferir_entre_cuentas_tesoreria(origen_id, destino_id, monto_origen, monto_destino, tasa, usuario_id=usuario_id, notas=notas, conn=conn)
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Transferencia de tesorera completada exitosamente.",
+                    "data": res
+                })
+                return
+
+            elif path == "/api/gastos":
+                usuario_id = int(body.get("usuario_id") or 1)
+                res = registrar_gasto_operativo(body, usuario_id=usuario_id, conn=conn)
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Gasto operativo {res['numero_gasto']} registrado exitosamente.",
+                    "data": res
+                }, status=201)
+                return
+
+            # --- FASE 3A: SIMULADOR DE IMPACTO DE PRECIOS CON IA ORGÁNICA ---
+            elif path == "/api/ia/inventario/simular-precio":
+                prod_id = int(body.get("producto_id"))
+                nuevo_precio = float(body.get("nuevo_precio") or body.get("nuevo_precio_usd") or 0.0)
+                sim = simular_impacto_precio(prod_id, nuevo_precio, conn=conn)
+                self.send_json(sim)
+                return
+
+            # --- FASE 3B: CFO COPILOT GERENCIAL - CONSULTA CONVERSACIONAL ---
+            elif path == "/api/ia/copilot/consulta":
+                pregunta = (body.get("pregunta") or body.get("mensaje") or body.get("query") or "").strip()
+                if not pregunta:
+                    self.send_error_json("Debe ingresar una pregunta o consulta gerencial.", 400)
+                    return
+                resp = cfo_copilot.procesar_consulta_gerencial(pregunta, conn=conn)
+                self.send_json(resp)
+                return
+
             else:
                 self.send_error_json("Endpoint no reconocido", 404)
 
+        except LookupError as le:
+            conn.rollback()
+            self.send_error_json(str(le), 404)
         except (ErrorStockNegativo, ErrorMovimientoRetroactivoNoPermitido, ErrorInconsistenciaCPP,
-                ErrorCostoHistoricoNoRecuperable, ErrorCantidadDevolucionExcedeDisponible, ValueError) as ve:
+                ErrorCostoHistoricoNoRecuperable, ErrorCantidadDevolucionExcedeDisponible,
+                ErrorAnulacionAjusteConMovimientosPosteriores, ValueError) as ve:
             conn.rollback()
             self.send_error_json(str(ve), 400)
         except sqlite3.IntegrityError as ie:
