@@ -741,7 +741,7 @@ function navigate(viewName) {
     if (backdrop) backdrop.classList.add('hidden');
   }
 
-  const views = ['dashboard', 'categorias', 'productos', 'clientes', 'facturacion', 'devoluciones', 'compras', 'proveedores', 'cxc', 'cxp', 'reportes'];
+  const views = ['dashboard', 'categorias', 'productos', 'clientes', 'facturacion', 'devoluciones', 'compras', 'proveedores', 'cxc', 'cxp', 'reportes', 'tesoreria'];
   views.forEach(v => {
     const el = document.getElementById(`view-${v}`);
     const navBtn = document.getElementById(`nav-${v}`);
@@ -811,6 +811,7 @@ function navigate(viewName) {
   if (viewName === 'cxp') {
     loadCxp();
   }
+  if (viewName === 'tesoreria') loadTesoreria();
   if (viewName === 'reportes') {
     loadReportes();
   }
@@ -10390,28 +10391,33 @@ function cambiarSubtabProductos(subtab) {
   AppState.productoSubtab = subtab;
   const containerCatalogo = document.getElementById('subtabProdCatalogoContainer');
   const containerAjustes = document.getElementById('subtabProdAjustesContainer');
+  const containerIa = document.getElementById('subtabProdIaContainer');
   const btnCatalogo = document.getElementById('btnSubtabProdCatalogo');
   const btnAjustes = document.getElementById('btnSubtabProdAjustes');
+  const btnIa = document.getElementById('btnSubtabProdIa');
+
+  const inactiveClass = 'px-4 py-2 rounded-xl text-sm font-semibold transition flex items-center bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 shadow-2xs';
+  const activeClass = 'px-4 py-2 rounded-xl text-sm font-bold shadow-xs transition flex items-center btn-theme-primary text-white';
+
+  if (btnCatalogo) btnCatalogo.className = inactiveClass;
+  if (btnAjustes) btnAjustes.className = inactiveClass;
+  if (btnIa) btnIa.className = inactiveClass;
+
+  if (containerCatalogo) containerCatalogo.classList.add('hidden');
+  if (containerAjustes) containerAjustes.classList.add('hidden');
+  if (containerIa) containerIa.classList.add('hidden');
 
   if (subtab === 'ajustes') {
-    if (containerCatalogo) containerCatalogo.classList.add('hidden');
     if (containerAjustes) containerAjustes.classList.remove('hidden');
-    if (btnCatalogo) {
-      btnCatalogo.className = 'px-4 py-2 rounded-xl text-sm font-semibold transition flex items-center bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 shadow-2xs';
-    }
-    if (btnAjustes) {
-      btnAjustes.className = 'px-4 py-2 rounded-xl text-sm font-bold shadow-xs transition flex items-center btn-theme-primary text-white';
-    }
+    if (btnAjustes) btnAjustes.className = activeClass;
     cargarHistorialAjustes();
+  } else if (subtab === 'ia') {
+    if (containerIa) containerIa.classList.remove('hidden');
+    if (btnIa) btnIa.className = activeClass;
+    cargarDiagnosticoIaInventario();
   } else {
     if (containerCatalogo) containerCatalogo.classList.remove('hidden');
-    if (containerAjustes) containerAjustes.classList.add('hidden');
-    if (btnCatalogo) {
-      btnCatalogo.className = 'px-4 py-2 rounded-xl text-sm font-bold shadow-xs transition flex items-center btn-theme-primary text-white';
-    }
-    if (btnAjustes) {
-      btnAjustes.className = 'px-4 py-2 rounded-xl text-sm font-semibold transition flex items-center bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 shadow-2xs';
-    }
+    if (btnCatalogo) btnCatalogo.className = activeClass;
     loadProductos();
   }
 }
@@ -13438,3 +13444,1878 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+/**
+ * ============================================================================
+ * MÓDULO DE TESORERÍA, CAJAS, ARQUEOS Y PAGOS N:M (FASE 2F-6D)
+ * D-BIAN SYSTEM COMPUTER - Ing. José Morales
+ * ============================================================================
+ */
+
+// Estado local de Tesorería
+AppState.tesoreria = {
+  cuentas: [],
+  resumen: null,
+  tabActual: 'movimientos',
+  pagos: [],
+  gastos: [],
+  anticipos: [],
+  cajasAbiertas: [],
+  cobroNMDetalles: []
+};
+
+/**
+ * Carga principal de la vista de Tesorería
+ */
+async function loadTesoreria() {
+  try {
+    const res = await fetch('/api/tesoreria/resumen');
+    if (!res.ok) throw new Error('No se pudo cargar el resumen de tesorería');
+    const json = await res.json();
+    AppState.tesoreria.resumen = json.data;
+    AppState.tesoreria.cuentas = json.data.cuentas || [];
+    AppState.tesoreria.cajasAbiertas = json.data.cajas_abiertas || [];
+
+    renderTesoreriaCards(AppState.tesoreria.resumen);
+    renderTesoreriaTurnosBanner(AppState.tesoreria.cajasAbiertas);
+
+    // Cargar la sub-pestaña activa
+    cambiarTabTesoreria(AppState.tesoreria.tabActual || 'movimientos');
+  } catch (err) {
+    console.error('[Tesorería] Error al cargar:', err);
+    if (typeof showToast === 'function') {
+      showToast(err.message || 'Error al conectar con el servidor de tesorería', 'error');
+    }
+  }
+}
+
+/**
+ * Renderiza las tarjetas de balance de cuentas
+ */
+function renderTesoreriaCards(resumen) {
+  const container = document.getElementById('tesoreriaCuentasCardsContainer');
+  if (!container) return;
+
+  const cuentas = resumen.cuentas || [];
+  const tasas = AppState.config || { tasa_ves: 45.0, tasa_cop: 4100.0 };
+  const tVes = parseFloat(tasas.tasa_ves || 45.0);
+  const tCop = parseFloat(tasas.tasa_cop || 4100.0);
+
+  const getAccountIcon = (tipo, moneda) => {
+    if (tipo === 'caja_efectivo') {
+      return moneda === 'USD' ? 'fa-dollar-sign text-emerald-600 bg-emerald-50' : (moneda === 'VES' ? 'fa-money-bill-1 text-amber-600 bg-amber-50' : 'fa-coins text-teal-600 bg-teal-50');
+    }
+    return 'fa-building-columns text-sky-600 bg-sky-50';
+  };
+
+  const getSubtext = (c) => {
+    const saldo = parseFloat(c.saldo_actual || 0);
+    if (c.moneda === 'USD') {
+      return `≈ ${(saldo * tVes).toLocaleString('es-VE', { minimumFractionDigits: 2 })} Bs.`;
+    } else if (c.moneda === 'VES') {
+      const eq = tVes > 0 ? (saldo / tVes) : 0;
+      return `≈ $${eq.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+    } else if (c.moneda === 'COP') {
+      const eq = tCop > 0 ? (saldo / tCop) : 0;
+      return `≈ $${eq.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+    }
+    return '';
+  };
+
+  container.innerHTML = cuentas.map(c => {
+    const iconClass = getAccountIcon(c.tipo, c.moneda);
+    const saldo = parseFloat(c.saldo_actual || 0);
+    const formattedSaldo = c.moneda === 'USD'
+      ? `$${saldo.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : (c.moneda === 'VES' ? `${saldo.toLocaleString('es-VE', { minimumFractionDigits: 2 })} Bs.` : `${saldo.toLocaleString('es-CO', { minimumFractionDigits: 0 })} COP`);
+
+    // Verificar si tiene turno abierto
+    const isOpen = (resumen.cajas_abiertas || []).some(a => a.cuenta_tesoreria_id === c.id);
+    const statusBadge = c.tipo === 'caja_efectivo'
+      ? (isOpen
+        ? `<span class="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-300 flex items-center"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1 animate-pulse"></span>Turno Abierto</span>`
+        : `<span class="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">Turno Cerrado</span>`)
+      : `<span class="text-[10px] font-bold text-sky-700 bg-sky-100/80 px-2 py-0.5 rounded-full border border-sky-300">Cuenta Activa</span>`;
+
+    return `
+      <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 hover:shadow-md transition">
+        <div class="flex items-start justify-between">
+          <div class="space-y-1">
+            <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">${c.nombre}</span>
+            <h3 class="text-2xl font-black text-slate-900 font-mono tracking-tight">${formattedSaldo}</h3>
+            <p class="text-xs font-mono text-slate-500 font-medium">${getSubtext(c)}</p>
+          </div>
+          <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-xl shrink-0 ${iconClass}">
+            <i class="fa-solid ${iconClass.split(' ')[0]}"></i>
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+          <span class="text-[11px] font-semibold text-slate-400 capitalize">${c.tipo.replace('_', ' ')}</span>
+          ${statusBadge}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+/**
+ * Renderiza el banner de turnos abiertos
+ */
+function renderTesoreriaTurnosBanner(aperturas) {
+  const container = document.getElementById('tesoreriaTurnosAlertaContainer');
+  if (!container) return;
+
+  if (!aperturas || aperturas.length === 0) {
+    container.innerHTML = `
+      <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between text-xs text-slate-600">
+        <div class="flex items-center space-x-2">
+          <i class="fa-solid fa-circle-info text-slate-400 text-sm"></i>
+          <span>No hay turnos de caja de mostrador abiertos actualmente. Puede iniciar jornada haciendo clic en <strong>Abrir Caja</strong>.</span>
+        </div>
+        <button onclick="openModalAperturaCaja()" class="text-xs font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl transition">
+          <i class="fa-solid fa-lock-open mr-1"></i>Abrir Caja
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-emerald-900">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+          <i class="fa-solid fa-cash-register text-base"></i>
+        </div>
+        <div>
+          <h4 class="font-bold text-sm leading-tight text-emerald-950">Turno de Caja Activo: ${aperturas.map(a => a.cuenta_nombre).join(', ')}</h4>
+          <p class="text-xs text-emerald-700 mt-0.5">Iniciado: ${aperturas[0].fecha_apertura} | Fondo Inicial: $${parseFloat(aperturas[0].monto_inicial_usd || 0).toFixed(2)} USD</p>
+        </div>
+      </div>
+      <button onclick="openModalCierreCaja()" class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs shadow-xs transition shrink-0">
+        <i class="fa-solid fa-calculator mr-1.5"></i>Cerrar / Realizar Arqueo
+      </button>
+    </div>
+  `;
+}
+
+/**
+ * Cambia la sub-pestaña activa de tesorería
+ */
+function cambiarTabTesoreria(tabName) {
+  AppState.tesoreria.tabActual = tabName;
+
+  const tabs = ['movimientos', 'gastos', 'anticipos', 'arqueos'];
+  tabs.forEach(t => {
+    const btn = document.getElementById(`tab-tesoreria-${t}`);
+    const content = document.getElementById(`tesoreriaTabContent${t.charAt(0).toUpperCase() + t.slice(1)}`);
+    if (btn) {
+      if (t === tabName) {
+        btn.classList.add('active-tab', 'border-teal-600', 'text-teal-700', 'font-bold');
+        btn.classList.remove('border-transparent', 'text-slate-500', 'font-medium');
+      } else {
+        btn.classList.remove('active-tab', 'border-teal-600', 'text-teal-700', 'font-bold');
+        btn.classList.add('border-transparent', 'text-slate-500', 'font-medium');
+      }
+    }
+    if (content) {
+      if (t === tabName) {
+        content.classList.remove('hidden');
+      } else {
+        content.classList.add('hidden');
+      }
+    }
+  });
+
+  if (tabName === 'movimientos') loadTesoreriaMovimientos();
+  if (tabName === 'gastos') loadTesoreriaGastos();
+  if (tabName === 'anticipos') loadTesoreriaAnticipos();
+  if (tabName === 'arqueos') loadTesoreriaArqueos();
+}
+
+/**
+ * Carga el historial de pagos y movimientos
+ */
+async function loadTesoreriaMovimientos() {
+  const tbody = document.getElementById('tablaPagosTesoreriaBody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando movimientos...</td></tr>`;
+
+  try {
+    const tipo = document.getElementById('filtroTipoOperacionPago')?.value || '';
+    const estado = document.getElementById('filtroEstadoPago')?.value || '';
+    const params = new URLSearchParams();
+    if (tipo) params.append('tipo_operacion', tipo);
+    if (estado) params.append('estado', estado);
+
+    const res = await fetch(`/api/pagos?${params.toString()}`);
+    if (!res.ok) throw new Error('Error al consultar historial de pagos');
+    const json = await res.json();
+    AppState.tesoreria.pagos = json.data || [];
+    renderTablaPagosTesoreria(AppState.tesoreria.pagos);
+  } catch (err) {
+    console.error('[Tesorería] Error al cargar pagos:', err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-rose-500 font-semibold">${err.message}</td></tr>`;
+  }
+}
+
+/**
+ * Renderiza la tabla de pagos
+ */
+function renderTablaPagosTesoreria(pagos) {
+  const tbody = document.getElementById('tablaPagosTesoreriaBody');
+  if (!tbody) return;
+
+  if (!pagos || pagos.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-10 text-slate-400"><i class="fa-solid fa-folder-open text-2xl block mb-2 opacity-50"></i>No hay registros de pagos que coincidan con el filtro</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = pagos.map(p => {
+    const estadoBadge = p.estado === 'activo'
+      ? `<span class="bg-emerald-50 text-emerald-700 font-bold px-2.5 py-0.5 rounded-full border border-emerald-200/80 text-[10px]">Activo</span>`
+      : `<span class="bg-rose-50 text-rose-700 font-bold px-2.5 py-0.5 rounded-full border border-rose-200/80 text-[10px]" title="Anulado: ${p.motivo_anulacion || ''}">Anulado</span>`;
+
+    const opBadge = p.tipo_operacion === 'cobro_cliente'
+      ? `<span class="text-teal-700 font-bold"><i class="fa-solid fa-arrow-down-left mr-1"></i>Cobro Cliente</span>`
+      : (p.tipo_operacion === 'pago_proveedor'
+        ? `<span class="text-rose-700 font-bold"><i class="fa-solid fa-arrow-up-right mr-1"></i>Pago Proveedor</span>`
+        : `<span class="text-amber-700 font-bold"><i class="fa-solid fa-piggy-bank mr-1"></i>Anticipo</span>`);
+
+    const terceroNombre = p.cliente_nombre || p.proveedor_nombre || `Tercero #${p.tercero_id}`;
+
+    const anularBtn = p.estado === 'activo'
+      ? `<button onclick="anularPagoModal(${p.id}, '${p.numero_pago}')" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition" title="Anular Pago"><i class="fa-solid fa-ban text-xs"></i></button>`
+      : `<span class="text-slate-300 text-xs">-</span>`;
+
+    return `
+      <tr class="hover:bg-slate-50/80 transition text-xs font-medium">
+        <td class="py-3 px-4 font-mono">
+          <strong class="text-slate-900 block font-bold">${p.numero_pago}</strong>
+          <span class="text-[10px] text-slate-400">${p.fecha_pago || p.created_at}</span>
+        </td>
+        <td class="py-3 px-4">${opBadge}</td>
+        <td class="py-3 px-4 font-semibold text-slate-800">${terceroNombre}</td>
+        <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${p.concepto || ''}">${p.concepto || '-'}</td>
+        <td class="py-3 px-4 text-right font-mono font-black text-slate-900">$${parseFloat(p.monto_total_equivalente_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4 text-right font-mono text-emerald-700 font-bold">$${parseFloat(p.monto_aplicado_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4 text-right font-mono text-amber-700 font-bold">$${parseFloat(p.monto_no_aplicado_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4 text-center">${estadoBadge}</td>
+        <td class="py-3 px-4 text-center">${anularBtn}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+/**
+ * Filtro instantáneo de la tabla de pagos
+ */
+function filtrarTablaPagosTesoreria() {
+  const query = (document.getElementById('filtroBuscarPago')?.value || '').toLowerCase().trim();
+  if (!query) {
+    renderTablaPagosTesoreria(AppState.tesoreria.pagos);
+    return;
+  }
+  const filtrados = (AppState.tesoreria.pagos || []).filter(p => {
+    return (p.numero_pago || '').toLowerCase().includes(query) ||
+           (p.cliente_nombre || '').toLowerCase().includes(query) ||
+           (p.proveedor_nombre || '').toLowerCase().includes(query) ||
+           (p.concepto || '').toLowerCase().includes(query);
+  });
+  renderTablaPagosTesoreria(filtrados);
+}
+
+/**
+ * Carga gastos operativos
+ */
+async function loadTesoreriaGastos() {
+  const tbody = document.getElementById('tablaGastosTesoreriaBody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando gastos operativos...</td></tr>`;
+
+  try {
+    const res = await fetch('/api/gastos');
+    if (!res.ok) throw new Error('Error al consultar gastos operativos');
+    const json = await res.json();
+    AppState.tesoreria.gastos = json.data || [];
+    renderTablaGastosTesoreria(AppState.tesoreria.gastos);
+  } catch (err) {
+    console.error('[Tesorería] Error al cargar gastos:', err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-rose-500 font-semibold">${err.message}</td></tr>`;
+  }
+}
+
+/**
+ * Renderiza la tabla de gastos
+ */
+function renderTablaGastosTesoreria(gastos) {
+  const tbody = document.getElementById('tablaGastosTesoreriaBody');
+  if (!tbody) return;
+
+  if (!gastos || gastos.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-10 text-slate-400"><i class="fa-solid fa-receipt text-2xl block mb-2 opacity-50"></i>No hay gastos operativos registrados</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = gastos.map(g => {
+    const tipoPagoBadge = g.tipo_pago === 'contado'
+      ? `<span class="bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-full border border-emerald-200 text-[10px]">Contado (${g.cuenta_nombre || 'Caja'})</span>`
+      : `<span class="bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-full border border-amber-200 text-[10px]">Crédito (CxP #${g.cuenta_por_pagar_id || ''})</span>`;
+
+    return `
+      <tr class="hover:bg-slate-50/80 transition text-xs font-medium">
+        <td class="py-3 px-4 font-mono">
+          <strong class="text-slate-900 block font-bold">${g.numero_gasto}</strong>
+          <span class="text-[10px] text-slate-400">${g.fecha_emision || g.created_at}</span>
+        </td>
+        <td class="py-3 px-4 capitalize font-semibold text-slate-700">${g.categoria_gasto}</td>
+        <td class="py-3 px-4 font-bold text-slate-800">${g.beneficiario}</td>
+        <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${g.concepto || ''}">${g.concepto}</td>
+        <td class="py-3 px-4">${tipoPagoBadge}</td>
+        <td class="py-3 px-4 text-right font-mono font-bold text-slate-800">${parseFloat(g.monto_total_moneda || 0).toLocaleString('es-VE', { minimumFractionDigits: 2 })} ${g.moneda}</td>
+        <td class="py-3 px-4 text-right font-mono font-black text-rose-700">$${parseFloat(g.monto_total_usd || 0).toFixed(2)} USD</td>
+        <td class="py-3 px-4 text-center"><span class="bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded-full text-[10px] capitalize">${g.estado}</span></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+/**
+ * Filtro de gastos
+ */
+function filtrarTablaGastosTesoreria() {
+  const query = (document.getElementById('filtroBuscarGasto')?.value || '').toLowerCase().trim();
+  if (!query) {
+    renderTablaGastosTesoreria(AppState.tesoreria.gastos);
+    return;
+  }
+  const filtrados = (AppState.tesoreria.gastos || []).filter(g => {
+    return (g.numero_gasto || '').toLowerCase().includes(query) ||
+           (g.beneficiario || '').toLowerCase().includes(query) ||
+           (g.concepto || '').toLowerCase().includes(query);
+  });
+  renderTablaGastosTesoreria(filtrados);
+}
+
+/**
+ * Carga anticipos de clientes
+ */
+async function loadTesoreriaAnticipos() {
+  const tbody = document.getElementById('tablaAnticiposTesoreriaBody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando saldos a favor...</td></tr>`;
+
+  try {
+    // Si tenemos clientes, consultar anticipos de cada uno o de la lista general
+    const clientesRes = await fetch('/api/clientes');
+    const clientes = await clientesRes.json();
+    let todosAnticipos = [];
+
+    for (const c of (clientes || [])) {
+      try {
+        const aRes = await fetch(`/api/anticipos/cliente/${c.id}?solo_disponibles=false`);
+        if (aRes.ok) {
+          const aJson = await aRes.json();
+          (aJson.data || []).forEach(ant => {
+            ant.cliente_nombre = c.nombre;
+            ant.cliente_cedula = c.documento;
+            todosAnticipos.push(ant);
+          });
+        }
+      } catch (e) {
+        // Ignorar fallo de cliente individual
+      }
+    }
+
+    AppState.tesoreria.anticipos = todosAnticipos;
+    renderTablaAnticiposTesoreria(AppState.tesoreria.anticipos);
+  } catch (err) {
+    console.error('[Tesorería] Error al cargar anticipos:', err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-rose-500 font-semibold">${err.message}</td></tr>`;
+  }
+}
+
+/**
+ * Renderiza tabla de anticipos
+ */
+function renderTablaAnticiposTesoreria(anticipos) {
+  const tbody = document.getElementById('tablaAnticiposTesoreriaBody');
+  if (!tbody) return;
+
+  if (!anticipos || anticipos.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-10 text-slate-400"><i class="fa-solid fa-piggy-bank text-2xl block mb-2 opacity-50"></i>No hay saldos a favor registrados</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = anticipos.map(a => {
+    const saldoDisp = parseFloat(a.saldo_disponible_usd || 0);
+    const aplicarBtn = saldoDisp > 0
+      ? `<button onclick="openModalAplicarAnticipo(${a.id}, ${a.tercero_id}, ${saldoDisp}, '${escapeHtml(a.cliente_nombre || '')}')" class="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold rounded-lg text-xs transition"><i class="fa-solid fa-check-to-slot mr-1"></i>Aplicar</button>`
+      : `<span class="text-slate-400 text-xs">Totalmente aplicado</span>`;
+
+    return `
+      <tr class="hover:bg-slate-50/80 transition text-xs font-medium">
+        <td class="py-3 px-4 font-mono font-bold text-slate-800">#${a.id} <span class="text-[10px] text-slate-400 block font-normal">${a.created_at}</span></td>
+        <td class="py-3 px-4 font-bold text-slate-900">${a.cliente_nombre || 'Cliente #' + a.tercero_id}</td>
+        <td class="py-3 px-4 font-mono text-slate-600">${a.pago_numero || 'Pago #' + a.pago_origen_id}</td>
+        <td class="py-3 px-4 text-right font-mono font-bold text-slate-600">$${parseFloat(a.monto_original_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4 text-right font-mono font-black text-emerald-700 text-sm">$${saldoDisp.toFixed(2)}</td>
+        <td class="py-3 px-4 text-center"><span class="bg-emerald-50 text-emerald-800 font-bold px-2 py-0.5 rounded-full text-[10px] capitalize">${a.estado}</span></td>
+        <td class="py-3 px-4 text-center">${aplicarBtn}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+/**
+ * Filtro de anticipos
+ */
+function filtrarTablaAnticiposTesoreria() {
+  const query = (document.getElementById('filtroBuscarAnticipo')?.value || '').toLowerCase().trim();
+  if (!query) {
+    renderTablaAnticiposTesoreria(AppState.tesoreria.anticipos);
+    return;
+  }
+  const filtrados = (AppState.tesoreria.anticipos || []).filter(a => {
+    return (a.cliente_nombre || '').toLowerCase().includes(query) ||
+           (a.cliente_cedula || '').toLowerCase().includes(query);
+  });
+  renderTablaAnticiposTesoreria(filtrados);
+}
+
+/**
+ * Carga el historial de arqueos y cierres
+ */
+async function loadTesoreriaArqueos() {
+  const tbody = document.getElementById('tablaArqueosTesoreriaBody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Cargando historial de arqueos...</td></tr>`;
+
+  try {
+    // Tomar del resumen o endpoint
+    const resumen = AppState.tesoreria.resumen;
+    const cierres = resumen?.cierres_recientes || [];
+    renderTablaArqueosTesoreria(cierres);
+  } catch (err) {
+    console.error('[Tesorería] Error al cargar arqueos:', err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-rose-500 font-semibold">${err.message}</td></tr>`;
+  }
+}
+
+/**
+ * Renderiza tabla de arqueos
+ */
+function renderTablaArqueosTesoreria(cierres) {
+  const tbody = document.getElementById('tablaArqueosTesoreriaBody');
+  if (!tbody) return;
+
+  if (!cierres || cierres.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-10 text-slate-400"><i class="fa-solid fa-scale-balanced text-2xl block mb-2 opacity-50"></i>No hay registros de arqueos cerrados aún</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = cierres.map(c => {
+    const dif = parseFloat(c.diferencia_usd || 0);
+    const badgeArqueo = c.estado_arqueo === 'cuadrado'
+      ? `<span class="bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-full border border-emerald-200 text-[10px]"><i class="fa-solid fa-check mr-1"></i>Cuadrado</span>`
+      : (c.estado_arqueo === 'sobrante'
+        ? `<span class="bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-full border border-amber-200 text-[10px]"><i class="fa-solid fa-arrow-up mr-1"></i>Sobrante</span>`
+        : `<span class="bg-rose-50 text-rose-700 font-bold px-2 py-0.5 rounded-full border border-rose-200 text-[10px]"><i class="fa-solid fa-arrow-down mr-1"></i>Faltante</span>`);
+
+    return `
+      <tr class="hover:bg-slate-50/80 transition text-xs font-medium">
+        <td class="py-3 px-4 font-mono font-bold text-slate-800">#${c.id}</td>
+        <td class="py-3 px-4 font-semibold text-slate-700">${c.cuenta_nombre || 'Caja'}</td>
+        <td class="py-3 px-4 font-mono text-[11px]">${c.fecha_apertura}</td>
+        <td class="py-3 px-4 font-mono text-[11px]">${c.fecha_cierre}</td>
+        <td class="py-3 px-4 text-right font-mono font-bold text-slate-800">$${parseFloat(c.saldo_teorico_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4 text-right font-mono font-bold text-slate-900">$${parseFloat(c.saldo_real_fisico_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4 text-right font-mono font-black ${dif === 0 ? 'text-emerald-600' : (dif > 0 ? 'text-amber-600' : 'text-rose-600')}">${dif > 0 ? '+' : ''}$${dif.toFixed(2)}</td>
+        <td class="py-3 px-4 text-center">${badgeArqueo}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ============================================================================
+// CONTROLADORES DE MODALES DE TESORERÍA
+// ============================================================================
+
+/**
+ * Modal Apertura de Caja
+ */
+function openModalAperturaCaja() {
+  const modal = document.getElementById('modalAperturaCaja');
+  const select = document.getElementById('aperturaCuentaId');
+  if (!modal || !select) return;
+
+  // Filtrar solo cuentas tipo caja_efectivo
+  const cajas = (AppState.tesoreria.cuentas || []).filter(c => c.tipo === 'caja_efectivo');
+  select.innerHTML = cajas.map(c => `
+    <option value="${c.id}">${c.nombre} (${c.moneda}) - Saldo actual: ${parseFloat(c.saldo_actual || 0).toFixed(2)}</option>
+  `).join('');
+
+  document.getElementById('aperturaMontoUsd').value = '0.00';
+  document.getElementById('aperturaMontoMoneda').value = '0.00';
+  document.getElementById('aperturaNotas').value = '';
+
+  modal.classList.remove('hidden');
+}
+
+function closeModalAperturaCaja() {
+  document.getElementById('modalAperturaCaja')?.classList.add('hidden');
+}
+
+async function submitAperturaCaja() {
+  try {
+    const cuentaId = parseInt(document.getElementById('aperturaCuentaId').value);
+    const montoUsd = parseFloat(document.getElementById('aperturaMontoUsd').value || 0);
+    const montoMoneda = parseFloat(document.getElementById('aperturaMontoMoneda').value || 0);
+    const notas = document.getElementById('aperturaNotas').value.trim();
+
+    const res = await fetch('/api/tesoreria/cajas/apertura', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cuenta_tesoreria_id: cuentaId,
+        monto_inicial_usd: montoUsd,
+        monto_inicial_moneda: montoMoneda,
+        notas_apertura: notas,
+        usuario_id: 1
+      })
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Error al abrir turno de caja');
+
+    closeModalAperturaCaja();
+    showToast(`Turno de caja #${json.data.id} abierto exitosamente`, 'success');
+    loadTesoreria();
+  } catch (err) {
+    console.error('[Tesorería] Error apertura:', err);
+    showToast(err.message || 'Error al abrir caja', 'error');
+  }
+}
+
+/**
+ * Modal Cierre de Caja y Arqueo
+ */
+function openModalCierreCaja() {
+  const modal = document.getElementById('modalCierreCaja');
+  const select = document.getElementById('cierreAperturaId');
+  if (!modal || !select) return;
+
+  const abiertas = AppState.tesoreria.cajasAbiertas || [];
+  if (abiertas.length === 0) {
+    showToast('No existen turnos de caja abiertos para cerrar.', 'warning');
+    return;
+  }
+
+  select.innerHTML = abiertas.map(a => `
+    <option value="${a.id}">${a.cuenta_nombre} (Abierta: ${a.fecha_apertura})</option>
+  `).join('');
+
+  actualizarInfoTurnoCierre();
+  document.getElementById('cierreFisicoUsd').value = '0.00';
+  document.getElementById('cierreFisicoMoneda').value = '0.00';
+  document.getElementById('cierreNotas').value = '';
+
+  modal.classList.remove('hidden');
+}
+
+function closeModalCierreCaja() {
+  document.getElementById('modalCierreCaja')?.classList.add('hidden');
+}
+
+function actualizarInfoTurnoCierre() {
+  const select = document.getElementById('cierreAperturaId');
+  const id = parseInt(select?.value || 0);
+  const turno = (AppState.tesoreria.cajasAbiertas || []).find(a => a.id === id);
+  if (!turno) return;
+
+  const fechaTxt = document.getElementById('cierreFechaAperturaTxt');
+  const fondoTxt = document.getElementById('cierreFondoInicialTxt');
+  if (fechaTxt) fechaTxt.textContent = turno.fecha_apertura;
+  if (fondoTxt) fondoTxt.textContent = `$${parseFloat(turno.monto_inicial_usd || 0).toFixed(2)} USD`;
+}
+
+function calcularDiferenciaArqueoVisual() {
+  // Función reactiva opcional para UX
+}
+
+async function submitCierreCaja() {
+  try {
+    const aperturaId = parseInt(document.getElementById('cierreAperturaId').value);
+    const fisicoUsd = parseFloat(document.getElementById('cierreFisicoUsd').value || 0);
+    const fisicoMoneda = parseFloat(document.getElementById('cierreFisicoMoneda').value || 0);
+    const notas = document.getElementById('cierreNotas').value.trim();
+
+    const res = await fetch('/api/tesoreria/cajas/cierre', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        caja_apertura_id: aperturaId,
+        saldo_real_fisico_usd: fisicoUsd,
+        saldo_real_fisico_moneda: fisicoMoneda,
+        notas_cierre: notas,
+        usuario_id: 1
+      })
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Error al cerrar turno de caja');
+
+    closeModalCierreCaja();
+    const dif = parseFloat(json.data.diferencia_usd || 0);
+    const estadoArqueo = json.data.estado_arqueo;
+    const msg = `Arqueo: ${estadoArqueo.toUpperCase()} (Diferencia: ${dif >= 0 ? '+' : ''}$${dif.toFixed(2)} USD)`;
+    showToast(msg, dif === 0 ? 'success' : 'warning', 4500);
+
+    loadTesoreria();
+  } catch (err) {
+    console.error('[Tesorería] Error cierre:', err);
+    showToast(err.message || 'Error al cerrar caja', 'error');
+  }
+}
+
+/**
+ * Modal Transferencia entre Cuentas
+ */
+function openModalTransferenciaTesoreria() {
+  const modal = document.getElementById('modalTransferenciaTesoreria');
+  const origenSel = document.getElementById('transOrigenId');
+  const destinoSel = document.getElementById('transDestinoId');
+  if (!modal || !origenSel || !destinoSel) return;
+
+  const cuentas = AppState.tesoreria.cuentas || [];
+  const optionsHtml = cuentas.map(c => `
+    <option value="${c.id}" data-moneda="${c.moneda}">${c.nombre} (${c.moneda}) - Saldo: ${parseFloat(c.saldo_actual || 0).toFixed(2)}</option>
+  `).join('');
+
+  origenSel.innerHTML = optionsHtml;
+  destinoSel.innerHTML = optionsHtml;
+
+  if (cuentas.length > 1) {
+    destinoSel.selectedIndex = 1;
+  }
+
+  document.getElementById('transMontoOrigen').value = '10.00';
+  document.getElementById('transNotas').value = '';
+  recalcularTransferenciaTesoreria();
+
+  modal.classList.remove('hidden');
+}
+
+function closeModalTransferenciaTesoreria() {
+  document.getElementById('modalTransferenciaTesoreria')?.classList.add('hidden');
+}
+
+function recalcularTransferenciaTesoreria() {
+  const origenSel = document.getElementById('transOrigenId');
+  const destinoSel = document.getElementById('transDestinoId');
+  const montoOrigenInput = document.getElementById('transMontoOrigen');
+  const tasaInput = document.getElementById('transTasa');
+  const destinoTxt = document.getElementById('transMontoDestinoTxt');
+
+  if (!origenSel || !destinoSel || !montoOrigenInput || !tasaInput || !destinoTxt) return;
+
+  const optOrigen = origenSel.options[origenSel.selectedIndex];
+  const optDestino = destinoSel.options[destinoSel.selectedIndex];
+  const mOrigen = optOrigen?.getAttribute('data-moneda') || 'USD';
+  const mDestino = optDestino?.getAttribute('data-moneda') || 'USD';
+  const valOrigen = parseFloat(montoOrigenInput.value || 0);
+
+  const tasas = AppState.config || { tasa_ves: 45.0, tasa_cop: 4100.0 };
+  let sugerida = 1.0;
+
+  if (mOrigen === 'USD' && mDestino === 'VES') sugerida = parseFloat(tasas.tasa_ves || 45.0);
+  else if (mOrigen === 'USD' && mDestino === 'COP') sugerida = parseFloat(tasas.tasa_cop || 4100.0);
+  else if (mOrigen === 'VES' && mDestino === 'USD') sugerida = parseFloat(tasas.tasa_ves || 45.0);
+  else if (mOrigen === 'COP' && mDestino === 'USD') sugerida = parseFloat(tasas.tasa_cop || 4100.0);
+
+  // Si el usuario no modificó manualmente, sugerir la tasa oficial
+  if (tasaInput.dataset.manual !== 'true') {
+    tasaInput.value = sugerida.toFixed(4);
+  }
+
+  const tasa = parseFloat(tasaInput.value || 1.0);
+  let valDestino = 0;
+
+  if (mOrigen === mDestino) {
+    valDestino = valOrigen;
+  } else if (mOrigen === 'USD') {
+    valDestino = valOrigen * tasa;
+  } else {
+    valDestino = tasa > 0 ? (valOrigen / tasa) : 0;
+  }
+
+  destinoTxt.textContent = `${valDestino.toLocaleString(mDestino === 'USD' ? 'en-US' : 'es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${mDestino}`;
+}
+
+async function submitTransferenciaTesoreria() {
+  try {
+    const origenId = parseInt(document.getElementById('transOrigenId').value);
+    const destinoId = parseInt(document.getElementById('transDestinoId').value);
+    const montoOrigen = parseFloat(document.getElementById('transMontoOrigen').value || 0);
+    const tasa = parseFloat(document.getElementById('transTasa').value || 1.0);
+    const notas = document.getElementById('transNotas').value.trim();
+
+    if (origenId === destinoId) {
+      throw new Error('La cuenta origen y destino deben ser diferentes.');
+    }
+    if (montoOrigen <= 0) {
+      throw new Error('El monto a transferir debe ser mayor a 0.');
+    }
+
+    const origenSel = document.getElementById('transOrigenId');
+    const destinoSel = document.getElementById('transDestinoId');
+    const mOrigen = origenSel.options[origenSel.selectedIndex]?.getAttribute('data-moneda') || 'USD';
+    const mDestino = destinoSel.options[destinoSel.selectedIndex]?.getAttribute('data-moneda') || 'USD';
+    let montoDestino = (mOrigen === mDestino) ? montoOrigen : (mOrigen === 'USD' ? montoOrigen * tasa : montoOrigen / tasa);
+
+    const res = await fetch('/api/tesoreria/transferencias', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cuenta_origen_id: origenId,
+        cuenta_destino_id: destinoId,
+        monto_origen: montoOrigen,
+        monto_destino: montoDestino,
+        tasa_cambio: tasa,
+        notas: notas,
+        usuario_id: 1
+      })
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Error al ejecutar transferencia');
+
+    closeModalTransferenciaTesoreria();
+    showToast('Transferencia ejecutada con éxito', 'success');
+    loadTesoreria();
+  } catch (err) {
+    console.error('[Tesorería] Error transferencia:', err);
+    showToast(err.message || 'Error en transferencia', 'error');
+  }
+}
+
+/**
+ * Modal Gasto Operativo
+ */
+function openModalGastoOperativo() {
+  const modal = document.getElementById('modalGastoOperativo');
+  const cuentaSel = document.getElementById('gastoCuentaId');
+  if (!modal || !cuentaSel) return;
+
+  const cuentas = AppState.tesoreria.cuentas || [];
+  cuentaSel.innerHTML = cuentas.map(c => `
+    <option value="${c.id}">${c.nombre} (${c.moneda})</option>
+  `).join('');
+
+  document.getElementById('gastoBeneficiario').value = '';
+  document.getElementById('gastoBeneficiarioRif').value = '';
+  document.getElementById('gastoMontoMoneda').value = '0.00';
+  document.getElementById('gastoConcepto').value = '';
+
+  actualizarTasaGastoOperativo();
+  recalcularTotalUsdGasto();
+  toggleCuentaGastoOperativo();
+
+  modal.classList.remove('hidden');
+}
+
+function closeModalGastoOperativo() {
+  document.getElementById('modalGastoOperativo')?.classList.add('hidden');
+}
+
+function toggleCuentaGastoOperativo() {
+  const tipoPago = document.getElementById('gastoTipoPago')?.value;
+  const container = document.getElementById('containerCuentaGasto');
+  if (container) {
+    if (tipoPago === 'contado') {
+      container.classList.remove('hidden');
+    } else {
+      container.classList.add('hidden');
+    }
+  }
+}
+
+function actualizarTasaGastoOperativo() {
+  const moneda = document.getElementById('gastoMoneda')?.value || 'USD';
+  const tasaInput = document.getElementById('gastoTasaCambio');
+  if (!tasaInput) return;
+
+  const tasas = AppState.config || { tasa_ves: 45.0, tasa_cop: 4100.0 };
+  if (moneda === 'USD') tasaInput.value = '1.0000';
+  else if (moneda === 'VES') tasaInput.value = parseFloat(tasas.tasa_ves || 45.0).toFixed(4);
+  else if (moneda === 'COP') tasaInput.value = parseFloat(tasas.tasa_cop || 4100.0).toFixed(4);
+
+  recalcularTotalUsdGasto();
+}
+
+function recalcularTotalUsdGasto() {
+  const moneda = document.getElementById('gastoMoneda')?.value || 'USD';
+  const monto = parseFloat(document.getElementById('gastoMontoMoneda')?.value || 0);
+  const tasa = parseFloat(document.getElementById('gastoTasaCambio')?.value || 1.0);
+  const txt = document.getElementById('gastoTotalUsdTxt');
+
+  let totalUsd = 0;
+  if (moneda === 'USD') totalUsd = monto;
+  else totalUsd = tasa > 0 ? (monto / tasa) : 0;
+
+  if (txt) txt.textContent = `$${totalUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+}
+
+async function submitGastoOperativo() {
+  try {
+    const categoria = document.getElementById('gastoCategoria').value;
+    const tipoPago = document.getElementById('gastoTipoPago').value;
+    const beneficiario = document.getElementById('gastoBeneficiario').value.trim();
+    const rif = document.getElementById('gastoBeneficiarioRif').value.trim();
+    const moneda = document.getElementById('gastoMoneda').value;
+    const montoMoneda = parseFloat(document.getElementById('gastoMontoMoneda').value || 0);
+    const tasa = parseFloat(document.getElementById('gastoTasaCambio').value || 1.0);
+    const cuentaId = tipoPago === 'contado' ? parseInt(document.getElementById('gastoCuentaId').value) : null;
+    const concepto = document.getElementById('gastoConcepto').value.trim();
+
+    if (!beneficiario) throw new Error('Debe indicar el beneficiario.');
+    if (montoMoneda <= 0) throw new Error('El monto del gasto debe ser mayor a 0.');
+    if (!concepto) throw new Error('Debe ingresar el concepto o descripción del gasto.');
+
+    const res = await fetch('/api/gastos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        categoria_gasto: categoria,
+        tipo_pago: tipoPago,
+        beneficiario: beneficiario,
+        beneficiario_rif: rif,
+        moneda: moneda,
+        monto_total_moneda: montoMoneda,
+        tasa_cambio: tasa,
+        cuenta_tesoreria_id: cuentaId,
+        concepto: concepto,
+        usuario_id: 1
+      })
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Error al registrar gasto');
+
+    closeModalGastoOperativo();
+    showToast(`Gasto ${json.data.numero_gasto} registrado exitosamente`, 'success');
+    loadTesoreria();
+  } catch (err) {
+    console.error('[Tesorería] Error gasto:', err);
+    showToast(err.message || 'Error al guardar gasto', 'error');
+  }
+}
+
+/**
+ * Modal Cobro N:M y Anticipos
+ */
+async function openModalCobroMultipleNM() {
+  const modal = document.getElementById('modalPagoMultipleNM');
+  const clienteSel = document.getElementById('pagoNMClienteId');
+  if (!modal || !clienteSel) return;
+
+  try {
+    const res = await fetch('/api/clientes');
+    const clientes = await res.json();
+    clienteSel.innerHTML = '<option value="">-- Seleccione un cliente --</option>' +
+      (clientes || []).map(c => `<option value="${c.id}">${c.nombre} (${c.documento || 'S/D'})</option>`).join('');
+
+    AppState.tesoreria.cobroNMDetalles = [];
+    document.getElementById('pagoNMFacturasContainer').innerHTML = '<p class="text-xs text-slate-400 text-center py-4">Seleccione un cliente para ver facturas pendientes</p>';
+    document.getElementById('pagoNMTotalDeudaTxt').textContent = 'Deuda Total: $0.00';
+    document.getElementById('pagoNMConcepto').value = 'Cobro comercial de facturas';
+
+    agregarFilaDetallePagoNM(); // Primera fila por defecto (USD)
+    recalcularCobroMultipleNM();
+
+    modal.classList.remove('hidden');
+  } catch (err) {
+    console.error('[Tesorería] Error abrir cobro N:M:', err);
+    showToast('Error al cargar clientes', 'error');
+  }
+}
+
+function closeModalPagoMultipleNM() {
+  document.getElementById('modalPagoMultipleNM')?.classList.add('hidden');
+}
+
+async function cargarFacturasPendientesClienteNM() {
+  const clienteId = parseInt(document.getElementById('pagoNMClienteId')?.value || 0);
+  const container = document.getElementById('pagoNMFacturasContainer');
+  const deudaTxt = document.getElementById('pagoNMTotalDeudaTxt');
+  if (!container) return;
+
+  if (!clienteId) {
+    container.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">Seleccione un cliente para ver facturas pendientes</p>';
+    if (deudaTxt) deudaTxt.textContent = 'Deuda Total: $0.00';
+    return;
+  }
+
+  container.innerHTML = '<p class="text-xs text-slate-400 text-center py-4"><i class="fa-solid fa-spinner fa-spin mr-1"></i>Buscando facturas con saldo...</p>';
+
+  try {
+    const res = await fetch(`/api/cxc?cliente_id=${clienteId}&estado=pendiente`);
+    const json = await res.json();
+    const facturas = (json || []).filter(f => parseFloat(f.saldo_pendiente || 0) > 0);
+
+    if (facturas.length === 0) {
+      container.innerHTML = '<p class="text-xs text-emerald-600 font-bold text-center py-4"><i class="fa-solid fa-circle-check mr-1"></i>El cliente no posee facturas pendientes. Todo pago se registrará como Anticipo.</p>';
+      if (deudaTxt) deudaTxt.textContent = 'Deuda Total: $0.00';
+      recalcularCobroMultipleNM();
+      return;
+    }
+
+    let sumaDeuda = 0;
+    container.innerHTML = facturas.map((f, idx) => {
+      const saldo = parseFloat(f.saldo_pendiente || 0);
+      sumaDeuda += saldo;
+      return `
+        <label class="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 cursor-pointer text-xs">
+          <div class="flex items-center space-x-2">
+            <input type="checkbox" name="facturaNMSelect" value="${f.id}" data-saldo="${saldo}" onchange="recalcularCobroMultipleNM()" checked class="rounded border-slate-300 text-teal-600 focus:ring-teal-500">
+            <div>
+              <strong class="text-slate-900 block font-mono">Factura #${f.numero_factura || f.id}</strong>
+              <span class="text-[10px] text-slate-400">Emisión: ${f.fecha_emision || ''}</span>
+            </div>
+          </div>
+          <div class="text-right">
+            <span class="text-slate-400 text-[10px] block">Saldo Pendiente:</span>
+            <strong class="font-mono text-rose-600 font-bold text-xs">$${saldo.toFixed(2)} USD</strong>
+          </div>
+        </label>
+      `;
+    }).join('');
+
+    if (deudaTxt) deudaTxt.textContent = `Deuda Total: $${sumaDeuda.toFixed(2)}`;
+    recalcularCobroMultipleNM();
+  } catch (err) {
+    console.error('[Tesorería] Error facturas cliente:', err);
+    container.innerHTML = '<p class="text-xs text-rose-500 text-center py-4">Error al consultar facturas pendientes</p>';
+  }
+}
+
+function agregarFilaDetallePagoNM() {
+  const container = document.getElementById('pagoNMDetallesContainer');
+  if (!container) return;
+
+  const cuentas = AppState.tesoreria.cuentas || [];
+  const idx = AppState.tesoreria.cobroNMDetalles.length;
+  AppState.tesoreria.cobroNMDetalles.push({ id: idx });
+
+  const tasas = AppState.config || { tasa_ves: 45.0, tasa_cop: 4100.0 };
+  const fila = document.createElement('div');
+  fila.id = `filaDetalleNM_${idx}`;
+  fila.className = 'grid grid-cols-12 gap-2 items-center bg-white p-2 rounded-xl border border-slate-200 text-xs';
+  fila.innerHTML = `
+    <div class="col-span-4">
+      <select id="nmDetalleCuenta_${idx}" onchange="actualizarMonedaFilaNM(${idx})" class="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold">
+        ${cuentas.map(c => `<option value="${c.id}" data-moneda="${c.moneda}">${c.nombre} (${c.moneda})</option>`).join('')}
+      </select>
+    </div>
+    <div class="col-span-3">
+      <input type="number" step="0.01" min="0.01" id="nmDetalleMonto_${idx}" oninput="recalcularCobroMultipleNM()" placeholder="Monto" value="0.00" class="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold font-mono">
+    </div>
+    <div class="col-span-2">
+      <input type="number" step="0.0001" min="0.0001" id="nmDetalleTasa_${idx}" oninput="recalcularCobroMultipleNM()" value="1.0000" class="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono">
+    </div>
+    <div class="col-span-2 text-right">
+      <strong id="nmDetalleEqUsd_${idx}" class="font-mono text-slate-800 font-bold">$0.00</strong>
+    </div>
+    <div class="col-span-1 text-center">
+      <button type="button" onclick="eliminarFilaDetallePagoNM(${idx})" class="text-slate-400 hover:text-rose-600"><i class="fa-solid fa-trash-can"></i></button>
+    </div>
+  `;
+  container.appendChild(fila);
+  actualizarMonedaFilaNM(idx);
+}
+
+function eliminarFilaDetallePagoNM(idx) {
+  const fila = document.getElementById(`filaDetalleNM_${idx}`);
+  if (fila) fila.remove();
+  recalcularCobroMultipleNM();
+}
+
+function actualizarMonedaFilaNM(idx) {
+  const sel = document.getElementById(`nmDetalleCuenta_${idx}`);
+  const tasaInput = document.getElementById(`nmDetalleTasa_${idx}`);
+  if (!sel || !tasaInput) return;
+
+  const moneda = sel.options[sel.selectedIndex]?.getAttribute('data-moneda') || 'USD';
+  const tasas = AppState.config || { tasa_ves: 45.0, tasa_cop: 4100.0 };
+
+  if (moneda === 'USD') tasaInput.value = '1.0000';
+  else if (moneda === 'VES') tasaInput.value = parseFloat(tasas.tasa_ves || 45.0).toFixed(4);
+  else if (moneda === 'COP') tasaInput.value = parseFloat(tasas.tasa_cop || 4100.0).toFixed(4);
+
+  recalcularCobroMultipleNM();
+}
+
+function recalcularCobroMultipleNM() {
+  const container = document.getElementById('pagoNMDetallesContainer');
+  if (!container) return;
+
+  const filas = container.querySelectorAll('[id^="filaDetalleNM_"]');
+  let totalRecibidoUsd = 0;
+
+  filas.forEach(f => {
+    const idx = f.id.replace('filaDetalleNM_', '');
+    const sel = document.getElementById(`nmDetalleCuenta_${idx}`);
+    const moneda = sel?.options[sel.selectedIndex]?.getAttribute('data-moneda') || 'USD';
+    const monto = parseFloat(document.getElementById(`nmDetalleMonto_${idx}`)?.value || 0);
+    const tasa = parseFloat(document.getElementById(`nmDetalleTasa_${idx}`)?.value || 1.0);
+    const eqTxt = document.getElementById(`nmDetalleEqUsd_${idx}`);
+
+    let eq = 0;
+    if (moneda === 'USD') eq = monto;
+    else eq = tasa > 0 ? (monto / tasa) : 0;
+
+    if (eqTxt) eqTxt.textContent = `$${eq.toFixed(2)}`;
+    totalRecibidoUsd += eq;
+  });
+
+  // Calcular deuda seleccionada
+  const checks = document.querySelectorAll('input[name="facturaNMSelect"]:checked');
+  let deudaSeleccionada = 0;
+  checks.forEach(c => {
+    deudaSeleccionada += parseFloat(c.getAttribute('data-saldo') || 0);
+  });
+
+  let aplicado = Math.min(totalRecibidoUsd, deudaSeleccionada);
+  let anticipo = Math.max(0, totalRecibidoUsd - deudaSeleccionada);
+
+  const recTxt = document.getElementById('pagoNMTotalRecibidoTxt');
+  const aplTxt = document.getElementById('pagoNMTotalAplicadoTxt');
+  const antTxt = document.getElementById('pagoNMAnticipoTxt');
+
+  if (recTxt) recTxt.textContent = `$${totalRecibidoUsd.toFixed(2)}`;
+  if (aplTxt) aplTxt.textContent = `$${aplicado.toFixed(2)}`;
+  if (antTxt) antTxt.textContent = `$${anticipo.toFixed(2)}`;
+}
+
+async function submitCobroMultipleNM() {
+  try {
+    const clienteId = parseInt(document.getElementById('pagoNMClienteId').value);
+    if (!clienteId) throw new Error('Debe seleccionar un cliente.');
+
+    const concepto = document.getElementById('pagoNMConcepto').value.trim() || 'Cobro de facturas';
+
+    // Desglose monetario
+    const container = document.getElementById('pagoNMDetallesContainer');
+    const filas = container.querySelectorAll('[id^="filaDetalleNM_"]');
+    const detalles = [];
+
+    filas.forEach(f => {
+      const idx = f.id.replace('filaDetalleNM_', '');
+      const sel = document.getElementById(`nmDetalleCuenta_${idx}`);
+      const cuentaId = parseInt(sel?.value || 0);
+      const moneda = sel?.options[sel.selectedIndex]?.getAttribute('data-moneda') || 'USD';
+      const monto = parseFloat(document.getElementById(`nmDetalleMonto_${idx}`)?.value || 0);
+      const tasa = parseFloat(document.getElementById(`nmDetalleTasa_${idx}`)?.value || 1.0);
+
+      if (monto > 0 && cuentaId > 0) {
+        detalles.push({
+          cuenta_tesoreria_id: cuentaId,
+          metodo_pago: moneda === 'USD' ? 'efectivo_usd' : (moneda === 'VES' ? 'pago_movil_ves' : 'efectivo_cop'),
+          moneda: moneda,
+          monto_moneda: monto,
+          tasa_cambio: tasa,
+          monto_equivalente_usd: moneda === 'USD' ? monto : monto / tasa
+        });
+      }
+    });
+
+    if (detalles.length === 0) throw new Error('Debe ingresar al menos un detalle de pago con monto mayor a 0.');
+
+    // Calcular total disponible para aplicar
+    const totalRecibido = detalles.reduce((sum, d) => sum + d.monto_equivalente_usd, 0);
+
+    // Facturas seleccionadas y aplicaciones proporcionales/secuenciales
+    const checks = document.querySelectorAll('input[name="facturaNMSelect"]:checked');
+    const aplicaciones = [];
+    let remanente = totalRecibido;
+
+    checks.forEach(c => {
+      if (remanente <= 0.001) return;
+      const fId = parseInt(c.value);
+      const saldoF = parseFloat(c.getAttribute('data-saldo') || 0);
+      const amortizar = Math.min(remanente, saldoF);
+
+      aplicaciones.push({
+        cuenta_por_cobrar_id: fId,
+        monto_aplicado_usd: round2(amortizar)
+      });
+      remanente -= amortizar;
+    });
+
+    const payload = {
+      tipo_operacion: 'cobro_cliente',
+      tercero_tipo: 'cliente',
+      tercero_id: clienteId,
+      concepto: concepto,
+      detalles: detalles,
+      aplicaciones: aplicaciones,
+      usuario_id: 1
+    };
+
+    const res = await fetch('/api/pagos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Error al procesar pago');
+
+    closeModalPagoMultipleNM();
+    const antGen = parseFloat(json.data.monto_no_aplicado_usd || 0);
+    const msg = `Pago ${json.data.numero_pago} procesado exitosamente por $${parseFloat(json.data.monto_total_equivalente_usd).toFixed(2)} USD.` +
+                (antGen > 0 ? ` (Anticipo generado: $${antGen.toFixed(2)} USD)` : '');
+    showToast(msg, 'success', 5000);
+
+    loadTesoreria();
+  } catch (err) {
+    console.error('[Tesorería] Error cobro N:M:', err);
+    showToast(err.message || 'Error al procesar cobro', 'error');
+  }
+}
+
+/**
+ * Modal Aplicar Anticipo a Factura
+ */
+async function openModalAplicarAnticipo(anticipoId, clienteId, saldoDisp, clienteNombre) {
+  const modal = document.getElementById('modalAplicarAnticipo');
+  const facturaSel = document.getElementById('aplicarAnticipoFacturaId');
+  if (!modal || !facturaSel) return;
+
+  document.getElementById('aplicarAnticipoId').value = anticipoId;
+  document.getElementById('aplicarAnticipoClienteTxt').textContent = clienteNombre;
+  document.getElementById('aplicarAnticipoSaldoTxt').textContent = `$${parseFloat(saldoDisp).toFixed(2)} USD`;
+  document.getElementById('aplicarAnticipoMontoUsd').value = parseFloat(saldoDisp).toFixed(2);
+
+  facturaSel.innerHTML = '<option value="">Cargando facturas impagas...</option>';
+
+  try {
+    const res = await fetch(`/api/cxc?cliente_id=${clienteId}&estado=pendiente`);
+    const json = await res.json();
+    const facturas = (json || []).filter(f => parseFloat(f.saldo_pendiente || 0) > 0);
+
+    if (facturas.length === 0) {
+      showToast('El cliente no tiene facturas con saldo pendiente.', 'info');
+      return;
+    }
+
+    facturaSel.innerHTML = facturas.map(f => `
+      <option value="${f.id}" data-saldo="${f.saldo_pendiente}">Factura #${f.numero_factura || f.id} (Saldo: $${parseFloat(f.saldo_pendiente).toFixed(2)} USD)</option>
+    `).join('');
+
+    actualizarMontoSugeridoAnticipo();
+    modal.classList.remove('hidden');
+  } catch (err) {
+    console.error('[Tesorería] Error facturas para anticipo:', err);
+    showToast('Error al consultar facturas del cliente', 'error');
+  }
+}
+
+function closeModalAplicarAnticipo() {
+  document.getElementById('modalAplicarAnticipo')?.classList.add('hidden');
+}
+
+function actualizarMontoSugeridoAnticipo() {
+  const sel = document.getElementById('aplicarAnticipoFacturaId');
+  const opt = sel?.options[sel.selectedIndex];
+  const saldoFactura = parseFloat(opt?.getAttribute('data-saldo') || 0);
+  const saldoAnticipo = parseFloat(document.getElementById('aplicarAnticipoSaldoTxt')?.textContent.replace(/[^0-9.]/g, '') || 0);
+
+  const sugerido = Math.min(saldoFactura, saldoAnticipo);
+  const input = document.getElementById('aplicarAnticipoMontoUsd');
+  if (input && sugerido > 0) {
+    input.value = sugerido.toFixed(2);
+  }
+}
+
+async function submitAplicarAnticipo() {
+  try {
+    const anticipoId = parseInt(document.getElementById('aplicarAnticipoId').value);
+    const facturaId = parseInt(document.getElementById('aplicarAnticipoFacturaId').value);
+    const monto = parseFloat(document.getElementById('aplicarAnticipoMontoUsd').value || 0);
+
+    if (!facturaId) throw new Error('Debe seleccionar una factura.');
+    if (monto <= 0) throw new Error('El monto a aplicar debe ser mayor a 0.');
+
+    const res = await fetch('/api/anticipos/aplicar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        anticipo_id: anticipoId,
+        aplicaciones: [{ cuenta_por_cobrar_id: facturaId, monto_aplicado_usd: monto }],
+        usuario_id: 1
+      })
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Error al aplicar anticipo');
+
+    closeModalAplicarAnticipo();
+    showToast(`Anticipo aplicado exitosamente por $${monto.toFixed(2)} USD`, 'success');
+    loadTesoreria();
+  } catch (err) {
+    console.error('[Tesorería] Error aplicar anticipo:', err);
+    showToast(err.message || 'Error al aplicar anticipo', 'error');
+  }
+}
+
+/**
+ * Anulación de pago con confirmación
+ */
+async function anularPagoModal(pagoId, numeroPago) {
+  const motivo = prompt(`¿Está seguro de anular el pago ${numeroPago}?\n\nEsta acción restituirá el saldo pendiente a las facturas y revertirá los fondos de caja.\nIndique el motivo de la anulación:`, 'Error de digitación / Solicitud del cliente');
+  if (motivo === null) return; // Cancelado
+  if (!motivo.trim()) {
+    showToast('Debe ingresar un motivo para anular el pago.', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/pagos/${pagoId}/anular`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: motivo.trim(), usuario_id: 1 })
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Error al anular pago');
+
+    showToast(`Pago ${numeroPago} anulado exitosamente`, 'success');
+    loadTesoreria();
+  } catch (err) {
+    console.error('[Tesorería] Error anulación pago:', err);
+    showToast(err.message || 'Error al anular pago', 'error');
+  }
+}
+
+/**
+ * Helper para redondeo exacto a 2 decimales
+ */
+function round2(val) {
+  return Math.round((val + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Helper para escapar HTML en cadenas dinámicas
+ */
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
+ * ============================================================================
+ * MÓDULO FRONTEND DE INTELIGENCIA ARTIFICIAL ORGÁNICA (FASE 3A)
+ * D-BIAN SYSTEM COMPUTER - Ing. José Morales
+ * ============================================================================
+ */
+
+AppState.iaDiagnosticoData = null;
+
+/**
+ * Carga el diagnóstico analítico de inventario desde el backend
+ */
+async function cargarDiagnosticoIaInventario() {
+  const tbody = document.getElementById('iaTablaDiagnosticoBody');
+  if (tbody) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2 text-indigo-600"></i>Analizando inventario con IA orgánica basada en CPP...</td></tr>`;
+  }
+
+  try {
+    const res = await fetch('/api/ia/inventario/diagnostico');
+    if (!res.ok) throw new Error('Error al consultar diagnóstico de IA');
+    const json = await res.json();
+    AppState.iaDiagnosticoData = json;
+
+    renderIaMetricasPatrimoniales(json.resumen_patrimonial);
+    renderIaAlertasBanner(json.alertas_gerenciales);
+    renderIaTablaDiagnostico(json.analisis_productos);
+  } catch (err) {
+    console.error('[IA Inventario] Error al cargar:', err);
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="9" class="text-center py-6 text-rose-500 font-bold">${err.message}</td></tr>`;
+    }
+    if (typeof showToast === 'function') {
+      showToast(err.message || 'Error al evaluar inventario con IA', 'error');
+    }
+  }
+}
+
+/**
+ * Renderiza las tarjetas métricas del resumen patrimonial
+ */
+function renderIaMetricasPatrimoniales(resumen) {
+  if (!resumen) return;
+
+  const patUsd = document.getElementById('iaTotalPatrimonioUsd');
+  const patBs = document.getElementById('iaTotalPatrimonioBs');
+  const riesgUsd = document.getElementById('iaCapitalRiesgoUsd');
+  const riesgPct = document.getElementById('iaCapitalRiesgoPct');
+  const ahorroUsd = document.getElementById('iaAhorroComprasUsd');
+  const scoreTxt = document.getElementById('iaScoreSaludTxt');
+  const scoreDesc = document.getElementById('iaScoreSaludDesc');
+
+  if (patUsd) patUsd.textContent = `$${parseFloat(resumen.total_valoracion_cpp_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (patBs) patBs.textContent = `${parseFloat(resumen.total_valoracion_cpp_ves || 0).toLocaleString('es-VE', { minimumFractionDigits: 2 })} Bs.`;
+
+  const capRiesgo = parseFloat(resumen.capital_en_riesgo_margen_negativo_usd || 0);
+  if (riesgUsd) riesgUsd.textContent = `$${capRiesgo.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (riesgPct) {
+    riesgPct.textContent = `${resumen.porcentaje_capital_en_riesgo}% del patrimonio comprometido`;
+    riesgPct.className = capRiesgo > 0 ? 'text-xs text-rose-600 font-bold mt-0.5' : 'text-xs text-emerald-600 font-bold mt-0.5';
+  }
+
+  if (ahorroUsd) ahorroUsd.textContent = `$${parseFloat(resumen.ahorro_inmediato_compras_usd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const score = parseFloat(resumen.score_salud_inventario || 0);
+  if (scoreTxt) scoreTxt.textContent = `${score.toFixed(0)} / 100`;
+  if (scoreDesc) {
+    if (score >= 85) {
+      scoreDesc.textContent = 'Estado Excelente';
+      scoreDesc.className = 'text-xs font-bold text-emerald-600 mt-0.5';
+    } else if (score >= 60) {
+      scoreDesc.textContent = 'Atención en Márgenes / Precios';
+      scoreDesc.className = 'text-xs font-bold text-amber-600 mt-0.5';
+    } else {
+      scoreDesc.textContent = 'Riesgo Crítico de Venta a Pérdida';
+      scoreDesc.className = 'text-xs font-bold text-rose-600 mt-0.5';
+    }
+  }
+}
+
+/**
+ * Renderiza el banner de alertas críticas
+ */
+function renderIaAlertasBanner(alertas) {
+  const container = document.getElementById('iaAlertasCriticasContainer');
+  if (!container) return;
+
+  if (!alertas || alertas.length === 0) {
+    container.innerHTML = `
+      <div class="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center space-x-2 text-xs text-emerald-800">
+        <i class="fa-solid fa-circle-check text-emerald-600 text-sm"></i>
+        <span>Todos los productos operan con márgenes positivos sobre el costo CPP auditado. Cero ventas a pérdida detectadas.</span>
+      </div>
+    `;
+    return;
+  }
+
+  const criticas = alertas.filter(a => a.nivel === 'CRITICO');
+
+  container.innerHTML = `
+    <div class="p-4 bg-rose-50/90 border border-rose-200 rounded-2xl space-y-2 text-xs text-rose-950">
+      <div class="flex items-center space-x-2.5 font-bold text-rose-900 text-sm">
+        <i class="fa-solid fa-triangle-exclamation text-rose-600 text-base"></i>
+        <span>Diagnóstico Crítico de Rentabilidad: ${criticas.length} Producto(s) con Venta a Pérdida</span>
+      </div>
+      <p class="text-rose-800">
+        El motor de IA orgánica detectó que existe mercancía cuyo precio de venta en catálogo es inferior al Costo Promedio Ponderado (CPP) auditado. Cada venta a ese precio destruye patrimonio de la empresa.
+      </p>
+      <div class="mt-2 space-y-1.5 pt-2 border-t border-rose-200/80">
+        ${alertas.map(a => `
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between p-2 bg-white/80 rounded-xl border border-rose-100 gap-1.5">
+            <div>
+              <strong class="text-rose-900 font-mono">[${a.codigo}] ${a.nombre}:</strong>
+              <span class="text-slate-700 ml-1">${a.mensaje}</span>
+            </div>
+            <span class="text-emerald-800 font-bold bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200 text-[11px] whitespace-nowrap">
+              ${a.recomendacion}
+            </span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Renderiza la tabla analítica por producto
+ */
+function renderIaTablaDiagnostico(productos) {
+  const tbody = document.getElementById('iaTablaDiagnosticoBody');
+  if (!tbody) return;
+
+  if (!productos || productos.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-slate-400">No hay productos disponibles para análisis</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = productos.map(p => {
+    const estadoBadge = p.estado_abastecimiento === 'SOBRESTOCK'
+      ? `<span class="bg-indigo-50 text-indigo-700 font-bold px-2.5 py-0.5 rounded-full border border-indigo-200 text-[10px]"><i class="fa-solid fa-layer-group mr-1"></i>Sobrestock</span>`
+      : (p.estado_abastecimiento === 'OPTIMO'
+        ? `<span class="bg-emerald-50 text-emerald-700 font-bold px-2.5 py-0.5 rounded-full border border-emerald-200 text-[10px]"><i class="fa-solid fa-check mr-1"></i>Óptimo</span>`
+        : `<span class="bg-rose-50 text-rose-700 font-bold px-2.5 py-0.5 rounded-full border border-rose-200 text-[10px]"><i class="fa-solid fa-triangle-exclamation mr-1"></i>${p.estado_abastecimiento}</span>`);
+
+    const alertaBadge = p.alerta_rentabilidad === 'VENTA_A_PERDIDA'
+      ? `<span class="bg-rose-600 text-white font-extrabold px-2 py-0.5 rounded-full text-[10px] animate-pulse">Venta a Pérdida</span>`
+      : (p.alerta_rentabilidad === 'MARGEN_ESTRECHO'
+        ? `<span class="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full text-[10px]">Margen Estrecho</span>`
+        : `<span class="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full text-[10px]">Saludable</span>`);
+
+    const margenColor = p.margen_unitario_usd < 0 ? 'text-rose-600 font-black' : (p.margen_porcentaje < 8 ? 'text-amber-600 font-bold' : 'text-emerald-700 font-bold');
+
+    return `
+      <tr class="hover:bg-slate-50/80 transition text-xs font-medium">
+        <td class="py-3 px-4">
+          <strong class="text-slate-900 block font-bold font-mono">[${p.codigo}]</strong>
+          <span class="text-slate-600 text-[11px]">${p.nombre}</span>
+        </td>
+        <td class="py-3 px-4 text-right font-mono">
+          <strong class="text-slate-900 block font-bold">${p.stock_actual} u</strong>
+          <span class="text-[10px] text-slate-400">Mínimo: ${p.stock_minimo} u</span>
+        </td>
+        <td class="py-3 px-4 text-right font-mono font-bold text-slate-800">$${parseFloat(p.costo_cpp_usd).toFixed(2)}</td>
+        <td class="py-3 px-4 text-right font-mono font-bold text-slate-900">$${parseFloat(p.precio_venta_usd).toFixed(2)}</td>
+        <td class="py-3 px-4 text-right font-mono ${margenColor}">
+          <span class="block">${p.margen_porcentaje > 0 ? '+' : ''}${parseFloat(p.margen_porcentaje).toFixed(1)}%</span>
+          <span class="text-[10px] block font-normal">(${p.margen_unitario_usd > 0 ? '+' : ''}$${parseFloat(p.margen_unitario_usd).toFixed(2)})</span>
+        </td>
+        <td class="py-3 px-4 text-center">${estadoBadge}</td>
+        <td class="py-3 px-4 text-center">${alertaBadge}</td>
+        <td class="py-3 px-4 text-slate-600 text-[11px] max-w-xs leading-tight">${p.accion_abastecimiento}</td>
+        <td class="py-3 px-4 text-center">
+          <button onclick="openModalSimuladorPrecioIA(${p.id}, '${escapeHtml(p.nombre)}', ${p.stock_actual}, ${p.costo_cpp_usd}, ${p.precio_venta_usd})"
+                  class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold rounded-lg text-xs transition" title="Simular impacto de precio">
+            <i class="fa-solid fa-chart-line mr-1"></i>Simular
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+/**
+ * Modal Simulador de Precios
+ */
+function openModalSimuladorPrecioIA(prodId, nombre, stock, cpp, precioActual) {
+  const modal = document.getElementById('modalSimuladorPrecioIA');
+  if (!modal) return;
+
+  document.getElementById('simuladorProductoId').value = prodId;
+  document.getElementById('simProdNombreTxt').textContent = nombre;
+  document.getElementById('simProdStockTxt').textContent = `${stock} unidades`;
+  document.getElementById('simProdCppTxt').textContent = `$${parseFloat(cpp).toFixed(2)} USD`;
+  document.getElementById('simProdPrecioActualTxt').textContent = `$${parseFloat(precioActual).toFixed(2)} USD`;
+
+  // Sugerir nuevo precio saludable (mínimo costo CPP * 1.15)
+  const sugerido = cpp > precioActual ? round2(cpp * 1.15) : round2(precioActual * 1.05);
+  document.getElementById('simuladorNuevoPrecio').value = sugerido.toFixed(2);
+
+  ejecutarSimulacionEnVivo();
+  modal.classList.remove('hidden');
+}
+
+function closeModalSimuladorPrecioIA() {
+  document.getElementById('modalSimuladorPrecioIA')?.classList.add('hidden');
+}
+
+async function ejecutarSimulacionEnVivo() {
+  const prodId = parseInt(document.getElementById('simuladorProductoId')?.value || 0);
+  const nuevoPrecio = parseFloat(document.getElementById('simuladorNuevoPrecio')?.value || 0);
+  const container = document.getElementById('simuladorResultadosContainer');
+
+  if (!container || !prodId || nuevoPrecio <= 0) return;
+
+  try {
+    const res = await fetch('/api/ia/inventario/simular-precio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ producto_id: prodId, nuevo_precio: nuevoPrecio })
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Error al simular');
+
+    const act = json.precio_actual;
+    const sim = json.precio_simulado;
+    const dif = json.diferencial;
+
+    const colorGanancia = dif.es_ganancia ? 'text-emerald-700' : 'text-rose-700';
+    const bgCard = sim.nuevo_margen_unitario_usd >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200';
+
+    container.innerHTML = `
+      <div class="p-3 ${bgCard} border rounded-xl space-y-2">
+        <div class="flex justify-between items-center font-bold">
+          <span class="text-slate-700">Resultado Proyectado con Nuevo Precio:</span>
+          <span class="font-mono text-sm ${colorGanancia}">
+            ${sim.nuevo_margen_porcentaje >= 0 ? '+' : ''}${sim.nuevo_margen_porcentaje.toFixed(1)}% Margen
+          </span>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-200/60 font-mono">
+          <div><span class="text-slate-500 block font-sans">Margen Unitario:</span><strong class="${colorGanancia}">$${sim.nuevo_margen_unitario_usd.toFixed(2)} USD / u</strong></div>
+          <div><span class="text-slate-500 block font-sans">Utilidad Proyectada Stock:</span><strong class="${colorGanancia}">$${sim.nueva_utilidad_proyectada_stock.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD</strong></div>
+        </div>
+      </div>
+      <div class="p-2.5 bg-white border border-slate-200 rounded-xl flex items-center justify-between font-mono text-xs">
+        <span class="text-slate-600 font-sans">Impacto Patrimonial vs Precio Anterior:</span>
+        <strong class="${colorGanancia} font-black text-sm">
+          ${dif.incremento_ganancia_total_stock_usd >= 0 ? '+' : ''}$${dif.incremento_ganancia_total_stock_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+        </strong>
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<p class="text-xs text-rose-500">${err.message}</p>`;
+  }
+}
+
+
+
+// ==============================================================================
+// FASE 3B: CFO COPILOT GERENCIAL - ASISTENTE FINANCIERO CONVERSACIONAL DETERMINISTA
+// D-BIAN SYSTEM COMPUTER - Ing. José Morales
+// Cero Alucinaciones | 100% Read-Only | Conexión en Tiempo Real a Datos Contables
+// ==============================================================================
+
+const cfoCopilotState = {
+  historial: [],
+  sugerenciasCargadas: false,
+  consultando: false
+};
+
+function abrirModalCfoCopilot() {
+  const modal = document.getElementById('modalCfoCopilot');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+
+  if (!cfoCopilotState.sugerenciasCargadas) {
+    cargarSugerenciasCopilot();
+  }
+
+  if (cfoCopilotState.historial.length === 0) {
+    renderizarMensajeInicialCopilot();
+  }
+
+  setTimeout(() => {
+    document.getElementById('inputCfoCopilot')?.focus();
+  }, 100);
+}
+
+function cerrarModalCfoCopilot() {
+  document.getElementById('modalCfoCopilot')?.classList.add('hidden');
+}
+
+function limpiarInputCopilot() {
+  const inp = document.getElementById('inputCfoCopilot');
+  if (inp) {
+    inp.value = '';
+    inp.focus();
+  }
+}
+
+function reiniciarConversacionCopilot() {
+  cfoCopilotState.historial = [];
+  const container = document.getElementById('cfoCopilotChatContainer');
+  if (container) container.innerHTML = '';
+  renderizarMensajeInicialCopilot();
+}
+
+async function cargarSugerenciasCopilot() {
+  const container = document.getElementById('cfoCopilotSuggestionsContainer');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/ia/copilot/sugerencias');
+    const json = await res.json();
+    if (!res.ok || !json.sugerencias) return;
+
+    container.innerHTML = json.sugerencias.map(s => `
+      <button type="button" onclick="ejecutarPreguntaRapidaCopilot('${escapeHtml(s.texto)}')" class="inline-flex items-center px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/70 text-slate-700 hover:text-indigo-900 text-xs font-semibold shadow-2xs transition whitespace-nowrap active:scale-95">
+        <i class="fa-solid fa-sparkles text-indigo-500 mr-1.5 text-[10px]"></i>
+        <span>${escapeHtml(s.texto)}</span>
+      </button>
+    `).join('');
+
+    cfoCopilotState.sugerenciasCargadas = true;
+  } catch (err) {
+    console.error('Error al cargar sugerencias de Copilot:', err);
+  }
+}
+
+function ejecutarPreguntaRapidaCopilot(texto) {
+  const inp = document.getElementById('inputCfoCopilot');
+  if (inp) inp.value = texto;
+  enviarConsultaCfoCopilot();
+}
+
+function renderizarMensajeInicialCopilot() {
+  const container = document.getElementById('cfoCopilotChatContainer');
+  if (!container) return;
+
+  const msgId = 'copilot_msg_init';
+  const html = `
+    <div id="${msgId}" class="flex items-start space-x-3 max-w-3xl">
+      <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-600 to-teal-500 flex items-center justify-center text-white shrink-0 shadow-sm">
+        <span class="text-sm">🧠</span>
+      </div>
+      <div class="flex-1 bg-white border border-slate-200/90 rounded-2xl rounded-tl-sm p-4 shadow-xs text-xs space-y-3">
+        <div class="flex justify-between items-center border-b border-slate-100 pb-2">
+          <strong class="text-slate-800 font-extrabold text-sm">CFO Copilot Gerencial</strong>
+          <span class="text-[10px] text-slate-400 font-mono">Modo: Auditoría Contable CPP</span>
+        </div>
+        <p class="text-slate-600 leading-relaxed">
+          Bienvenido. Soy su <strong>Director Financiero de Inteligencia Artificial Orgánica</strong>.
+          Estoy conectado directamente a la base de datos de su empresa y al motor de <strong>Costo Promedio Ponderado (CPP)</strong>.
+        </p>
+        <div class="p-3 bg-indigo-50/60 border border-indigo-100 rounded-xl space-y-1.5 text-indigo-950 font-medium">
+          <p class="font-bold flex items-center text-indigo-900">
+            <i class="fa-solid fa-circle-check text-indigo-600 mr-1.5 text-xs"></i>Garantía de Fidelidad Numérica:
+          </p>
+          <ul class="list-disc list-inside space-y-0.5 text-[11px] text-indigo-900/80">
+            <li><strong>Cero Datos Fantasmas:</strong> Cada saldo y margen proviene de consultas SQL auditadas.</li>
+            <li><strong>Inmunidad Patrimonial:</strong> Esta interfaz es estrictamente de lectura (READ-ONLY).</li>
+            <li><strong>Multimoneda Oficial:</strong> Conversión operativa en tiempo real a tasas de BCV y TRM.</li>
+          </ul>
+        </div>
+        <p class="text-slate-500 text-[11px]">
+          Haga clic en cualquiera de las sugerencias rápidas arriba o escriba su duda directamente abajo (ej: <em>"¿Cuál es el balance 360?"</em> o <em>"¿Qué productos están a pérdida?"</em>).
+        </p>
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = html;
+  cfoCopilotState.historial.push({ rol: 'asistente', contenido: 'Mensaje de bienvenida inicial' });
+}
+
+async function enviarConsultaCfoCopilot() {
+  if (cfoCopilotState.consultando) return;
+
+  const inp = document.getElementById('inputCfoCopilot');
+  const pregunta = (inp?.value || '').trim();
+  if (!pregunta) return;
+
+  const container = document.getElementById('cfoCopilotChatContainer');
+  if (!container) return;
+
+  // 1. Renderizar mensaje del usuario
+  const userHtml = `
+    <div class="flex items-start justify-end space-x-2 max-w-2xl ml-auto">
+      <div class="bg-indigo-600 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 shadow-sm text-xs font-medium">
+        <p>${escapeHtml(pregunta)}</p>
+      </div>
+      <div class="w-7 h-7 rounded-lg bg-indigo-700 flex items-center justify-center text-white text-xs shrink-0">
+        <i class="fa-solid fa-user"></i>
+      </div>
+    </div>
+  `;
+  container.insertAdjacentHTML('beforeend', userHtml);
+  inp.value = '';
+
+  // 2. Renderizar indicador de carga determinista
+  const typingId = 'copilot_typing_' + Date.now();
+  const typingHtml = `
+    <div id="${typingId}" class="flex items-start space-x-3 max-w-xl">
+      <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-600 to-teal-500 flex items-center justify-center text-white shrink-0 shadow-sm animate-pulse">
+        <span class="text-sm">🧠</span>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-2xl rounded-tl-sm p-3.5 shadow-xs text-xs text-slate-500 flex items-center space-x-2">
+        <i class="fa-solid fa-circle-notch fa-spin text-indigo-600 text-sm"></i>
+        <span>Consultando balance, existencias CPP y tesorería en tiempo real...</span>
+      </div>
+    </div>
+  `;
+  container.insertAdjacentHTML('beforeend', typingHtml);
+  container.scrollTop = container.scrollHeight;
+
+  cfoCopilotState.consultando = true;
+
+  try {
+    const res = await fetch('/api/ia/copilot/consulta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pregunta: pregunta })
+    });
+
+    const data = await res.json();
+    document.getElementById(typingId)?.remove();
+
+    if (!res.ok || data.status !== 'ok') {
+      throw new Error(data.error || 'Error al procesar consulta contable');
+    }
+
+    // 3. Renderizar respuesta enriquecida
+    renderizarRespuestaCopilot(data, container);
+
+  } catch (err) {
+    document.getElementById(typingId)?.remove();
+    const errorHtml = `
+      <div class="flex items-start space-x-3 max-w-xl">
+        <div class="w-8 h-8 rounded-xl bg-rose-600 flex items-center justify-center text-white shrink-0">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <div class="bg-rose-50 border border-rose-200 rounded-2xl rounded-tl-sm p-3 text-xs text-rose-800">
+          <strong class="block font-bold">Error al auditar datos:</strong>
+          <span>${escapeHtml(err.message)}</span>
+        </div>
+      </div>
+    `;
+    container.insertAdjacentHTML('beforeend', errorHtml);
+  } finally {
+    cfoCopilotState.consultando = false;
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+function renderizarRespuestaCopilot(data, container) {
+  const kpis = data.kpis || [];
+  const tablas = data.tablas || [];
+  const alertas = data.alertas || [];
+  const acciones = data.acciones_sugeridas || [];
+
+  // Formatear markdown básico en el resumen
+  let resumenHtml = escapeHtml(data.resumen_ejecutivo || '')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+  // KPI cards grid
+  let kpisHtml = '';
+  if (kpis.length > 0) {
+    kpisHtml = `
+      <div class="grid grid-cols-2 sm:grid-cols-${Math.min(kpis.length, 4)} gap-2 pt-2">
+        ${kpis.map(k => {
+          let badgeColor = 'bg-slate-50 border-slate-200 text-slate-800';
+          let valColor = 'text-slate-900';
+          if (k.tipo === 'primary') { badgeColor = 'bg-indigo-50/70 border-indigo-200 text-indigo-900'; valColor = 'text-indigo-700'; }
+          else if (k.tipo === 'danger') { badgeColor = 'bg-rose-50 border-rose-200 text-rose-900'; valColor = 'text-rose-700'; }
+          else if (k.tipo === 'warning') { badgeColor = 'bg-amber-50 border-amber-200 text-amber-900'; valColor = 'text-amber-800'; }
+          else if (k.tipo === 'success') { badgeColor = 'bg-emerald-50 border-emerald-200 text-emerald-900'; valColor = 'text-emerald-700'; }
+
+          return `
+            <div class="p-2.5 rounded-xl border ${badgeColor} shadow-2xs space-y-0.5">
+              <span class="text-[10px] text-slate-500 block font-medium leading-tight">${escapeHtml(k.etiqueta)}</span>
+              <strong class="text-xs sm:text-sm font-extrabold font-mono block ${valColor}">${escapeHtml(k.valor)}</strong>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  // Alertas
+  let alertasHtml = '';
+  if (alertas.length > 0) {
+    alertasHtml = `
+      <div class="space-y-1.5 pt-1">
+        ${alertas.map(a => {
+          let bg = a.nivel === 'danger' ? 'bg-rose-50 border-rose-200 text-rose-800' :
+                   (a.nivel === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800');
+          let icon = a.nivel === 'danger' ? 'fa-triangle-exclamation' : (a.nivel === 'warning' ? 'fa-circle-exclamation' : 'fa-circle-check');
+          return `
+            <div class="p-2.5 rounded-xl border ${bg} text-xs flex items-start space-x-2">
+              <i class="fa-solid ${icon} mt-0.5 shrink-0"></i>
+              <span class="leading-relaxed font-medium">${escapeHtml(a.mensaje)}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  // Tabla compacta
+  let tablasHtml = '';
+  if (tablas.length > 0) {
+    tablasHtml = tablas.map(t => `
+      <div class="pt-2">
+        <h5 class="text-[11px] font-bold text-slate-700 uppercase tracking-wide mb-1.5 flex items-center">
+          <i class="fa-solid fa-table-list mr-1.5 text-indigo-600"></i>${escapeHtml(t.titulo)}
+        </h5>
+        <div class="overflow-x-auto rounded-xl border border-slate-200 shadow-2xs max-h-56">
+          <table class="w-full text-[11px] text-left border-collapse">
+            <thead class="bg-slate-100 text-slate-600 font-bold sticky top-0 border-b border-slate-200">
+              <tr>
+                ${t.columnas.map(c => `<th class="p-2 whitespace-nowrap">${escapeHtml(c)}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 bg-white">
+              ${t.filas.map(f => `
+                <tr class="hover:bg-slate-50 transition">
+                  ${Object.values(f).map(val => `<td class="p-2 whitespace-nowrap font-medium text-slate-700">${escapeHtml(String(val))}</td>`).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // Acciones sugeridas (botones de navegación rápida)
+  let accionesHtml = '';
+  if (acciones.length > 0) {
+    accionesHtml = `
+      <div class="pt-2 flex flex-wrap gap-1.5 border-t border-slate-100">
+        ${acciones.map(ac => `
+          <button type="button" onclick="ejecutarAccionCopilot('${escapeHtml(ac.accion)}')" class="inline-flex items-center px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold text-[11px] border border-indigo-200 shadow-2xs transition active:scale-95">
+            <span>${escapeHtml(ac.texto)}</span>
+            <i class="fa-solid fa-arrow-up-right-from-square ml-1.5 text-[9px]"></i>
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  const assistantHtml = `
+    <div class="flex items-start space-x-3 max-w-3xl">
+      <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-600 to-teal-500 flex items-center justify-center text-white shrink-0 shadow-sm">
+        <span class="text-sm">🧠</span>
+      </div>
+      <div class="flex-1 bg-white border border-slate-200/90 rounded-2xl rounded-tl-sm p-4 shadow-xs text-xs space-y-3">
+        <div class="flex justify-between items-center border-b border-slate-100 pb-2">
+          <div class="flex items-center space-x-2">
+            <strong class="text-slate-800 font-extrabold text-sm">${escapeHtml(data.titulo || 'Auditoría Gerencial')}</strong>
+            <span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-700 font-mono">${escapeHtml(data.intent || 'GENERAL')}</span>
+          </div>
+          <span class="text-[10px] text-slate-400 font-mono">${new Date(data.timestamp).toLocaleTimeString()}</span>
+        </div>
+
+        <p class="text-slate-700 leading-relaxed text-xs">${resumenHtml}</p>
+
+        ${kpisHtml}
+        ${alertasHtml}
+        ${tablasHtml}
+        ${accionesHtml}
+      </div>
+    </div>
+  `;
+
+  container.insertAdjacentHTML('beforeend', assistantHtml);
+  cfoCopilotState.historial.push({ rol: 'asistente', titulo: data.titulo, intent: data.intent });
+}
+
+function ejecutarAccionCopilot(accionJs) {
+  cerrarModalCfoCopilot();
+  try {
+    if (accionJs.startsWith("navigate('") && accionJs.endsWith("')")) {
+      const vista = accionJs.replace("navigate('", "").replace("')", "");
+      navigate(vista);
+    } else if (accionJs.startsWith("abrirSimuladorPrecioIA(")) {
+      const prodId = parseInt(accionJs.replace("abrirSimuladorPrecioIA(", "").replace(")", ""));
+      abrirSimuladorPrecioIA(prodId);
+    } else if (accionJs === "abrirModalAperturaCaja()") {
+      abrirModalAperturaCaja();
+    } else if (accionJs === "abrirDiagnosticoIaProductos()") {
+      navigate('productos');
+      setTimeout(() => {
+        document.getElementById('btnSubtabProdIa')?.click();
+      }, 150);
+    } else if (accionJs.startsWith("ejecutarPreguntaCopilot('")) {
+      const p = accionJs.replace("ejecutarPreguntaCopilot('", "").replace("')", "");
+      abrirModalCfoCopilot();
+      ejecutarPreguntaRapidaCopilot(p);
+    } else {
+      new Function(accionJs)();
+    }
+  } catch (err) {
+    console.error('Error ejecutando acción sugerida por Copilot:', err);
+  }
+}

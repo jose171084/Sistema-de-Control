@@ -9,7 +9,7 @@
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <!-- Estilos Custom Soft UI y Tematización Dinámica -->
-  <link rel="stylesheet" href="styles.css?v=2.5.0">
+  <link rel="stylesheet" href="styles.css?v=3.0.0">
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans min-h-screen antialiased overflow-x-hidden md:flex selection:bg-teal-100 selection:text-teal-900">
 
@@ -94,6 +94,11 @@
       <div class="pt-3 pb-1 px-2.5">
         <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Finanzas & Control</span>
       </div>
+      <button onclick="navigate('tesoreria')" id="nav-tesoreria" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-vault mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+        <span data-label-key="tab_tesoreria">Cajas & Tesorería</span>
+      </button>
+
       <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn group">
         <i class="fa-solid fa-hand-holding-dollar mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_cxc">Cuentas por Cobrar (CxC)</span>
@@ -106,6 +111,17 @@
         <i class="fa-solid fa-chart-column mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_reportes">Informes & Kardex Fiscal</span>
       </button>
+
+      <!-- Botón CFO Copilot IA (Fase 3B) -->
+      <div class="pt-2 px-1">
+        <button onclick="abrirModalCfoCopilot()" id="nav-cfo-copilot" class="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/40 text-white font-semibold text-xs shadow-md hover:border-indigo-400 hover:shadow-indigo-500/10 transition-all">
+          <span class="flex items-center space-x-2">
+            <span class="text-sm">🧠</span>
+            <span class="font-bold tracking-tight">CFO Copilot IA</span>
+          </span>
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-indigo-500/30 text-indigo-300 border border-indigo-500/40">Audit</span>
+        </button>
+      </div>
     </nav>
 
     <!-- Tarjeta de Tasas de Cambio en Sidebar (Soft UI Mini-Card) -->
@@ -268,6 +284,10 @@
         <button onclick="navigate('compras')" class="btn-theme-compra text-white px-2.5 sm:px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-xs flex items-center justify-center transition-all duration-200 active:scale-95" title="Cargar Compra">
           <i class="fa-solid fa-cart-shopping sm:mr-1.5"></i>
           <span class="hidden sm:inline" data-label-key="btn_cargar_compra">Cargar Compra</span>
+        </button>
+        <button onclick="abrirModalCfoCopilot()" id="btnHeaderCfoCopilot" title="CFO Copilot IA: Asistente Financiero Ejecutivo" class="px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 via-purple-600 to-teal-600 hover:from-indigo-500 hover:to-teal-500 shadow-sm flex items-center space-x-1.5 transition-all duration-200 active:scale-95">
+          <span class="text-sm">🧠</span>
+          <span class="hidden md:inline font-bold">CFO Copilot</span>
         </button>
         <button onclick="openPersonalizacionModal()" title="Personalizar Colores y Nombres" class="p-2 bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 hover:text-slate-800 rounded-xl transition-all duration-200 shadow-2xs active:scale-95">
           <i class="fa-solid fa-palette text-xs sm:text-sm"></i>
@@ -508,6 +528,10 @@
                 class="px-4 py-2 rounded-xl text-sm font-semibold transition flex items-center bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 shadow-2xs">
           <i class="fa-solid fa-sliders mr-2 text-amber-600"></i>Ajustes de Inventario
         </button>
+        <button type="button" onclick="cambiarSubtabProductos('ia')" id="btnSubtabProdIa" 
+                class="px-4 py-2 rounded-xl text-sm font-semibold transition flex items-center bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 shadow-2xs">
+          <i class="fa-solid fa-brain mr-2 text-indigo-600"></i>Diagnóstico IA Orgánica
+        </button>
       </div>
 
       <!-- CONTENEDOR 1: CATÁLOGO DE PRODUCTOS (EXISTENTE) -->
@@ -681,6 +705,110 @@
           </div>
         </div>
       </div>
+    
+      <!-- CONTENEDOR 3: INTELIGENCIA ARTIFICIAL ORGÁNICA (FASE 3A) -->
+      <div id="subtabProdIaContainer" class="hidden space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h2 class="text-2xl font-bold text-slate-800 flex items-center">
+              <i class="fa-solid fa-brain text-indigo-600 mr-2.5"></i>
+              Inteligencia Artificial Orgánica de Inventarios & Rentabilidad
+            </h2>
+            <p class="text-sm text-slate-500">
+              Análisis predictivo basado estrictamente en costos CPP auditados, existencias reales y prevención de pérdidas comerciales.
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="cargarDiagnosticoIaInventario()" class="text-sm bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl shadow-2xs transition">
+              <i class="fa-solid fa-rotate-right mr-1.5 text-indigo-600"></i>Reevaluar Indicadores
+            </button>
+          </div>
+        </div>
+
+        <!-- Banner de Alertas Críticas / Pérdidas de Margen -->
+        <div id="iaAlertasCriticasContainer"></div>
+
+        <!-- Tarjetas de Métricas de Inteligencia Patrimonial -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Patrimonio en Inventario</p>
+              <h3 class="text-2xl font-black text-slate-900 mt-1" id="iaTotalPatrimonioUsd">$0.00</h3>
+              <p class="text-xs text-slate-500 mt-0.5" id="iaTotalPatrimonioBs">0.00 Bs.</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-sack-dollar"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Capital en Riesgo (Venta a Pérdida)</p>
+              <h3 class="text-2xl font-black text-rose-600 mt-1" id="iaCapitalRiesgoUsd">$0.00</h3>
+              <p class="text-xs text-rose-500 font-bold mt-0.5" id="iaCapitalRiesgoPct">0.0% del patrimonio</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Ahorro Evitado en Compras</p>
+              <h3 class="text-2xl font-black text-emerald-600 mt-1" id="iaAhorroComprasUsd">$0.00</h3>
+              <p class="text-xs text-emerald-700 font-medium mt-0.5">Sobrestock protegido</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-shield-halved"></i>
+            </div>
+          </div>
+
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div>
+              <p class="text-xs font-semibold uppercase text-slate-400 tracking-wider">Score Salud de Inventario</p>
+              <h3 class="text-2xl font-black text-slate-900 mt-1" id="iaScoreSaludTxt">0 / 100</h3>
+              <p class="text-xs font-semibold mt-0.5" id="iaScoreSaludDesc">-</p>
+            </div>
+            <div class="w-12 h-12 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center text-xl">
+              <i class="fa-solid fa-heart-pulse"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabla de Diagnóstico Analítico y Sugerencias IA -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <div>
+              <h4 class="font-bold text-slate-800 text-sm">Evaluación Inteligente por Producto</h4>
+              <p class="text-xs text-slate-500">Márgenes de rentabilidad, stock mínimo vs real y sugerencias de compra auditadas.</p>
+            </div>
+            <span class="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-full">
+              <i class="fa-solid fa-sparkles mr-1"></i>100% Basado en Datos Reales
+            </span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold uppercase text-slate-500 tracking-wider">
+                  <th class="py-3 px-4">Producto / Código</th>
+                  <th class="py-3 px-4 text-right">Stock Actual / Mínimo</th>
+                  <th class="py-3 px-4 text-right">Costo CPP Real</th>
+                  <th class="py-3 px-4 text-right">Precio Venta</th>
+                  <th class="py-3 px-4 text-right">Margen Bruto (%)</th>
+                  <th class="py-3 px-4 text-center">Estado Abastecimiento</th>
+                  <th class="py-3 px-4 text-center">Alerta Rentabilidad</th>
+                  <th class="py-3 px-4">Sugerencia Operativa</th>
+                  <th class="py-3 px-4 text-center">Simulador</th>
+                </tr>
+              </thead>
+              <tbody id="iaTablaDiagnosticoBody" class="divide-y divide-slate-100">
+                <tr><td colspan="9" class="text-center py-8 text-slate-400">Analizando inventario con IA orgánica...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
     </section>
 
     <!-- ========================================================
@@ -3601,6 +3729,216 @@
         </div>
       </div>
     </section>
+
+    <!-- ========================================================
+         VISTA 12: CAJAS & TESORERÍA EMPRESARIAL (FASE 2F-6D)
+         ======================================================== -->
+    <section id="view-tesoreria" class="hidden space-y-6">
+      <!-- Encabezado de Tesorería -->
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800 flex items-center">
+            <i class="fa-solid fa-vault text-teal-600 mr-2.5"></i>
+            Cajas & Tesorería Multimoneda
+          </h2>
+          <p class="text-sm text-slate-500">
+            Control de efectivo en bóveda, cajas de mostrador, cuentas bancarias, arqueos de turno y pagos N:M.
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button onclick="loadTesoreria()" class="text-sm bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl shadow-2xs transition">
+            <i class="fa-solid fa-rotate-right mr-1.5"></i>Actualizar
+          </button>
+          <button onclick="openModalAperturaCaja()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow-2xs transition">
+            <i class="fa-solid fa-lock-open mr-1.5"></i>Abrir Caja
+          </button>
+          <button onclick="openModalCierreCaja()" class="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow-2xs transition">
+            <i class="fa-solid fa-calculator mr-1.5"></i>Cerrar / Arqueo
+          </button>
+          <button onclick="openModalTransferenciaTesoreria()" class="bg-sky-600 hover:bg-sky-700 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow-2xs transition">
+            <i class="fa-solid fa-right-left mr-1.5"></i>Transferir
+          </button>
+          <button onclick="openModalGastoOperativo()" class="bg-rose-600 hover:bg-rose-700 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow-2xs transition">
+            <i class="fa-solid fa-receipt mr-1.5"></i>Registrar Gasto
+          </button>
+          <button onclick="openModalCobroMultipleNM()" class="bg-teal-600 hover:bg-teal-700 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow-2xs transition">
+            <i class="fa-solid fa-hand-holding-dollar mr-1.5"></i>Cobro N:M / Anticipo
+          </button>
+        </div>
+      </div>
+
+      <!-- Tarjetas de Saldo de Cuentas de Tesorería (KPI Cards) -->
+      <div id="tesoreriaCuentasCardsContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Renderizado dinámico desde app.js -->
+        <div class="p-5 rounded-2xl bg-white border border-slate-200 animate-pulse h-28"></div>
+        <div class="p-5 rounded-2xl bg-white border border-slate-200 animate-pulse h-28"></div>
+        <div class="p-5 rounded-2xl bg-white border border-slate-200 animate-pulse h-28"></div>
+        <div class="p-5 rounded-2xl bg-white border border-slate-200 animate-pulse h-28"></div>
+      </div>
+
+      <!-- Banner de Turnos Activos -->
+      <div id="tesoreriaTurnosAlertaContainer"></div>
+
+      <!-- Pestañas de Navegación Interna -->
+      <div class="border-b border-slate-200">
+        <nav class="flex space-x-2 overflow-x-auto pb-1" aria-label="Tabs Tesorería">
+          <button onclick="cambiarTabTesoreria('movimientos')" id="tab-tesoreria-movimientos" class="tab-tesoreria-btn active-tab border-b-2 border-teal-600 pb-3 px-3 text-sm font-bold text-teal-700 whitespace-nowrap">
+            <i class="fa-solid fa-list-check mr-1.5"></i>Historial de Pagos & Movimientos
+          </button>
+          <button onclick="cambiarTabTesoreria('gastos')" id="tab-tesoreria-gastos" class="tab-tesoreria-btn border-b-2 border-transparent pb-3 px-3 text-sm font-medium text-slate-500 hover:text-slate-700 whitespace-nowrap">
+            <i class="fa-solid fa-arrow-trend-down mr-1.5 text-rose-500"></i>Gastos Operativos
+          </button>
+          <button onclick="cambiarTabTesoreria('anticipos')" id="tab-tesoreria-anticipos" class="tab-tesoreria-btn border-b-2 border-transparent pb-3 px-3 text-sm font-medium text-slate-500 hover:text-slate-700 whitespace-nowrap">
+            <i class="fa-solid fa-piggy-bank mr-1.5 text-emerald-500"></i>Saldos a Favor (Anticipos)
+          </button>
+          <button onclick="cambiarTabTesoreria('arqueos')" id="tab-tesoreria-arqueos" class="tab-tesoreria-btn border-b-2 border-transparent pb-3 px-3 text-sm font-medium text-slate-500 hover:text-slate-700 whitespace-nowrap">
+            <i class="fa-solid fa-scale-balanced mr-1.5 text-amber-500"></i>Cierres y Arqueos de Caja
+          </button>
+        </nav>
+      </div>
+
+      <!-- Sub-Tab 1: Historial de Pagos y Movimientos -->
+      <div id="tesoreriaTabContentMovimientos" class="space-y-4">
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-3 items-center justify-between">
+          <div class="relative w-full md:w-96">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+            <input type="text" id="filtroBuscarPago" oninput="filtrarTablaPagosTesoreria()" placeholder="Buscar por N° pago, cliente, concepto..."
+                   class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-teal-500 focus:bg-white transition">
+          </div>
+          <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            <select id="filtroTipoOperacionPago" onchange="loadTesoreriaMovimientos()" class="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-medium">
+              <option value="">Todas las Operaciones</option>
+              <option value="cobro_cliente">Cobros a Clientes</option>
+              <option value="pago_proveedor">Pagos a Proveedores</option>
+              <option value="anticipo_cliente">Anticipos</option>
+            </select>
+            <select id="filtroEstadoPago" onchange="loadTesoreriaMovimientos()" class="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-medium">
+              <option value="">Todos los Estados</option>
+              <option value="activo">Activos</option>
+              <option value="anulado">Anulados</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold uppercase text-slate-500 tracking-wider">
+                  <th class="py-3 px-4">Fecha / N° Pago</th>
+                  <th class="py-3 px-4">Operación</th>
+                  <th class="py-3 px-4">Tercero (Cliente/Prov)</th>
+                  <th class="py-3 px-4">Concepto</th>
+                  <th class="py-3 px-4 text-right">Total USD</th>
+                  <th class="py-3 px-4 text-right">Aplicado USD</th>
+                  <th class="py-3 px-4 text-right">Anticipo USD</th>
+                  <th class="py-3 px-4 text-center">Estado</th>
+                  <th class="py-3 px-4 text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="tablaPagosTesoreriaBody" class="divide-y divide-slate-100">
+                <tr><td colspan="9" class="text-center py-8 text-slate-400">Cargando pagos...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-Tab 2: Gastos Operativos -->
+      <div id="tesoreriaTabContentGastos" class="hidden space-y-4">
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-3 items-center justify-between">
+          <div class="relative w-full md:w-96">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+            <input type="text" id="filtroBuscarGasto" oninput="filtrarTablaGastosTesoreria()" placeholder="Buscar por N° gasto, beneficiario, concepto..."
+                   class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-rose-500 focus:bg-white transition">
+          </div>
+          <button onclick="openModalGastoOperativo()" class="bg-rose-600 hover:bg-rose-700 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-2xs transition">
+            <i class="fa-solid fa-plus mr-1"></i>Nuevo Gasto
+          </button>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold uppercase text-slate-500 tracking-wider">
+                  <th class="py-3 px-4">Fecha / N° Gasto</th>
+                  <th class="py-3 px-4">Categoría</th>
+                  <th class="py-3 px-4">Beneficiario</th>
+                  <th class="py-3 px-4">Concepto</th>
+                  <th class="py-3 px-4">Tipo Pago / Cuenta</th>
+                  <th class="py-3 px-4 text-right">Monto Moneda</th>
+                  <th class="py-3 px-4 text-right">Monto Total USD</th>
+                  <th class="py-3 px-4 text-center">Estado</th>
+                </tr>
+              </thead>
+              <tbody id="tablaGastosTesoreriaBody" class="divide-y divide-slate-100">
+                <tr><td colspan="8" class="text-center py-8 text-slate-400">Cargando gastos operativos...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-Tab 3: Saldos a Favor (Anticipos de Clientes) -->
+      <div id="tesoreriaTabContentAnticipos" class="hidden space-y-4">
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-3 items-center justify-between">
+          <div class="relative w-full md:w-96">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+            <input type="text" id="filtroBuscarAnticipo" oninput="filtrarTablaAnticiposTesoreria()" placeholder="Buscar cliente por nombre o cédula..."
+                   class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-emerald-500 focus:bg-white transition">
+          </div>
+          <span class="text-xs text-slate-500 font-medium">Saldos a favor originados por sobrepagos o pagos anticipados</span>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold uppercase text-slate-500 tracking-wider">
+                  <th class="py-3 px-4">ID / Fecha</th>
+                  <th class="py-3 px-4">Cliente</th>
+                  <th class="py-3 px-4">N° Pago Origen</th>
+                  <th class="py-3 px-4 text-right">Monto Original USD</th>
+                  <th class="py-3 px-4 text-right">Saldo Disponible USD</th>
+                  <th class="py-3 px-4 text-center">Estado</th>
+                  <th class="py-3 px-4 text-center">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="tablaAnticiposTesoreriaBody" class="divide-y divide-slate-100">
+                <tr><td colspan="7" class="text-center py-8 text-slate-400">Cargando anticipos...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-Tab 4: Historial de Arqueos y Cierres de Caja -->
+      <div id="tesoreriaTabContentArqueos" class="hidden space-y-4">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold uppercase text-slate-500 tracking-wider">
+                  <th class="py-3 px-4">ID Turno</th>
+                  <th class="py-3 px-4">Cuenta de Caja</th>
+                  <th class="py-3 px-4">Apertura (Fecha / Fondo)</th>
+                  <th class="py-3 px-4">Cierre (Fecha)</th>
+                  <th class="py-3 px-4 text-right">Saldo Teórico</th>
+                  <th class="py-3 px-4 text-right">Saldo Físico Contado</th>
+                  <th class="py-3 px-4 text-right">Diferencia</th>
+                  <th class="py-3 px-4 text-center">Resultado Arqueo</th>
+                </tr>
+              </thead>
+              <tbody id="tablaArqueosTesoreriaBody" class="divide-y divide-slate-100">
+                <tr><td colspan="8" class="text-center py-8 text-slate-400">Cargando historial de arqueos...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <!-- ========================================================
@@ -5512,7 +5850,7 @@
             <i class="fa-solid fa-circle-check text-emerald-600 text-sm"></i>
             <span class="font-bold text-[11px]">Sistema Certificado & Auditoría Conciliada</span>
           </div>
-          <span class="font-mono text-[10px] font-semibold bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">132/132 Tests Backend OK</span>
+          <span class="font-mono text-[10px] font-semibold bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">161/161 Tests Backend OK</span>
         </div>
       </div>
 
@@ -5525,9 +5863,469 @@
     </div>
   </div>
 
+
+  <!-- ========================================================
+       MODAL: APERTURA DE TURNO DE CAJA (FASE 2F-6D)
+       ======================================================== -->
+  <div id="modalAperturaCaja" class="fixed inset-0 z-50 flex items-center justify-center hidden bg-slate-900/60 backdrop-blur-xs p-4">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in duration-200">
+      <div class="bg-gradient-to-r from-emerald-600 to-teal-700 px-6 py-4 text-white flex justify-between items-center">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center"><i class="fa-solid fa-lock-open text-base"></i></div>
+          <div><h3 class="font-bold text-base leading-tight">Apertura de Turno de Caja</h3><p class="text-xs text-emerald-100">Iniciar jornada con fondo de caja</p></div>
+        </div>
+        <button onclick="closeModalAperturaCaja()" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="formAperturaCaja" onsubmit="event.preventDefault(); submitAperturaCaja();" class="p-6 space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Cuenta de Caja a Abrir *</label>
+          <select id="aperturaCuentaId" required class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:bg-white focus:border-emerald-500">
+            <!-- Cargado dinámicamente: solo cuentas de tipo caja_efectivo -->
+          </select>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Fondo Inicial USD</label>
+            <div class="relative">
+              <span class="absolute left-3 top-2.5 text-slate-400 font-bold">$</span>
+              <input type="number" step="0.01" min="0" id="aperturaMontoUsd" value="0.00" class="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Fondo Moneda Local</label>
+            <input type="number" step="0.01" min="0" id="aperturaMontoMoneda" value="0.00" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Notas / Observaciones</label>
+          <textarea id="aperturaNotas" rows="2" placeholder="Ej. Billetes de denominación baja para vuelto..." class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs"></textarea>
+        </div>
+        <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+          <button type="button" onclick="closeModalAperturaCaja()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-sm">Confirmar Apertura</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MODAL: CIERRE Y ARQUEO DE CAJA (FASE 2F-6D)
+       ======================================================== -->
+  <div id="modalCierreCaja" class="fixed inset-0 z-50 flex items-center justify-center hidden bg-slate-900/60 backdrop-blur-xs p-4">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in duration-200">
+      <div class="bg-gradient-to-r from-amber-600 to-amber-700 px-6 py-4 text-white flex justify-between items-center">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center"><i class="fa-solid fa-calculator text-base"></i></div>
+          <div><h3 class="font-bold text-base leading-tight">Cierre y Arqueo Ciego de Caja</h3><p class="text-xs text-amber-100">Conciliación de saldo teórico vs físico</p></div>
+        </div>
+        <button onclick="closeModalCierreCaja()" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="formCierreCaja" onsubmit="event.preventDefault(); submitCierreCaja();" class="p-6 space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Turno de Caja Abierto *</label>
+          <select id="cierreAperturaId" onchange="actualizarInfoTurnoCierre()" required class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold">
+            <!-- Cargado dinámicamente con turnos abiertos -->
+          </select>
+        </div>
+
+        <div id="cierreResumenTurnoContainer" class="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
+          <div class="flex justify-between text-slate-600"><span>Apertura:</span><strong id="cierreFechaAperturaTxt" class="font-mono text-slate-800">-</strong></div>
+          <div class="flex justify-between text-slate-600"><span>Fondo Inicial:</span><strong id="cierreFondoInicialTxt" class="font-mono text-slate-800">$0.00</strong></div>
+        </div>
+
+        <div class="bg-amber-50/70 p-4 rounded-2xl border border-amber-200/70 space-y-3">
+          <h4 class="font-bold text-xs text-amber-900 uppercase tracking-wider flex items-center">
+            <i class="fa-solid fa-money-bill-wave text-amber-600 mr-1.5"></i>Conteo Físico Real en Bóveda
+          </h4>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] font-bold text-slate-700 uppercase mb-1">Efectivo USD Contado *</label>
+              <div class="relative">
+                <span class="absolute left-3 top-2.5 text-slate-400 font-bold">$</span>
+                <input type="number" step="0.01" min="0" id="cierreFisicoUsd" oninput="calcularDiferenciaArqueoVisual()" required value="0.00" class="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-xl text-sm font-extrabold text-slate-900">
+              </div>
+            </div>
+            <div>
+              <label class="block text-[11px] font-bold text-slate-700 uppercase mb-1">Moneda Local Contada</label>
+              <input type="number" step="0.01" min="0" id="cierreFisicoMoneda" value="0.00" class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm font-extrabold text-slate-900">
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Notas del Arqueo / Justificación</label>
+          <textarea id="cierreNotas" rows="2" placeholder="Observaciones sobre faltantes, billetes deteriorados, etc..." class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs"></textarea>
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+          <button type="button" onclick="closeModalCierreCaja()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs shadow-sm">Realizar Cierre de Turno</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MODAL: TRANSFERENCIA ENTRE CUENTAS DE TESORERÍA (FASE 2F-6D)
+       ======================================================== -->
+  <div id="modalTransferenciaTesoreria" class="fixed inset-0 z-50 flex items-center justify-center hidden bg-slate-900/60 backdrop-blur-xs p-4">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in duration-200">
+      <div class="bg-gradient-to-r from-sky-600 to-indigo-700 px-6 py-4 text-white flex justify-between items-center">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center"><i class="fa-solid fa-right-left text-base"></i></div>
+          <div><h3 class="font-bold text-base leading-tight">Transferencia de Tesorería</h3><p class="text-xs text-sky-100">Fondeo de cajas o cambio de divisas</p></div>
+        </div>
+        <button onclick="closeModalTransferenciaTesoreria()" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="formTransferenciaTesoreria" onsubmit="event.preventDefault(); submitTransferenciaTesoreria();" class="p-6 space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Cuenta Origen (Sale dinero) *</label>
+          <select id="transOrigenId" onchange="recalcularTransferenciaTesoreria()" required class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold">
+            <!-- Cuentas origen -->
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Cuenta Destino (Ingresa dinero) *</label>
+          <select id="transDestinoId" onchange="recalcularTransferenciaTesoreria()" required class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold">
+            <!-- Cuentas destino -->
+          </select>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Monto Origen *</label>
+            <input type="number" step="0.01" min="0.01" id="transMontoOrigen" oninput="recalcularTransferenciaTesoreria()" required value="0.00" class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Tasa de Cambio</label>
+            <input type="number" step="0.0001" min="0.0001" id="transTasa" oninput="recalcularTransferenciaTesoreria()" required value="1.0000" class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold font-mono">
+          </div>
+        </div>
+        <div class="p-3 bg-sky-50/70 border border-sky-200/70 rounded-xl flex justify-between items-center text-xs">
+          <span class="text-sky-800 font-medium">Monto acreditado en Destino:</span>
+          <strong id="transMontoDestinoTxt" class="font-mono text-sm text-sky-900">$0.00</strong>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Motivo / Notas</label>
+          <textarea id="transNotas" rows="2" placeholder="Ej. Cambio de divisas USD para tener cambio en COP..." class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs"></textarea>
+        </div>
+        <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+          <button type="button" onclick="closeModalTransferenciaTesoreria()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl text-xs shadow-sm">Ejecutar Transferencia</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MODAL: REGISTRO DE GASTO OPERATIVO (FASE 2F-6D)
+       ======================================================== -->
+  <div id="modalGastoOperativo" class="fixed inset-0 z-50 flex items-center justify-center hidden bg-slate-900/60 backdrop-blur-xs p-4">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in duration-200">
+      <div class="bg-gradient-to-r from-rose-600 to-red-700 px-6 py-4 text-white flex justify-between items-center">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center"><i class="fa-solid fa-receipt text-base"></i></div>
+          <div><h3 class="font-bold text-base leading-tight">Registrar Gasto Operativo</h3><p class="text-xs text-rose-100">Egresos de caja, transferencias o pasivos a crédito</p></div>
+        </div>
+        <button onclick="closeModalGastoOperativo()" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="formGastoOperativo" onsubmit="event.preventDefault(); submitGastoOperativo();" class="p-6 space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Categoría del Gasto *</label>
+            <select id="gastoCategoria" required class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold">
+              <option value="servicios">Servicios Básicos (Luz/Agua/Internet)</option>
+              <option value="nomina">Nómina / Salarios / Viáticos</option>
+              <option value="mantenimiento">Mantenimiento y Reparaciones</option>
+              <option value="alquiler">Alquiler de Local / Depósito</option>
+              <option value="papeleria">Papelería y Suministros</option>
+              <option value="transporte">Fletes y Transporte</option>
+              <option value="otros">Otros Gastos Operativos</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Modalidad de Pago *</label>
+            <select id="gastoTipoPago" onchange="toggleCuentaGastoOperativo()" required class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold">
+              <option value="contado">Contado (Egresa de Tesorería)</option>
+              <option value="credito">Crédito (Genera CxP a Proveedor)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Beneficiario / Proveedor *</label>
+            <input type="text" id="gastoBeneficiario" required placeholder="Nombre o Empresa" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">RIF / Cédula</label>
+            <input type="text" id="gastoBeneficiarioRif" placeholder="J-12345678-0" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Moneda *</label>
+            <select id="gastoMoneda" onchange="actualizarTasaGastoOperativo()" required class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold">
+              <option value="USD">USD ($)</option>
+              <option value="VES">VES (Bs.)</option>
+              <option value="COP">COP (Pesos)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Monto Moneda *</label>
+            <input type="number" step="0.01" min="0.01" id="gastoMontoMoneda" oninput="recalcularTotalUsdGasto()" required value="0.00" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Tasa de Cambio</label>
+            <input type="number" step="0.0001" min="0.0001" id="gastoTasaCambio" oninput="recalcularTotalUsdGasto()" required value="1.0000" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono">
+          </div>
+        </div>
+
+        <div id="containerCuentaGasto">
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Cuenta de Tesorería Origen *</label>
+          <select id="gastoCuentaId" class="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold">
+            <!-- Cuentas de tesorería -->
+          </select>
+        </div>
+
+        <div class="p-3 bg-rose-50/70 border border-rose-200/70 rounded-xl flex justify-between items-center text-xs">
+          <span class="text-rose-800 font-medium">Equivalente Total en USD:</span>
+          <strong id="gastoTotalUsdTxt" class="font-mono text-sm text-rose-900">$0.00 USD</strong>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Descripción / Concepto *</label>
+          <textarea id="gastoConcepto" required rows="2" placeholder="Detalle del gasto efectuado..." class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs"></textarea>
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+          <button type="button" onclick="closeModalGastoOperativo()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-sm">Registrar Gasto</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MODAL: COBRO N:M MULTIMONEDA & ANTICIPOS (FASE 2F-6D)
+       ======================================================== -->
+  <div id="modalPagoMultipleNM" class="fixed inset-0 z-50 flex items-center justify-center hidden bg-slate-900/60 backdrop-blur-xs p-4">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in duration-200">
+      <div class="bg-gradient-to-r from-teal-600 to-emerald-700 px-6 py-4 text-white flex justify-between items-center">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center"><i class="fa-solid fa-hand-holding-dollar text-base"></i></div>
+          <div><h3 class="font-bold text-base leading-tight">Cobro N:M Multimoneda & Anticipos</h3><p class="text-xs text-teal-100">Liquidación múltiple de facturas con pagos mixtos</p></div>
+        </div>
+        <button onclick="closeModalPagoMultipleNM()" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="formPagoMultipleNM" onsubmit="event.preventDefault(); submitCobroMultipleNM();" class="p-6 space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Cliente *</label>
+          <select id="pagoNMClienteId" onchange="cargarFacturasPendientesClienteNM()" required class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold">
+            <!-- Clientes cargados dinámicamente -->
+          </select>
+        </div>
+
+        <!-- Lista de Facturas Pendientes para Seleccionar -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1.5 flex justify-between">
+            <span>Facturas Pendientes a Amortizar</span>
+            <span id="pagoNMTotalDeudaTxt" class="text-rose-600 font-bold font-mono">Deuda Total: $0.00</span>
+          </label>
+          <div class="border border-slate-200 rounded-2xl max-h-40 overflow-y-auto p-2 bg-slate-50/50 space-y-1.5" id="pagoNMFacturasContainer">
+            <p class="text-xs text-slate-400 text-center py-4">Seleccione un cliente para ver facturas pendientes</p>
+          </div>
+        </div>
+
+        <!-- Desglose de Medios de Pago (Mixtos) -->
+        <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+          <div class="flex justify-between items-center">
+            <span class="text-xs font-bold uppercase text-slate-700">Desglose Monetario Recibido</span>
+            <button type="button" onclick="agregarFilaDetallePagoNM()" class="text-[11px] font-bold text-teal-700 hover:text-teal-900 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded-lg">
+              <i class="fa-solid fa-plus mr-1"></i>Agregar Moneda / Cuenta
+            </button>
+          </div>
+          <div id="pagoNMDetallesContainer" class="space-y-2">
+            <!-- Filas dinámicas de pago (Efectivo USD, Bs, COP, etc.) -->
+          </div>
+        </div>
+
+        <!-- Balance del Pago -->
+        <div class="p-3 bg-teal-50 border border-teal-200 rounded-2xl grid grid-cols-3 gap-2 text-center text-xs">
+          <div><span class="text-slate-500 block">Total Recibido</span><strong id="pagoNMTotalRecibidoTxt" class="font-mono text-sm text-teal-800">$0.00</strong></div>
+          <div><span class="text-slate-500 block">Total Aplicado</span><strong id="pagoNMTotalAplicadoTxt" class="font-mono text-sm text-slate-800">$0.00</strong></div>
+          <div><span class="text-slate-500 block">Anticipo Generado</span><strong id="pagoNMAnticipoTxt" class="font-mono text-sm text-emerald-600">$0.00</strong></div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Concepto / Referencia</label>
+          <input type="text" id="pagoNMConcepto" value="Cobro comercial de facturas" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+          <button type="button" onclick="closeModalPagoMultipleNM()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs shadow-sm">Procesar Cobro</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MODAL: APLICAR ANTICIPO / SALDO A FAVOR (FASE 2F-6D)
+       ======================================================== -->
+  <div id="modalAplicarAnticipo" class="fixed inset-0 z-50 flex items-center justify-center hidden bg-slate-900/60 backdrop-blur-xs p-4">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in duration-200">
+      <div class="bg-gradient-to-r from-emerald-600 to-teal-700 px-6 py-4 text-white flex justify-between items-center">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center"><i class="fa-solid fa-piggy-bank text-base"></i></div>
+          <div><h3 class="font-bold text-base leading-tight">Aplicar Saldo a Favor</h3><p class="text-xs text-emerald-100">Amortizar facturas con crédito existente</p></div>
+        </div>
+        <button onclick="closeModalAplicarAnticipo()" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="formAplicarAnticipo" onsubmit="event.preventDefault(); submitAplicarAnticipo();" class="p-6 space-y-4">
+        <input type="hidden" id="aplicarAnticipoId">
+        <div class="p-3 bg-emerald-50 rounded-2xl border border-emerald-200 text-xs flex justify-between items-center">
+          <div><span class="text-emerald-700 font-medium block">Cliente:</span><strong id="aplicarAnticipoClienteTxt" class="text-emerald-900 font-bold">-</strong></div>
+          <div class="text-right"><span class="text-emerald-700 font-medium block">Saldo Disponible:</span><strong id="aplicarAnticipoSaldoTxt" class="font-mono text-base text-emerald-900 font-black">$0.00 USD</strong></div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Seleccionar Factura Impaga *</label>
+          <select id="aplicarAnticipoFacturaId" onchange="actualizarMontoSugeridoAnticipo()" required class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold">
+            <!-- Facturas del cliente -->
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Monto a Aplicar en USD *</label>
+          <div class="relative">
+            <span class="absolute left-3.5 top-2.5 text-slate-400 font-bold">$</span>
+            <input type="number" step="0.01" min="0.01" id="aplicarAnticipoMontoUsd" required value="0.00" class="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900">
+          </div>
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+          <button type="button" onclick="closeModalAplicarAnticipo()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-sm">Aplicar a Factura</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- ========================================================
        CONTENEDOR DE NOTIFICACIONES TOAST CORPORATIVAS (FLOAT)
        ======================================================== -->
+  
+  <!-- ========================================================
+       MODAL: SIMULADOR DE IMPACTO DE PRECIO (IA ORGÁNICA FASE 3A)
+       ======================================================== -->
+  <div id="modalSimuladorPrecioIA" class="fixed inset-0 z-50 flex items-center justify-center hidden bg-slate-900/60 backdrop-blur-xs p-4">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in duration-200">
+      <div class="bg-gradient-to-r from-indigo-600 to-indigo-800 px-6 py-4 text-white flex justify-between items-center">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center"><i class="fa-solid fa-chart-line text-base"></i></div>
+          <div><h3 class="font-bold text-base leading-tight">Simulador de Rentabilidad con IA</h3><p class="text-xs text-indigo-100">Proyección de margen y utilidad sin alterar datos</p></div>
+        </div>
+        <button onclick="closeModalSimuladorPrecioIA()" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="p-6 space-y-4">
+        <input type="hidden" id="simuladorProductoId">
+        <div class="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-1">
+          <div class="flex justify-between font-bold"><span class="text-slate-500">Producto:</span><span id="simProdNombreTxt" class="text-slate-900 font-bold">-</span></div>
+          <div class="flex justify-between"><span class="text-slate-500">Stock Actual Físico:</span><strong id="simProdStockTxt" class="font-mono text-slate-800">-</strong></div>
+          <div class="flex justify-between"><span class="text-slate-500">Costo Histórico CPP:</span><strong id="simProdCppTxt" class="font-mono text-slate-900 font-black">-</strong></div>
+          <div class="flex justify-between"><span class="text-slate-500">Precio Actual Catálogo:</span><strong id="simProdPrecioActualTxt" class="font-mono text-slate-700">-</strong></div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Precio de Venta Simulado (USD) *</label>
+          <div class="relative">
+            <span class="absolute left-3.5 top-2.5 text-slate-400 font-bold">$</span>
+            <input type="number" step="0.01" min="0.01" id="simuladorNuevoPrecio" oninput="ejecutarSimulacionEnVivo()" class="w-full pl-8 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-base font-extrabold text-slate-900">
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">Ingrese un precio hipotético para proyectar el resultado contable.</p>
+        </div>
+
+        <!-- Resultados de la Simulación -->
+        <div id="simuladorResultadosContainer" class="p-4 bg-indigo-50/70 border border-indigo-200/80 rounded-2xl space-y-2 text-xs">
+          <!-- Renderizado dinámico -->
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+          <button type="button" onclick="closeModalSimuladorPrecioIA()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs">Cerrar Simulador</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MODAL: CFO COPILOT GERENCIAL (IA CONVERSACIONAL FASE 3B)
+       ======================================================== -->
+  <div id="modalCfoCopilot" class="fixed inset-0 z-50 flex items-center justify-center hidden bg-slate-900/70 backdrop-blur-xs p-3 sm:p-5">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-4xl w-full h-[90vh] max-h-[820px] flex flex-col overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
+      
+      <!-- Cabecera Ejecutiva -->
+      <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 px-5 sm:px-6 py-4 text-white flex justify-between items-center border-b border-indigo-500/30 shrink-0">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-teal-400 flex items-center justify-center shadow-md">
+            <span class="text-xl">🧠</span>
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <h3 class="font-extrabold text-base sm:text-lg leading-tight text-white tracking-tight">CFO Copilot Gerencial</h3>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>Auditado en Vivo
+              </span>
+            </div>
+            <p class="text-xs text-indigo-200/80">Director Financiero IA • Consultas Contables Deterministas y Protección Patrimonial</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button type="button" onclick="reiniciarConversacionCopilot()" title="Reiniciar conversación" class="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-white/10 transition text-xs flex items-center space-x-1">
+            <i class="fa-solid fa-rotate-right"></i>
+            <span class="hidden sm:inline">Reiniciar</span>
+          </button>
+          <button type="button" onclick="cerrarModalCfoCopilot()" class="text-white/70 hover:text-white p-2 rounded-xl hover:bg-white/10 transition text-lg">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Barra de Sugerencias Rápidas (Chips / Pills) -->
+      <div class="bg-slate-50 border-b border-slate-200 px-4 py-2.5 shrink-0 overflow-x-auto no-scrollbar">
+        <div class="flex items-center space-x-2 min-w-max" id="cfoCopilotSuggestionsContainer">
+          <!-- Renderizado dinámico de sugerencias -->
+        </div>
+      </div>
+
+      <!-- Contenedor del Chat (Scrollable) -->
+      <div id="cfoCopilotChatContainer" class="flex-1 p-4 sm:p-6 overflow-y-auto space-y-4 bg-slate-50/50">
+        <!-- Mensajes del usuario y del asistente se inyectan dinámicamente aquí -->
+      </div>
+
+      <!-- Pie de Entrada de Texto -->
+      <div class="p-3 sm:p-4 bg-white border-t border-slate-200 shrink-0">
+        <form id="formCfoCopilot" onsubmit="event.preventDefault(); enviarConsultaCfoCopilot();" class="flex items-center space-x-2">
+          <div class="relative flex-1">
+            <input type="text" id="inputCfoCopilot" placeholder="Pregúntele al CFO Copilot... Ej: ¿Cuánto dinero hay en caja? o ¿Cuál es el balance 360?" class="w-full pl-4 pr-10 py-3 bg-slate-100 hover:bg-slate-50 focus:bg-white border border-slate-300 focus:border-indigo-600 rounded-2xl text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition">
+            <button type="button" onclick="limpiarInputCopilot()" id="btnClearInputCopilot" class="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600 hidden text-xs">
+              <i class="fa-solid fa-circle-xmark"></i>
+            </button>
+          </div>
+          <button type="submit" id="btnSendCfoCopilot" class="px-4 sm:px-6 py-3 bg-gradient-to-r from-indigo-600 to-teal-600 hover:from-indigo-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm rounded-2xl shadow-md hover:shadow-lg flex items-center space-x-1.5 transition active:scale-95 shrink-0">
+            <span>Consultar</span>
+            <i class="fa-solid fa-arrow-right"></i>
+          </button>
+        </form>
+        <div class="flex justify-between items-center px-2 pt-2 text-[10px] text-slate-400">
+          <span>🔒 Consultas 100% de sólo lectura. Cero mutaciones en inventario.db.</span>
+          <span>Cálculo determinista en USD oficial (BCV / TRM)</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <div id="corporateToastContainer" class="fixed bottom-5 right-5 z-[9999] flex flex-col space-y-2 pointer-events-none max-w-sm w-full px-4" aria-live="polite"></div>
 
   <!-- ========================================================
@@ -5537,6 +6335,6 @@
   <div id="areaImpresionOficial" class="hidden-on-screen" aria-hidden="true"></div>
 
   <!-- Scripts -->
-  <script src="app.js?v=2.5.0"></script>
+  <script src="app.js?v=3.1.0"></script>
 </body>
 </html>

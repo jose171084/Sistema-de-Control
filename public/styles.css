@@ -1279,3 +1279,54 @@ body.rol-cajero .role-admin-only {
   display: none !important;
 }
 
+
+/* ========================================================
+   ESTILOS DE TESORERÍA, CAJAS Y ARQUEOS (FASE 2F-6D)
+   ======================================================== */
+.tab-tesoreria-btn {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+}
+
+.tab-tesoreria-btn:hover {
+  color: #0f766e;
+}
+
+.badge-arqueo-cuadrado {
+  background-color: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.badge-arqueo-sobrante {
+  background-color: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.badge-arqueo-faltante {
+  background-color: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+
+/* ========================================================
+   ESTILOS DE CFO COPILOT GERENCIAL (FASE 3B)
+   ======================================================== */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes pulseSubtle {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.02); opacity: 0.95; }
+}
+
+.animate-pulse-subtle {
+  animation: pulseSubtle 3s ease-in-out infinite;
+}
