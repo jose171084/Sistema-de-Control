@@ -12673,6 +12673,240 @@ const DocumentTemplates = {
 
   movimientoA4: function(data, config) {
     return this.movimientoHoja(data, config, 'a4Portrait');
+  },
+
+  // ========================================================
+  // CATÁLOGO CORPORATIVO DE PRODUCTOS (EDITORIAL & ÉLITE)
+  // Con condicional estricto de existencias y diseño TAVO CLOUD
+  // ========================================================
+  catalogoProductos: function(productos, config, opciones) {
+    const esc = DocumentPrinter.escape;
+    const cfg = config || AppState.config || {};
+    const opts = opciones || {};
+    const mostrarStock = Boolean(opts.mostrarStock);
+    const layout = opts.layout || 'grid'; // 'grid' | 'list'
+    const prods = Array.isArray(productos) ? productos : [];
+
+    // 1. Logotipo Corporativo
+    let logoHtml = '';
+    if (cfg.logo_url) {
+      logoHtml = `<img src="${esc(cfg.logo_url)}" alt="Logo" style="max-height: 48px; max-width: 150px; object-fit: contain; margin-bottom: 2px;">`;
+    } else {
+      logoHtml = `
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+          <div style="width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #071B49, #0755C9); color: #00C6E8; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 16px; border: 1px solid #00C6E8;">
+            TC
+          </div>
+          <span style="font-size: 13px; font-weight: 900; color: #071B49; letter-spacing: 0.5px;">TAVO CLOUD</span>
+        </div>
+      `;
+    }
+
+    // 2. Encabezado Institucional
+    const hoyStr = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const tasaVes = parseFloat(cfg.tasa_ves || 0);
+    const tituloDoc = mostrarStock ? 'CATÁLOGO DE INVENTARIO' : 'CATÁLOGO DE PRODUCTOS';
+    const subtituloDoc = mostrarStock ? 'Lista Oficial con Existencias Actuales' : 'Lista Oficial de Precios al Cliente';
+
+    let headerHtml = `
+      <div style="border-bottom: 2px solid #071B49; padding-bottom: 12px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 14px;">
+          ${logoHtml}
+          <div>
+            <h1 style="margin: 0; font-size: 17px; font-weight: 900; color: #071B49; text-transform: uppercase; letter-spacing: -0.2px;">
+              ${esc(cfg.nombre_negocio || 'TAVO CLOUD')}
+            </h1>
+            ${cfg.documento_fiscal ? `<p style="margin: 2px 0 0 0; font-size: 11px; font-weight: 700; color: #334155;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
+            <p style="margin: 2px 0 0 0; font-size: 10px; color: #64748B;">
+              ${cfg.telefono ? `<span><i class="fa-solid fa-phone" style="font-size: 9px; margin-right: 3px;"></i>${esc(cfg.telefono)}</span>` : ''}
+              ${cfg.telefono && cfg.direccion ? ' &bull; ' : ''}
+              ${cfg.direccion ? `<span>${esc(cfg.direccion)}</span>` : ''}
+            </p>
+          </div>
+        </div>
+
+        <div style="text-align: right; shrink-0;">
+          <div style="display: inline-block; background: #071B49; color: #FFFFFF; font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 6px; letter-spacing: 0.5px; text-transform: uppercase;">
+            ${tituloDoc}
+          </div>
+          <div style="font-size: 9.5px; font-weight: 600; color: ${mostrarStock ? '#047857' : '#0755C9'}; margin-top: 3px;">
+            ${subtituloDoc}
+          </div>
+          <div style="font-size: 9.5px; color: #64748B; margin-top: 2px;">
+            Emisión: <strong>${hoyStr}</strong>
+            ${tasaVes > 0 ? ` &bull; Tasa BCV: <strong>$1 = ${tasaVes.toFixed(2)} Bs.</strong>` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 3. Renderizado de Productos (Layout Grid vs Layout List)
+    let bodyHtml = '';
+
+    if (prods.length === 0) {
+      bodyHtml = `
+        <div style="text-align: center; padding: 40px 20px; color: #94A3B8; font-size: 13px; font-style: italic;">
+          No hay productos disponibles para mostrar con los filtros seleccionados.
+        </div>
+      `;
+    } else if (layout === 'list') {
+      // Vista Lista Ejecutiva
+      let rowsHtml = '';
+      prods.forEach((p, idx) => {
+        const num = idx + 1;
+        const codigo = esc(p.codigo || '—');
+        const nombre = esc(p.nombre || 'Producto');
+        const categoria = esc(p.categoria_nombre || 'General');
+        const precioTotal = parseFloat(p.precio_total || 0).toFixed(2);
+        const precioVes = tasaVes > 0 ? (p.precio_total * tasaVes).toFixed(2) : null;
+        const stock = parseFloat(p.stock || 0);
+
+        // Miniatura
+        const imgMini = p.imagen 
+          ? `<img src="${p.imagen}" alt="${nombre}" style="width: 32px; height: 32px; object-fit: contain; border-radius: 4px; border: 1px solid #E2E8F0; background: #F8FAFC;">`
+          : `<div style="width: 32px; height: 32px; border-radius: 4px; background: #F1F5F9; border: 1px solid #E2E8F0; display: flex; align-items: center; justify-content: center; color: #94A3B8; font-size: 11px;"><i class="fa-solid fa-box"></i></div>`;
+
+        // Columna de stock condicional
+        let stockTd = '';
+        if (mostrarStock) {
+          stockTd = stock > 0
+            ? `<td style="text-align: right; font-weight: 700; color: #047857; padding: 6px 8px;">${stock} unid.</td>`
+            : `<td style="text-align: right; font-weight: 700; color: #B91C1C; padding: 6px 8px;">Agotado</td>`;
+        }
+
+        rowsHtml += `
+          <tr style="break-inside: avoid; page-break-inside: avoid; border-bottom: 1px solid #F1F5F9;">
+            <td style="text-align: center; color: #94A3B8; font-size: 9px; padding: 6px 4px;">${num}</td>
+            <td style="padding: 4px 6px; text-align: center;">${imgMini}</td>
+            <td style="font-family: monospace; font-size: 10px; font-weight: 700; color: #334155; padding: 6px 8px;">${codigo}</td>
+            <td style="padding: 6px 8px;">
+              <strong style="color: #0F172A; font-size: 11px;">${nombre}</strong>
+              ${p.descripcion ? `<div style="font-size: 9px; color: #64748B;">${esc(p.descripcion)}</div>` : ''}
+            </td>
+            <td style="font-size: 10px; color: #64748B; padding: 6px 8px;">${categoria}</td>
+            <td style="text-align: right; font-family: monospace; font-size: 11.5px; font-weight: 800; color: #0755C9; padding: 6px 8px;">
+              $${precioTotal}
+              ${precioVes ? `<div style="font-size: 9px; font-weight: normal; color: #64748B;">≈ ${precioVes} Bs.</div>` : ''}
+            </td>
+            ${stockTd}
+          </tr>
+        `;
+      });
+
+      bodyHtml = `
+        <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
+          <thead>
+            <tr style="background: #071B49; color: #FFFFFF; font-size: 10px; text-transform: uppercase;">
+              <th style="padding: 7px 4px; text-align: center; width: 4%;">#</th>
+              <th style="padding: 7px 6px; text-align: center; width: 6%;">Foto</th>
+              <th style="padding: 7px 8px; text-align: left; width: 14%;">Código</th>
+              <th style="padding: 7px 8px; text-align: left; width: 42%;">Producto</th>
+              <th style="padding: 7px 8px; text-align: left; width: 16%;">Categoría</th>
+              <th style="padding: 7px 8px; text-align: right; width: 18%;">Precio ($)</th>
+              ${mostrarStock ? '<th style="padding: 7px 8px; text-align: right; width: 12%;">Existencia</th>' : ''}
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      `;
+
+    } else {
+      // Vista Cuadrícula Editorial (Catálogo Élite 3 Columnas)
+      let cardsHtml = '';
+      prods.forEach(p => {
+        const codigo = esc(p.codigo || '—');
+        const nombre = esc(p.nombre || 'Producto');
+        const categoria = esc(p.categoria_nombre || 'General');
+        const precioTotal = parseFloat(p.precio_total || 0).toFixed(2);
+        const precioVes = tasaVes > 0 ? (p.precio_total * tasaVes).toFixed(2) : null;
+        const stock = parseFloat(p.stock || 0);
+
+        // Imagen o Placeholder
+        const imgBlock = p.imagen
+          ? `<img src="${p.imagen}" alt="${nombre}" style="width: 100%; height: 100%; object-fit: contain; padding: 6px;">`
+          : `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #94A3B8; font-size: 10px; font-weight: 600; gap: 4px;">
+              <i class="fa-solid fa-box" style="font-size: 26px; color: #CBD5E1;"></i>
+              <span style="font-size: 8.5px; color: #94A3B8; text-transform: uppercase;">${categoria}</span>
+            </div>
+          `;
+
+        // Badge de Existencia (CONDICIONAL ESTRICTO)
+        let stockBadgeHtml = '';
+        if (mostrarStock) {
+          if (stock > 0) {
+            stockBadgeHtml = `
+              <div style="margin-top: 6px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46; font-size: 9.5px; font-weight: 700; padding: 2.5px 6px; border-radius: 4px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                <span style="display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #059669;"></span>
+                <span>Stock: <strong>${stock}</strong> unid.</span>
+              </div>
+            `;
+          } else {
+            stockBadgeHtml = `
+              <div style="margin-top: 6px; background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; font-size: 9.5px; font-weight: 700; padding: 2.5px 6px; border-radius: 4px; text-align: center;">
+                ✕ Agotado (0 unid.)
+              </div>
+            `;
+          }
+        }
+
+        cardsHtml += `
+          <div class="doc-catalogo-card" style="border: 1px solid #E2E8F0; border-radius: 8px; background: #FFFFFF; overflow: hidden; display: flex; flex-direction: column; page-break-inside: avoid; break-inside: avoid;">
+            <div style="width: 100%; height: 120px; background: #F8FAFC; border-bottom: 1px solid #F1F5F9; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+              ${imgBlock}
+            </div>
+            <div style="padding: 8px 10px; display: flex; flex-direction: column; flex: 1; justify-content: space-between;">
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                  <span style="font-family: monospace; font-size: 9px; font-weight: 700; color: #475569; background: #F1F5F9; padding: 1px 5px; border-radius: 3px;">${codigo}</span>
+                  <span style="font-size: 8px; text-transform: uppercase; color: #64748B; font-weight: 700; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${categoria}</span>
+                </div>
+                <h3 style="font-size: 11px; font-weight: 800; color: #0F172A; margin: 4px 0 2px 0; line-height: 1.25; min-height: 28px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+                  ${nombre}
+                </h3>
+                ${p.descripcion ? `<p style="font-size: 8.5px; color: #64748B; margin: 0 0 4px 0; max-height: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(p.descripcion)}</p>` : ''}
+              </div>
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; border-top: 1px dashed #E2E8F0; padding-top: 4px;">
+                  <div style="font-size: 14.5px; font-weight: 900; color: #0755C9;">$${precioTotal}</div>
+                  ${precioVes ? `<div style="font-size: 9px; font-weight: 600; color: #64748B;">≈ ${precioVes} Bs.</div>` : ''}
+                </div>
+                ${stockBadgeHtml}
+              </div>
+            </div>
+          </div>
+        `;
+      });
+
+      bodyHtml = `
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+          ${cardsHtml}
+        </div>
+      `;
+    }
+
+    // 4. Pie de Página Institucional
+    let footerHtml = `
+      <div style="border-top: 1px solid #CBD5E1; padding-top: 8px; margin-top: 18px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5px; color: #64748B; break-inside: avoid; page-break-inside: avoid;">
+        <div>
+          <strong>TAVO CLOUD Enterprise</strong> &bull; Precios en USD sujetos a cambio sin previo aviso.
+        </div>
+        <div style="text-align: right;">
+          ${cfg.telefono ? `<span>Contacto: <strong>${esc(cfg.telefono)}</strong></span> &bull; ` : ''}
+          ${cfg.direccion ? `<span>${esc(cfg.direccion)}</span>` : ''}
+        </div>
+      </div>
+    `;
+
+    return `
+      <div class="doc-sheet doc-letterPortrait doc-catalogo-sheet" style="padding: 10px; background: #FFFFFF;">
+        ${headerHtml}
+        ${bodyHtml}
+        ${footerHtml}
+      </div>
+    `;
   }
 };
 
@@ -16152,3 +16386,356 @@ window.verDetalleDevolucionCompra = verDetalleDevolucionCompra;
 window.cerrarModalNotaDebitoCompra = cerrarModalNotaDebitoCompra;
 window.imprimirNotaDebitoCompraDirecta = imprimirNotaDebitoCompraDirecta;
 window.anularDevolucionCompra = anularDevolucionCompra;
+
+
+// ========================================================
+// CONTROLADOR INTEGRAL DEL CATÁLOGO DE PRODUCTOS (PDF & WHATSAPP)
+// ========================================================
+
+function openCatalogoModal() {
+  const modal = document.getElementById('modalCatalogoProductos');
+  if (!modal) return;
+
+  // 1. Poblar Selector de Categorías
+  const catSel = document.getElementById('catalogoFilterCategoria');
+  if (catSel && AppState.categorias) {
+    catSel.innerHTML = '<option value="">Todas las Categorías</option>' +
+      AppState.categorias.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join('');
+  }
+
+  // 2. Poblar Selector de Clientes para WhatsApp
+  const cliSel = document.getElementById('catalogoClienteSelect');
+  if (cliSel && AppState.clientes) {
+    cliSel.innerHTML = '<option value="">-- Seleccionar cliente del directorio... --</option>' +
+      AppState.clientes.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)} (${escapeHtml(c.cedula)}) - ${escapeHtml(c.telefono || 'Sin telf')}</option>`).join('');
+  }
+
+  // 3. Resetear pestaña a Formato
+  setCatalogoTab('formato');
+
+  // 4. Actualizar estado visual de los radios y contador
+  actualizarModoStockCatalogo();
+  actualizarContadorCatalogo();
+
+  modal.classList.remove('hidden');
+}
+
+function closeCatalogoModal() {
+  const modal = document.getElementById('modalCatalogoProductos');
+  if (modal) modal.classList.add('hidden');
+}
+
+function setCatalogoTab(tab) {
+  const btnFormato = document.getElementById('tabBtnCatalogoFormato');
+  const btnWhatsApp = document.getElementById('tabBtnCatalogoWhatsApp');
+  const panelFormato = document.getElementById('panelCatalogoFormato');
+  const panelWhatsApp = document.getElementById('panelCatalogoWhatsApp');
+
+  if (tab === 'whatsapp') {
+    if (btnFormato) {
+      btnFormato.className = 'px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center bg-slate-100 text-slate-600 hover:bg-slate-200';
+    }
+    if (btnWhatsApp) {
+      btnWhatsApp.className = 'px-4 py-2 rounded-xl text-xs font-bold transition flex items-center bg-[#071B49] text-white shadow-xs';
+    }
+    if (panelFormato) panelFormato.classList.add('hidden');
+    if (panelWhatsApp) panelWhatsApp.classList.remove('hidden');
+    actualizarPreviewWhatsAppCatalogo();
+  } else {
+    if (btnFormato) {
+      btnFormato.className = 'px-4 py-2 rounded-xl text-xs font-bold transition flex items-center bg-[#071B49] text-white shadow-xs';
+    }
+    if (btnWhatsApp) {
+      btnWhatsApp.className = 'px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center bg-slate-100 text-slate-600 hover:bg-slate-200';
+    }
+    if (panelFormato) panelFormato.classList.remove('hidden');
+    if (panelWhatsApp) panelWhatsApp.classList.add('hidden');
+  }
+}
+
+function actualizarModoStockCatalogo() {
+  const radios = document.getElementsByName('catalogoStockOption');
+  let selected = 'sin_stock';
+  for (const r of radios) {
+    if (r.checked) {
+      selected = r.value;
+      break;
+    }
+  }
+
+  const cardOculto = document.getElementById('cardStockOculto');
+  const cardVisible = document.getElementById('cardStockVisible');
+
+  if (selected === 'con_stock') {
+    if (cardVisible) {
+      cardVisible.className = 'cursor-pointer border-2 border-emerald-600 bg-emerald-50/50 rounded-2xl p-3.5 flex flex-col justify-between transition relative';
+    }
+    if (cardOculto) {
+      cardOculto.className = 'cursor-pointer border-2 border-slate-200 rounded-2xl p-3.5 flex flex-col justify-between transition relative hover:border-slate-300';
+    }
+  } else {
+    if (cardOculto) {
+      cardOculto.className = 'cursor-pointer border-2 border-blue-600 bg-blue-50/50 rounded-2xl p-3.5 flex flex-col justify-between transition relative';
+    }
+    if (cardVisible) {
+      cardVisible.className = 'cursor-pointer border-2 border-slate-200 rounded-2xl p-3.5 flex flex-col justify-between transition relative hover:border-slate-300';
+    }
+  }
+
+  actualizarContadorCatalogo();
+  actualizarPreviewWhatsAppCatalogo();
+}
+
+function obtenerProductosFiltradosCatalogo() {
+  const catId = document.getElementById('catalogoFilterCategoria')?.value || '';
+  const tipo = document.getElementById('catalogoFilterTipo')?.value || '';
+  const disp = document.getElementById('catalogoFilterDisponibilidad')?.value || 'todos';
+
+  let list = AppState.productos || [];
+
+  // Filtrar solo activos
+  list = list.filter(p => p.activo !== 0);
+
+  if (catId) {
+    list = list.filter(p => String(p.categoria_id) === String(catId));
+  }
+  if (tipo) {
+    list = list.filter(p => p.tipo === tipo);
+  }
+  if (disp === 'con_stock') {
+    list = list.filter(p => parseFloat(p.stock || 0) > 0);
+  }
+
+  return list;
+}
+
+function actualizarContadorCatalogo() {
+  const prods = obtenerProductosFiltradosCatalogo();
+  const badge = document.getElementById('catalogoTotalItemsBadge');
+  if (badge) {
+    badge.textContent = `${prods.length} ${prods.length === 1 ? 'producto' : 'productos'}`;
+  }
+  actualizarPreviewWhatsAppCatalogo();
+}
+
+function seleccionarClienteParaWhatsAppCatalogo(clienteId) {
+  if (!clienteId) return;
+  const c = (AppState.clientes || []).find(cl => String(cl.id) === String(clienteId));
+  if (!c) return;
+
+  const telInput = document.getElementById('catalogoTelefonoWhatsApp');
+  if (telInput) {
+    telInput.value = (c.telefono || '').replace(/[^0-9+]/g, '');
+  }
+  actualizarPreviewWhatsAppCatalogo(c.nombre);
+}
+
+function actualizarPreviewWhatsAppCatalogo(nombreCliente = '') {
+  const textarea = document.getElementById('catalogoMensajeWhatsAppPreview');
+  if (!textarea) return;
+
+  const radios = document.getElementsByName('catalogoStockOption');
+  let mostrarStock = false;
+  for (const r of radios) {
+    if (r.checked && r.value === 'con_stock') {
+      mostrarStock = true;
+      break;
+    }
+  }
+
+  const prods = obtenerProductosFiltradosCatalogo();
+  const cfg = AppState.config || {};
+  const hoyStr = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const tasaVes = parseFloat(cfg.tasa_ves || 0);
+
+  let msg = `🌟 *CATÁLOGO OFICIAL DE PRODUCTOS* 🌟
+`;
+  msg += `🏢 *${cfg.nombre_negocio || 'TAVO CLOUD'}*
+`;
+  if (cfg.documento_fiscal) msg += `📄 RIF: ${cfg.documento_fiscal}
+`;
+  if (nombreCliente) msg += `👤 Estimado/a: *${nombreCliente}*
+`;
+  msg += `📅 Fecha: ${hoyStr}`;
+  if (tasaVes > 0) msg += ` | 💵 Tasa Oficial: ${tasaVes.toFixed(2)} Bs./$`;
+  msg += `
+
+`;
+
+  // Agrupar por categoría
+  const categoriasMap = {};
+  prods.forEach(p => {
+    const cat = p.categoria_nombre || 'General';
+    if (!categoriasMap[cat]) categoriasMap[cat] = [];
+    categoriasMap[cat].push(p);
+  });
+
+  const catNames = Object.keys(categoriasMap);
+  if (catNames.length === 0) {
+    msg += `_No hay productos registrados con los filtros seleccionados._
+
+`;
+  } else {
+    catNames.forEach(cat => {
+      msg += `📁 *${cat.toUpperCase()}*
+`;
+      msg += `━━━━━━━━━━━━━━━━━━━━━
+`;
+      categoriasMap[cat].forEach(p => {
+        const precio = parseFloat(p.precio_total || 0).toFixed(2);
+        const precioVes = tasaVes > 0 ? (p.precio_total * tasaVes).toFixed(2) : null;
+        msg += `🔹 *${p.nombre}*
+`;
+        msg += `   • Código: \`${p.codigo || '—'}\`
+`;
+        msg += `   • Precio: *$${precio} USD*`;
+        if (precioVes) msg += ` (≈ ${precioVes} Bs.)`;
+        msg += `
+`;
+        if (mostrarStock) {
+          const stk = parseFloat(p.stock || 0);
+          msg += stk > 0 
+            ? `   • Stock: _${stk} unidades disponibles_
+`
+            : `   • Stock: _Agotado_
+`;
+        }
+      });
+      msg += `
+`;
+    });
+  }
+
+  msg += `━━━━━━━━━━━━━━━━━━━━━
+`;
+  if (cfg.telefono) msg += `📞 *Pedidos y Atención:* ${cfg.telefono}
+`;
+  if (cfg.direccion) msg += `📍 *Ubicación:* ${cfg.direccion}
+`;
+  msg += `_¡Estamos a tu orden para cotizaciones y pedidos directos!_`;
+
+  textarea.value = msg;
+}
+
+function copiarTextoCatalogoWhatsApp() {
+  const textarea = document.getElementById('catalogoMensajeWhatsAppPreview');
+  if (!textarea || !textarea.value) return;
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(textarea.value).then(() => {
+      alert('✅ Mensaje del catálogo copiado al portapapeles. ¡Listo para pegar en WhatsApp!');
+    }).catch(() => {
+      textarea.select();
+      document.execCommand('copy');
+      alert('✅ Mensaje del catálogo copiado.');
+    });
+  } else {
+    textarea.select();
+    document.execCommand('copy');
+    alert('✅ Mensaje del catálogo copiado.');
+  }
+}
+
+function enviarCatalogoWhatsAppDirecto() {
+  const telInput = document.getElementById('catalogoTelefonoWhatsApp');
+  const textarea = document.getElementById('catalogoMensajeWhatsAppPreview');
+  const msg = textarea ? textarea.value : '';
+
+  if (!msg) {
+    alert('No hay información en el catálogo para enviar.');
+    return;
+  }
+
+  const rawPhone = telInput ? telInput.value.replace(/[^0-9]/g, '') : '';
+  const url = rawPhone 
+    ? `https://wa.me/${rawPhone}?text=${encodeURIComponent(msg)}`
+    : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+
+  window.open(url, '_blank');
+}
+
+function obtenerOpcionesCatalogoActual() {
+  const radiosStock = document.getElementsByName('catalogoStockOption');
+  let mostrarStock = false;
+  for (const r of radiosStock) {
+    if (r.checked && r.value === 'con_stock') {
+      mostrarStock = true;
+      break;
+    }
+  }
+
+  const radiosLayout = document.getElementsByName('catalogoLayout');
+  let layout = 'grid';
+  for (const r of radiosLayout) {
+    if (r.checked) {
+      layout = r.value;
+      break;
+    }
+  }
+
+  return { mostrarStock, layout };
+}
+
+function imprimirCatalogoProductos() {
+  const prods = obtenerProductosFiltradosCatalogo();
+  if (prods.length === 0) {
+    alert('No hay productos que coincidan con los filtros para generar el catálogo.');
+    return;
+  }
+
+  const opciones = obtenerOpcionesCatalogoActual();
+  const cfg = AppState.config || {};
+  const htmlDoc = DocumentTemplates.catalogoProductos(prods, cfg, opciones);
+
+  const docTitle = opciones.mostrarStock ? 'Catalogo_Inventario_TAVO_CLOUD' : 'Catalogo_Productos_TAVO_CLOUD';
+
+  DocumentPrinter.print({
+    type: 'letterPortrait',
+    title: docTitle,
+    html: htmlDoc
+  });
+}
+
+function abrirVistaPreviaCatalogo() {
+  const prods = obtenerProductosFiltradosCatalogo();
+  const opciones = obtenerOpcionesCatalogoActual();
+  const cfg = AppState.config || {};
+  const htmlDoc = DocumentTemplates.catalogoProductos(prods, cfg, opciones);
+
+  const modal = document.getElementById('modalVistaPreviaCatalogo');
+  const container = document.getElementById('vistaPreviaCatalogoContenido');
+  const titulo = document.getElementById('vistaPreviaCatalogoTitulo');
+
+  if (titulo) {
+    titulo.textContent = opciones.mostrarStock 
+      ? 'Vista Previa: Catálogo de Inventario (Con Existencias)' 
+      : 'Vista Previa: Catálogo Comercial (Sin Existencias)';
+  }
+
+  if (container) {
+    container.innerHTML = htmlDoc;
+  }
+
+  if (modal) {
+    modal.classList.remove('hidden');
+  }
+}
+
+function cerrarVistaPreviaCatalogo() {
+  const modal = document.getElementById('modalVistaPreviaCatalogo');
+  if (modal) modal.classList.add('hidden');
+}
+
+// Exportar al ámbito global para llamadas onclick desde el DOM
+window.openCatalogoModal = openCatalogoModal;
+window.closeCatalogoModal = closeCatalogoModal;
+window.setCatalogoTab = setCatalogoTab;
+window.actualizarModoStockCatalogo = actualizarModoStockCatalogo;
+window.actualizarContadorCatalogo = actualizarContadorCatalogo;
+window.seleccionarClienteParaWhatsAppCatalogo = seleccionarClienteParaWhatsAppCatalogo;
+window.actualizarPreviewWhatsAppCatalogo = actualizarPreviewWhatsAppCatalogo;
+window.copiarTextoCatalogoWhatsApp = copiarTextoCatalogoWhatsApp;
+window.enviarCatalogoWhatsAppDirecto = enviarCatalogoWhatsAppDirecto;
+window.imprimirCatalogoProductos = imprimirCatalogoProductos;
+window.abrirVistaPreviaCatalogo = abrirVistaPreviaCatalogo;
+window.cerrarVistaPreviaCatalogo = cerrarVistaPreviaCatalogo;
