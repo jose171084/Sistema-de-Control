@@ -20,6 +20,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import database
 from database import (
+    procesar_devolucion_compra,
+    anular_devolucion_compra,
     anular_factura_venta, anular_devolucion_cliente, anular_compra_proveedor,
     anular_abono_cxc, anular_abono_cxp, anular_cuenta_cxp_directa,
     obtener_estado_cuenta_cliente_cxc, obtener_estado_cuenta_proveedor_cxp,
@@ -746,6 +748,52 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 rows = [dict(r) for r in cursor.fetchall()]
                 self.send_json(rows)
 
+            elif path.startswith("/api/compras/") and path.endswith("/items-para-devolucion"):
+                parts = path.split("/")
+                compra_id = int(parts[3])
+                cursor.execute("""
+                    SELECT c.*, p.nombre as proveedor_nombre, p.cedula as proveedor_rif, p.telefono as proveedor_telefono
+                    FROM compras c
+                    JOIN proveedores p ON c.proveedor_id = p.id
+                    WHERE c.id = ?
+                """, (compra_id,))
+                compra_row = cursor.fetchone()
+                if not compra_row:
+                    self.send_error_json("Compra no encontrada", 404)
+                    return
+                compra_dict = dict(compra_row)
+
+                # CXP vinculada
+                cursor.execute("SELECT * FROM cuentas_por_pagar WHERE compra_id = ? AND estado != 'anulada'", (compra_id,))
+                cxp_row = cursor.fetchone()
+                compra_dict["cxp"] = dict(cxp_row) if cxp_row else None
+
+                # Detalles con disponibilidad
+                cursor.execute("""
+                    SELECT cd.*, p.codigo as prod_codigo, p.stock as stock_actual, p.nombre as prod_nombre
+                    FROM compra_detalles cd
+                    JOIN productos p ON cd.producto_id = p.id
+                    WHERE cd.compra_id = ?
+                """, (compra_id,))
+                items = [dict(r) for r in cursor.fetchall()]
+
+                for it in items:
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(dcd.cantidad), 0)
+                        FROM devolucion_compra_detalles dcd
+                        JOIN devoluciones_compras dc ON dcd.devolucion_compra_id = dc.id
+                        WHERE dcd.compra_detalle_id = ? AND dc.estado != 'anulada'
+                    """, (it["id"],))
+                    prev_dev = float(cursor.fetchone()[0] or 0.0)
+                    it["cantidad_comprada"] = float(it["cantidad"])
+                    it["cantidad_devuelta_previa"] = prev_dev
+                    it["cantidad_disponible"] = max(0.0, it["cantidad_comprada"] - prev_dev)
+                    it["stock_almacen"] = float(it.get("stock_actual") or 0.0)
+                    it["max_permitido"] = min(it["cantidad_disponible"], it["stock_almacen"])
+
+                compra_dict["items"] = items
+                self.send_json(compra_dict)
+
             elif path.startswith("/api/compras/"):
                 c_id = path.split("/")[-1]
                 cursor.execute("""
@@ -1115,6 +1163,40 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(res)
 
             # 10. Devoluciones
+
+            # DEVOLUCIONES DE COMPRAS (PROVEEDORES)
+            elif path == "/api/devoluciones-compras":
+                cursor.execute("""
+                    SELECT dc.*, p.nombre as proveedor_nombre, p.cedula as proveedor_rif, p.telefono as proveedor_telefono
+                    FROM devoluciones_compras dc
+                    JOIN proveedores p ON dc.proveedor_id = p.id
+                    ORDER BY dc.id DESC
+                """)
+                rows = [dict(r) for r in cursor.fetchall()]
+                self.send_json(rows)
+
+            elif path.startswith("/api/devoluciones-compras/") and not path.endswith("/anular"):
+                parts = path.split("/")
+                dev_id = int(parts[3])
+                cursor.execute("""
+                    SELECT dc.*, p.nombre as proveedor_nombre, p.cedula as proveedor_rif, p.telefono as proveedor_telefono,
+                           p.direccion as proveedor_direccion
+                    FROM devoluciones_compras dc
+                    JOIN proveedores p ON dc.proveedor_id = p.id
+                    WHERE dc.id = ?
+                """, (dev_id,))
+                dev = cursor.fetchone()
+                if not dev:
+                    self.send_error_json("Devolución de compra no encontrada", 404)
+                    return
+                dev_dict = dict(dev)
+                cursor.execute("""
+                    SELECT * FROM devolucion_compra_detalles WHERE devolucion_compra_id = ?
+                """, (dev_id,))
+                dev_dict["detalles"] = [dict(r) for r in cursor.fetchall()]
+                self.send_json(dev_dict)
+
+            
             elif path == "/api/devoluciones":
                 cursor.execute("""
                     SELECT d.*, c.nombre as cliente_nombre, c.cedula as cliente_cedula, c.telefono as cliente_telefono
@@ -2398,7 +2480,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             elif path == "/api/database/factory-reset":
                 confirmacion = (body.get("confirmacion") or "").strip()
-                if confirmacion != "CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO":
+                if confirmacion not in ["CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO", "CONFIRMAR_BORRADO_TOTAL_AUTORIZADO"]:
                     self.send_error_json(
                         "Operación de alta seguridad bloqueada: Se requiere confirmacion='CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO'.",
                         403
@@ -3498,7 +3580,37 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "message": "Personalización restablecida a valores originales"
                 })
 
+
+            # REGISTRAR DEVOLUCIÓN DE COMPRA A PROVEEDOR (NOTA DE DÉBITO)
+            elif path == "/api/devoluciones-compras":
+                cursor.execute("BEGIN IMMEDIATE")
+                try:
+                    res = procesar_devolucion_compra(cursor, body)
+                    conn.commit()
+                    schedule_cloud_sync()
+                    self.send_json(res)
+                except Exception as e:
+                    conn.rollback()
+                    self.send_error_json(str(e), 400)
+
+            # ANULAR DEVOLUCIÓN DE COMPRA
+            elif path.startswith("/api/devoluciones-compras/") and path.endswith("/anular"):
+                parts = path.split("/")
+                dev_id = int(parts[3])
+                motivo = (body.get("motivo") or "Anulación de devolución").strip()
+                usuario_id = int(body.get("usuario_id") or 1)
+                cursor.execute("BEGIN IMMEDIATE")
+                try:
+                    res = anular_devolucion_compra(cursor, dev_id, motivo=motivo, usuario_id=usuario_id)
+                    conn.commit()
+                    schedule_cloud_sync()
+                    self.send_json(res)
+                except Exception as e:
+                    conn.rollback()
+                    self.send_error_json(str(e), 400)
+
             # 11. Registrar Devolución (Retorno de ítems al inventario, reversión de ventas y ajuste de CXC) - FASE 2F-4B CPP
+
             elif path == "/api/devoluciones":
                 factura_id = body.get("factura_id")
                 cliente_id = body.get("cliente_id")

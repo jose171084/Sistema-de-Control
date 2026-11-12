@@ -47,68 +47,77 @@
         <span data-label-key="tab_dashboard">Dashboard</span>
       </button>
 
-      <!-- Sección: Ventas & Clientes -->
+      <!-- PRIMER GRUPO: INVENTARIO -->
       <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Ventas & Clientes</span>
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Inventario</span>
       </div>
-      <button onclick="navigate('facturacion')" id="nav-facturacion" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-cash-register mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_facturacion">Punto de Venta (POS)</span>
-      </button>
-      <button onclick="navigate('clientes')" id="nav-clientes" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-users mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_clientes">Clientes</span>
-      </button>
-      <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn group" title="Cartera de Créditos y Cobros a Clientes">
-        <i class="fa-solid fa-hand-holding-dollar mr-2.5 text-emerald-600 group-hover:scale-110 transition-transform text-sm w-4 text-center"></i>
-        <span data-label-key="tab_cxc">Cuentas por Cobrar (CxC)</span>
-      </button>
-      <button onclick="navigate('devoluciones')" id="nav-devoluciones" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-arrow-rotate-left mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_devoluciones">Devoluciones & NC</span>
-      </button>
-
-      <!-- Sección: Inventario & Catálogo -->
-      <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Inventario & Catálogo</span>
-      </div>
-      <button onclick="navigate('productos')" id="nav-productos" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-boxes-stacked mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_productos">Productos & Servicios</span>
-      </button>
       <button onclick="navigate('categorias')" id="nav-categorias" class="sidebar-nav-btn group">
         <i class="fa-solid fa-tags mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_categorias">Categorías</span>
       </button>
-
-      <!-- Sección: Compras & Proveedores -->
-      <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Compras & Proveedores</span>
-      </div>
-      <button onclick="navigate('compras')" id="nav-compras" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-truck-ramp-box mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_compras">Compras de Mercancía</span>
+      <button onclick="navigate('productos')" id="nav-productos" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-boxes-stacked mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+        <span data-label-key="tab_productos">Productos y Servicios</span>
       </button>
+
+      <!-- SEGUNDO GRUPO: CLIENTES Y VENTAS -->
+      <div class="pt-3 pb-1 px-2.5">
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Clientes y Ventas</span>
+      </div>
+      <button onclick="navigate('clientes')" id="nav-clientes" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-users mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+        <span data-label-key="tab_clientes">Clientes</span>
+      </button>
+      <button onclick="navigate('facturacion')" id="nav-facturacion" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-file-invoice-dollar mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+        <span data-label-key="tab_facturacion">Facturas</span>
+      </button>
+      <button onclick="navigate('devoluciones')" id="nav-devoluciones" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-arrow-rotate-left mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+        <span data-label-key="tab_devoluciones">Devoluciones de Factura</span>
+      </button>
+      <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn group" title="Cartera de Créditos y Cobros a Clientes">
+        <i class="fa-solid fa-hand-holding-dollar mr-2.5 text-emerald-600 group-hover:scale-110 transition-transform text-sm w-4 text-center"></i>
+        <span data-label-key="tab_cxc">Cuentas por Cobrar</span>
+      </button>
+
+      <!-- TERCER GRUPO: PROVEEDORES Y COMPRAS -->
+      <div class="pt-3 pb-1 px-2.5">
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Proveedores y Compras</span>
+      </div>
       <button onclick="navigate('proveedores')" id="nav-proveedores" class="sidebar-nav-btn group">
         <i class="fa-solid fa-building-user mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_proveedores">Proveedores</span>
       </button>
+      <button onclick="navigate('compras')" id="nav-compras" class="sidebar-nav-btn group">
+        <i class="fa-solid fa-truck-ramp-box mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+        <span data-label-key="tab_compras">Compras</span>
+      </button>
+      <button onclick="navigate('devolucion-compras')" id="nav-devolucion-compras" class="sidebar-nav-btn group" title="Devolución de mercancía a proveedores y anulación">
+        <i class="fa-solid fa-boxes-packing mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+        <span data-label-key="tab_devolucion_compras">Devolución de Compras</span>
+      </button>
       <button onclick="navigate('cxp')" id="nav-cxp" class="sidebar-nav-btn group" title="Control de Pagos y Deudas con Proveedores">
         <i class="fa-solid fa-receipt mr-2.5 text-amber-600 group-hover:scale-110 transition-transform text-sm w-4 text-center"></i>
-        <span data-label-key="tab_cxp">Cuentas por Pagar (CxP)</span>
+        <span data-label-key="tab_cxp">Cuentas por Pagar</span>
       </button>
 
-      <!-- Sección: Finanzas & Tesorería -->
+      <!-- CUARTO GRUPO: FINANZAS Y TESORERÍA -->
       <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Finanzas & Tesorería</span>
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Finanzas y Tesorería</span>
       </div>
       <button onclick="navigate('tesoreria')" id="nav-tesoreria" class="sidebar-nav-btn group">
         <i class="fa-solid fa-vault mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_tesoreria">Cajas & Tesorería</span>
+        <span data-label-key="tab_tesoreria">Caja y Tesorería</span>
       </button>
+
+      <!-- QUINTO GRUPO: INFORMES -->
+      <div class="pt-3 pb-1 px-2.5">
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Informes</span>
+      </div>
       <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn group role-admin-only">
         <i class="fa-solid fa-chart-column mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
-        <span data-label-key="tab_reportes">Informes & Kardex Fiscal</span>
+        <span data-label-key="tab_reportes">Informes</span>
       </button>
 
       <!-- Botón CFO Copilot IA (Fase 3B) -->
@@ -1752,6 +1761,252 @@
       </div>
     </section>
 
+
+    <!-- ========================================================
+         VISTA: DEVOLUCIONES DE COMPRAS (PROVEEDORES / NOTAS DE DÉBITO)
+         ======================================================== -->
+    <section id="view-devolucion-compras" class="hidden space-y-6">
+      
+      <!-- Encabezado de la Vista -->
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-2xl font-bold text-slate-800 flex items-center">
+            <i class="fa-solid fa-boxes-packing mr-2.5 text-amber-600"></i>
+            Devolución de Compras a Proveedores
+          </h2>
+          <p class="text-sm text-slate-500">
+            Retorno de mercancía a proveedores, emisión de Notas de Débito y ajuste automático de Cuentas por Pagar (CxP).
+          </p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="cambiarSubtabDevCompras('nueva')" id="btnSubtabDevCompNueva" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow transition flex items-center">
+            <i class="fa-solid fa-plus-circle mr-1.5"></i>Nueva Devolución
+          </button>
+          <button onclick="cambiarSubtabDevCompras('historial')" id="btnSubtabDevCompHistorial" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-medium shadow-sm transition flex items-center">
+            <i class="fa-solid fa-clock-rotate-left mr-1.5"></i>Historial de Devoluciones
+          </button>
+        </div>
+      </div>
+
+      <!-- SUBTAB 1: FORMULARIO DE NUEVA DEVOLUCIÓN A PROVEEDOR -->
+      <div id="subtabDevCompNuevaContainer" class="space-y-6">
+        
+        <!-- Tarjeta de Selección de Compra -->
+        <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div>
+              <span class="text-xs font-bold text-amber-700 uppercase tracking-wider flex items-center">
+                <i class="fa-solid fa-file-invoice-dollar mr-1.5"></i>Paso 1: Seleccionar Factura de Compra
+              </span>
+              <p class="text-xs text-slate-500 mt-0.5">Selecciona la factura de compra sobre la cual se ejecutará la devolución parcial o total de mercancía.</p>
+            </div>
+            <button onclick="initDevolucionComprasForm()" class="text-xs text-amber-600 hover:text-amber-800 font-semibold flex items-center">
+              <i class="fa-solid fa-arrows-rotate mr-1"></i>Actualizar Compras
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+            <div class="md:col-span-8">
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Factura de Compra *</label>
+              <select id="devCompSelectCompra" onchange="onSelectCompraDevolucion(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition">
+                <option value="">-- Selecciona una factura de compra registrada --</option>
+              </select>
+            </div>
+            <div class="md:col-span-4">
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Fecha de la Devolución *</label>
+              <input type="date" id="devCompFecha" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition">
+            </div>
+          </div>
+
+          <!-- Panel de Información de la Compra Seleccionada -->
+          <div id="devCompInfoCard" class="hidden bg-amber-50/60 p-4 rounded-xl border border-amber-200/80">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+              <div>
+                <span class="text-slate-500 font-medium">Proveedor:</span>
+                <p class="font-bold text-slate-800 text-sm" id="devCompProvNombre">-</p>
+                <p class="text-slate-500" id="devCompProvRif">-</p>
+              </div>
+              <div>
+                <span class="text-slate-500 font-medium">N° Control / Factura:</span>
+                <p class="font-bold text-slate-800 text-sm" id="devCompFacturaNum">-</p>
+                <p class="text-slate-500" id="devCompFechaCompra">-</p>
+              </div>
+              <div>
+                <span class="text-slate-500 font-medium">Monto Total Compra:</span>
+                <p class="font-black text-slate-900 text-sm" id="devCompTotalOriginal">$0.00</p>
+              </div>
+              <div>
+                <span class="text-slate-500 font-medium">Deuda Pendiente en CxP:</span>
+                <p class="font-black text-amber-700 text-sm" id="devCompSaldoPendiente">$0.00</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabla de Ítems Disponibles para Devolución -->
+        <div id="devCompItemsContainer" class="hidden bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+            <span class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center">
+              <i class="fa-solid fa-list-check mr-1.5 text-amber-600"></i>Paso 2: Indicar Cantidades a Devolver
+            </span>
+            <span class="text-xs text-slate-500">Solo ítems con stock físico en almacén pueden ser devueltos</span>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600 uppercase">
+                  <th class="py-2.5 px-3">Código / SKU</th>
+                  <th class="py-2.5 px-3">Producto</th>
+                  <th class="py-2.5 px-3 text-center">Comprado</th>
+                  <th class="py-2.5 px-3 text-center">Ya Devuelto</th>
+                  <th class="py-2.5 px-3 text-center text-teal-700 font-bold">Stock Almacén</th>
+                  <th class="py-2.5 px-3 text-center w-36">Cant. a Devolver</th>
+                  <th class="py-2.5 px-3 text-right">Costo Unit. ($)</th>
+                  <th class="py-2.5 px-3 text-right">Subtotal ($)</th>
+                </tr>
+              </thead>
+              <tbody id="devCompItemsTableBody" class="divide-y divide-slate-100 text-xs">
+                <!-- Renglones dinámicos -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Motivo y Resumen Financiero -->
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-6 pt-4 border-t border-slate-100 items-start">
+            
+            <div class="md:col-span-7 space-y-3">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Motivo de la Devolución *</label>
+                <select id="devCompMotivoSelect" onchange="onSelectMotivoDevCompra(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-amber-500">
+                  <option value="Mercancía defectuosa o con empaque roto">Mercancía defectuosa o con empaque roto</option>
+                  <option value="Producto vencido o próximo a caducar">Producto vencido o próximo a caducar</option>
+                  <option value="Discrepancia en despacho / Producto no solicitado">Discrepancia en despacho / Producto no solicitado</option>
+                  <option value="Acuerdo comercial / Devolución autorizada por proveedor">Acuerdo comercial / Devolución autorizada por proveedor</option>
+                  <option value="OTRO">Otro motivo (especificar)...</option>
+                </select>
+              </div>
+              <div id="devCompMotivoOtroBox" class="hidden">
+                <input type="text" id="devCompMotivoOtro" placeholder="Especifique el motivo detallado de la devolución..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-amber-500">
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Observaciones / Notas Internas</label>
+                <textarea id="devCompNotas" rows="2" placeholder="Notas adicionales, nro. de guía de retorno, chofer o acuerdo..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-amber-500"></textarea>
+              </div>
+            </div>
+
+            <!-- Resumen Financiero y Efecto en CxP -->
+            <div class="md:col-span-5 bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+              <span class="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center">
+                <i class="fa-solid fa-receipt mr-1.5 text-amber-600"></i>Impacto Financiero
+              </span>
+
+              <div class="space-y-1.5 text-xs">
+                <div class="flex justify-between text-slate-600">
+                  <span>Subtotal Devuelto:</span>
+                  <span class="font-bold text-slate-800" id="devCompSubtotalUsd">$0.00</span>
+                </div>
+                <div class="flex justify-between text-slate-600">
+                  <span>IVA Devuelto:</span>
+                  <span class="font-bold text-slate-800" id="devCompIvaUsd">$0.00</span>
+                </div>
+                <div class="flex justify-between text-sm font-extrabold text-slate-900 pt-1.5 border-t border-slate-200">
+                  <span>Total Devolución ($ USD):</span>
+                  <span class="text-rose-600" id="devCompTotalUsd">$0.00</span>
+                </div>
+                <div class="flex justify-between text-xs text-slate-500">
+                  <span>Total en Bolívares (BCV):</span>
+                  <span class="font-bold text-slate-700" id="devCompTotalBs">0.00 Bs.</span>
+                </div>
+              </div>
+
+              <!-- Explicación de impacto en CxP -->
+              <div class="bg-amber-100/70 p-2.5 rounded-lg border border-amber-200 text-[11px] text-amber-900 space-y-1">
+                <div class="flex items-center font-bold">
+                  <i class="fa-solid fa-circle-info mr-1 text-amber-700"></i>
+                  <span>Afectación de Deuda (CXP):</span>
+                </div>
+                <p id="devCompCxPEffectMsg">Selecciona cantidades para calcular la reducción en la deuda con el proveedor.</p>
+              </div>
+
+              <button type="button" onclick="procesarDevolucionCompra()" id="btnProcesarDevCompra" class="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-md transition flex items-center justify-center space-x-2 text-xs">
+                <i class="fa-solid fa-check-circle"></i>
+                <span>Completar Devolución a Proveedor</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+      <!-- SUBTAB 2: HISTORIAL DE DEVOLUCIONES DE COMPRAS -->
+      <div id="subtabDevCompHistorialContainer" class="hidden space-y-6">
+        
+        <!-- Tarjetas Métricas de Devoluciones de Compras -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <span class="text-xs font-bold text-slate-400 uppercase">Devoluciones Totales</span>
+            <p class="text-2xl font-black text-slate-800 mt-1" id="kpiDevCompCount">0</p>
+            <span class="text-[11px] text-slate-500">Operaciones a proveedores</span>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <span class="text-xs font-bold text-slate-400 uppercase">Total Devuelto ($ USD)</span>
+            <p class="text-2xl font-black text-rose-600 mt-1" id="kpiDevCompTotalUsd">$0.00</p>
+            <span class="text-[11px] text-slate-500" id="kpiDevCompTotalBs">0.00 Bs.</span>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <span class="text-xs font-bold text-slate-400 uppercase">Descontado en CxP</span>
+            <p class="text-2xl font-black text-emerald-600 mt-1" id="kpiDevCompDescontadoCxp">$0.00</p>
+            <span class="text-[11px] text-slate-500">Deuda directa rebajada</span>
+          </div>
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <span class="text-xs font-bold text-slate-400 uppercase">Ítems Retirados</span>
+            <p class="text-2xl font-black text-amber-600 mt-1" id="kpiDevCompItemsRetirados">0</p>
+            <span class="text-[11px] text-slate-500">Unidades devueltas al proveedor</span>
+          </div>
+        </div>
+
+        <!-- Buscador y Filtros -->
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row gap-3 items-center justify-between">
+          <div class="relative w-full sm:w-96">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+            <input type="text" id="devCompHistorialSearchInput" oninput="renderDevolucionesComprasHistorial()" placeholder="Buscar por N° DEV, proveedor o factura..." 
+                   class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-amber-500 focus:bg-white transition">
+          </div>
+          <button onclick="loadDevolucionesCompras()" class="text-xs text-slate-600 hover:text-slate-900 flex items-center font-semibold">
+            <i class="fa-solid fa-arrows-rotate mr-1.5 text-amber-600"></i>Actualizar Lista
+          </button>
+        </div>
+
+        <!-- Tabla de Historial -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <th class="py-3 px-4">N° Devolución</th>
+                  <th class="py-3 px-4">Fecha</th>
+                  <th class="py-3 px-4">Proveedor</th>
+                  <th class="py-3 px-4">Factura Origen</th>
+                  <th class="py-3 px-4">Motivo</th>
+                  <th class="py-3 px-4 text-right">Total Devuelto ($)</th>
+                  <th class="py-3 px-4 text-right">Rebaja en CxP ($)</th>
+                  <th class="py-3 px-4 text-center">Estado</th>
+                  <th class="py-3 px-4 text-center">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="devolucionesComprasTableBody" class="divide-y divide-slate-100 text-sm">
+                <!-- Dinámico -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
     <!-- ========================================================
          VISTA 7: PROVEEDORES
          ======================================================== -->
@@ -2504,16 +2759,16 @@
           <i class="fa-solid fa-folder-tree mr-1 text-sky-600"></i>Seleccionar Informe / Libro Fiscal:
         </label>
         <select id="mobileReportSelector" onchange="setReportTab(this.value)" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 shadow-xs focus:ring-2 focus:ring-sky-500">
-          <option value="kardex">📦 1. Kardex de Inventario (Entradas, Salidas & Saldos)</option>
-          <option value="inv_simple">📋 2. Stock Rápido (3 Columnas con Categorías)</option>
-          <option value="libro_ventas">⚖️ 3. Libro de Ventas SENIAT (Venezuela)</option>
-          <option value="libro_compras">🛒 4. Libro de Compras SENIAT (Venezuela)</option>
-          <option value="art177">📑 5. Libro de Inventario Art. 177 LISLR</option>
-          <option value="diarias">📊 6. Ventas Diarias (Monedas & Devoluciones)</option>
-          <option value="mensuales">📅 7. Ventas Mensuales</option>
-          <option value="inventario">🏢 8. Inventario General & Valoración</option>
-          <option value="cxc">💵 9. Cuentas por Cobrar (CXC)</option>
-          <option value="cxp">🧾 10. Cuentas por Pagar (CXP)</option>
+          <option value="kardex">📦 Kardex de Inventario (Entradas, Salidas & Saldos)</option>
+          <option value="inv_simple">📋 Stock Rápido (3 Columnas con Categorías)</option>
+          <option value="libro_ventas">⚖️ Libro de Ventas SENIAT (Venezuela)</option>
+          <option value="libro_compras">🛒 Libro de Compras SENIAT (Venezuela)</option>
+          <option value="art177">📑 Libro de Inventario Art. 177 LISLR</option>
+          <option value="diarias">📊 Ventas Diarias (Monedas & Devoluciones)</option>
+          <option value="mensuales">📅 Ventas Mensuales</option>
+          <option value="inventario">🏢 Inventario General & Valoración</option>
+          <option value="cxc">💵 Cuentas por Cobrar (CXC)</option>
+          <option value="cxp">🧾 Cuentas por Pagar (CXP)</option>
         </select>
       </div>
 
@@ -4184,48 +4439,56 @@
           <p class="text-slate-500 mb-2">Edita el texto que se muestra en cada pestaña de la barra lateral:</p>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña Dashboard</label>
+              <label class="block font-semibold text-slate-700 mb-1">Dashboard</label>
               <input type="text" id="customTabDashboard" placeholder="Dashboard" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 1 (Categorías)</label>
-              <input type="text" id="customTabCategorias" placeholder="1. Categorías" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Categorías</label>
+              <input type="text" id="customTabCategorias" placeholder="Categorías" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 2 (Productos & Servicios)</label>
-              <input type="text" id="customTabProductos" placeholder="2. Productos & Servicios" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Productos y Servicios</label>
+              <input type="text" id="customTabProductos" placeholder="Productos y Servicios" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 3 (Clientes)</label>
-              <input type="text" id="customTabClientes" placeholder="3. Clientes" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Clientes</label>
+              <input type="text" id="customTabClientes" placeholder="Clientes" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 4 (Facturación)</label>
-              <input type="text" id="customTabFacturacion" placeholder="4. Facturación (Ventas)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Facturas</label>
+              <input type="text" id="customTabFacturacion" placeholder="Facturas" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 5 (Devoluciones)</label>
-              <input type="text" id="customTabDevoluciones" placeholder="5. Devoluciones & NC" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Devoluciones de Factura</label>
+              <input type="text" id="customTabDevoluciones" placeholder="Devoluciones de Factura" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 6 (Compras)</label>
-              <input type="text" id="customTabCompras" placeholder="6. Compras" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Cuentas por Cobrar</label>
+              <input type="text" id="customTabCxc" placeholder="Cuentas por Cobrar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 7 (Proveedores)</label>
-              <input type="text" id="customTabProveedores" placeholder="7. Proveedores" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Proveedores</label>
+              <input type="text" id="customTabProveedores" placeholder="Proveedores" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 8 (Informes & Fiscales)</label>
-              <input type="text" id="customTabReportes" placeholder="8. Informes, Kardex & Fiscales" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Compras</label>
+              <input type="text" id="customTabCompras" placeholder="Compras" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 9 (Cuentas por Cobrar)</label>
-              <input type="text" id="customTabCxc" placeholder="9. Cuentas por Cobrar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Devolución de Compras</label>
+              <input type="text" id="customTabDevolucionCompras" placeholder="Devolución de Compras" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
             <div>
-              <label class="block font-semibold text-slate-700 mb-1">Pestaña 10 (Cuentas por Pagar)</label>
-              <input type="text" id="customTabCxp" placeholder="10. Cuentas por Pagar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <label class="block font-semibold text-slate-700 mb-1">Cuentas por Pagar</label>
+              <input type="text" id="customTabCxp" placeholder="Cuentas por Pagar" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Caja y Tesorería</label>
+              <input type="text" id="customTabTesoreria" placeholder="Caja y Tesorería" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-700 mb-1">Informes</label>
+              <input type="text" id="customTabReportes" placeholder="Informes" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
             </div>
           </div>
         </div>
@@ -6345,5 +6608,47 @@
 
   <!-- Scripts -->
   <script src="app.js?v=3.2.0"></script>
+
+    <!-- MODAL: DETALLE Y VOUCHER IMPRIMIBLE DE NOTA DE DÉBITO A PROVEEDOR -->
+    <div id="modalNotaDebitoCompra" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 hidden">
+      <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        
+        <!-- Header -->
+        <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+          <div class="flex items-center space-x-2.5">
+            <div class="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
+              <i class="fa-solid fa-file-invoice"></i>
+            </div>
+            <div>
+              <h3 class="font-extrabold text-sm text-slate-800" id="modalNdTitulo">Nota de Débito a Proveedor</h3>
+              <p class="text-[11px] text-slate-500" id="modalNdSubtitulo">Comprobante oficial de devolución de compra</p>
+            </div>
+          </div>
+          <button onclick="cerrarModalNotaDebitoCompra()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition">
+            <i class="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </div>
+
+        <!-- Contenido Imprimible -->
+        <div id="modalNdContenidoImprimible" class="p-6 overflow-y-auto space-y-4 text-xs text-slate-700 font-sans">
+          <!-- Dinámico -->
+        </div>
+
+        <!-- Footer Acciones -->
+        <div class="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+          <button onclick="cerrarModalNotaDebitoCompra()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200 transition">
+            Cerrar
+          </button>
+          <div class="flex items-center space-x-2">
+            <button onclick="imprimirNotaDebitoCompraDirecta()" class="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition flex items-center space-x-1.5">
+              <i class="fa-solid fa-print"></i>
+              <span>Imprimir Comprobante</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
 </body>
 </html>

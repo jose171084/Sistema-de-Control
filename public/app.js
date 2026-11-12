@@ -189,16 +189,18 @@ const DEFAULT_LABELS = {
   titulo_app: "Inventario & Facturación",
   subtitulo_app: "Control Multimoneda",
   tab_dashboard: "Dashboard",
-  tab_categorias: "1. Categorías",
-  tab_productos: "2. Productos & Servicios",
-  tab_clientes: "3. Clientes",
-  tab_facturacion: "4. Facturación (Ventas)",
-  tab_devoluciones: "5. Devoluciones & NC",
-  tab_compras: "6. Compras",
-  tab_proveedores: "7. Proveedores",
-  tab_reportes: "8. Informes, Kardex & Fiscales",
-  tab_cxc: "9. Cuentas por Cobrar",
-  tab_cxp: "10. Cuentas por Pagar",
+  tab_categorias: "Categorías",
+  tab_productos: "Productos y Servicios",
+  tab_clientes: "Clientes",
+  tab_facturacion: "Facturas",
+  tab_devoluciones: "Devoluciones de Factura",
+  tab_cxc: "Cuentas por Cobrar",
+  tab_proveedores: "Proveedores",
+  tab_compras: "Compras",
+  tab_devolucion_compras: "Devolución de Compras",
+  tab_cxp: "Cuentas por Pagar",
+  tab_tesoreria: "Caja y Tesorería",
+  tab_reportes: "Informes",
   btn_nueva_venta: "Nueva Venta",
   btn_cargar_compra: "Cargar Compra",
   btn_procesar_venta: "Completar Facturación",
@@ -303,9 +305,28 @@ function initPersonalizacion() {
     } catch(e) {}
   }
 
-  // Asegurar que la pestaña 8 quede con su nombre consolidado
-  if (labelsGuardados && (labelsGuardados.tab_reportes === '10. Reportes & Balances' || !labelsGuardados.tab_reportes)) {
-    labelsGuardados.tab_reportes = DEFAULT_LABELS.tab_reportes;
+  // Sanitización quirúrgica: eliminar cualquier prefijo numérico o cadenas obsoletas persistidas
+  if (labelsGuardados && typeof labelsGuardados === 'object') {
+    const cleanMapping = {
+      tab_dashboard: "Dashboard",
+      tab_categorias: "Categorías",
+      tab_productos: "Productos y Servicios",
+      tab_clientes: "Clientes",
+      tab_facturacion: "Facturas",
+      tab_devoluciones: "Devoluciones de Factura",
+      tab_cxc: "Cuentas por Cobrar",
+      tab_proveedores: "Proveedores",
+      tab_compras: "Compras",
+      tab_devolucion_compras: "Devolución de Compras",
+      tab_cxp: "Cuentas por Pagar",
+      tab_tesoreria: "Caja y Tesorería",
+      tab_reportes: "Informes"
+    };
+    for (const [k, v] of Object.entries(cleanMapping)) {
+      if (labelsGuardados[k] && (/^\d+\.\s*/.test(labelsGuardados[k]) || labelsGuardados[k].includes('& NC') || labelsGuardados[k].includes('(Ventas)') || labelsGuardados[k].includes('Kardex & Fiscales') || labelsGuardados[k].includes('Cajas & Tesorería') || labelsGuardados[k].includes('Punto de Venta') || labelsGuardados[k].includes('Reportes & Balances'))) {
+        labelsGuardados[k] = v;
+      }
+    }
     try { localStorage.setItem('sis_labels', JSON.stringify(labelsGuardados)); } catch(e) {}
   }
 
@@ -585,10 +606,12 @@ function openPersonalizacionModal() {
     customTabClientes: labels.tab_clientes,
     customTabFacturacion: labels.tab_facturacion,
     customTabDevoluciones: labels.tab_devoluciones,
-    customTabCompras: labels.tab_compras,
-    customTabProveedores: labels.tab_proveedores,
     customTabCxc: labels.tab_cxc,
+    customTabProveedores: labels.tab_proveedores,
+    customTabCompras: labels.tab_compras,
+    customTabDevolucionCompras: labels.tab_devolucion_compras,
     customTabCxp: labels.tab_cxp,
+    customTabTesoreria: labels.tab_tesoreria,
     customTabReportes: labels.tab_reportes,
     customTabKardex: labels.tab_kardex,
     customTabInvSimple: labels.tab_inv_simple,
@@ -650,11 +673,13 @@ async function guardarPersonalizacion() {
     tab_clientes: document.getElementById('customTabClientes').value.trim() || DEFAULT_LABELS.tab_clientes,
     tab_facturacion: document.getElementById('customTabFacturacion').value.trim() || DEFAULT_LABELS.tab_facturacion,
     tab_devoluciones: document.getElementById('customTabDevoluciones')?.value.trim() || DEFAULT_LABELS.tab_devoluciones,
-    tab_compras: document.getElementById('customTabCompras').value.trim() || DEFAULT_LABELS.tab_compras,
-    tab_proveedores: document.getElementById('customTabProveedores').value.trim() || DEFAULT_LABELS.tab_proveedores,
-    tab_cxc: document.getElementById('customTabCxc').value.trim() || DEFAULT_LABELS.tab_cxc,
+    tab_compras: document.getElementById('customTabCompras')?.value.trim() || DEFAULT_LABELS.tab_compras,
+    tab_proveedores: document.getElementById('customTabProveedores')?.value.trim() || DEFAULT_LABELS.tab_proveedores,
+    tab_devolucion_compras: document.getElementById('customTabDevolucionCompras')?.value.trim() || DEFAULT_LABELS.tab_devolucion_compras,
+    tab_cxc: document.getElementById('customTabCxc')?.value.trim() || DEFAULT_LABELS.tab_cxc,
     tab_cxp: document.getElementById('customTabCxp')?.value.trim() || DEFAULT_LABELS.tab_cxp,
-    tab_reportes: document.getElementById('customTabReportes').value.trim() || DEFAULT_LABELS.tab_reportes,
+    tab_tesoreria: document.getElementById('customTabTesoreria')?.value.trim() || DEFAULT_LABELS.tab_tesoreria,
+    tab_reportes: document.getElementById('customTabReportes')?.value.trim() || DEFAULT_LABELS.tab_reportes,
     tab_kardex: document.getElementById('customTabKardex')?.value.trim() || DEFAULT_LABELS.tab_kardex,
     tab_inv_simple: document.getElementById('customTabInvSimple')?.value.trim() || DEFAULT_LABELS.tab_inv_simple,
     tab_fiscal: document.getElementById('customTabFiscal')?.value.trim() || DEFAULT_LABELS.tab_fiscal,
@@ -729,6 +754,24 @@ function toggleMobileSidebar() {
 // ========================================================
 // NAVEGACIÓN ENTRE MÓDULOS
 // ========================================================
+
+// ========================================================
+// NAVEGACIÓN Y ENLACE: DEVOLUCIÓN DE COMPRAS (PROVEEDORES)
+// ========================================================
+function handleDevolucionComprasNav() {
+  navigate('compras');
+  if (typeof showToast === 'function') {
+    showToast('Devolución de Compras: Selecciona la compra y haz clic en "Anular Compra" para revertir existencias y deuda.', 'info');
+  }
+  setTimeout(() => {
+    const tabla = document.getElementById('comprasTableBody') || document.querySelector('#view-compras table');
+    if (tabla) {
+      tabla.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, 350);
+}
+window.handleDevolucionComprasNav = handleDevolucionComprasNav;
+
 function navigate(viewName) {
   AppState.currentView = viewName;
 
@@ -741,7 +784,7 @@ function navigate(viewName) {
     if (backdrop) backdrop.classList.add('hidden');
   }
 
-  const views = ['dashboard', 'categorias', 'productos', 'clientes', 'facturacion', 'devoluciones', 'compras', 'proveedores', 'cxc', 'cxp', 'reportes', 'tesoreria'];
+  const views = ['dashboard', 'categorias', 'productos', 'clientes', 'facturacion', 'devoluciones', 'compras', 'devolucion-compras', 'proveedores', 'cxc', 'cxp', 'reportes', 'tesoreria'];
   views.forEach(v => {
     const el = document.getElementById(`view-${v}`);
     const navBtn = document.getElementById(`nav-${v}`);
@@ -1318,7 +1361,7 @@ async function triggerDatabaseClean() {
     const res = await fetch('/api/database/clean-transactions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ confirmacion: 'CONFIRMAR_BORRADO_TOTAL_AUTORIZADO' })
+      body: JSON.stringify({ confirmacion: 'CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO' })
     });
     const data = await res.json();
     if (data.success) {
@@ -1346,7 +1389,7 @@ async function triggerFactoryReset() {
     const res = await fetch('/api/database/factory-reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ confirmacion: 'CONFIRMAR_BORRADO_TOTAL_AUTORIZADO' })
+      body: JSON.stringify({ confirmacion: 'CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO' })
     });
     const data = await res.json();
     if (data.success) {
@@ -15319,3 +15362,653 @@ function ejecutarAccionCopilot(accionJs) {
     console.error('Error ejecutando acción sugerida por Copilot:', err);
   }
 }
+
+
+// ========================================================
+// MÓDULO: DEVOLUCIONES DE COMPRAS A PROVEEDORES (FASE 3B)
+// ========================================================
+
+AppState.devolucionesCompras = [];
+AppState.compraSeleccionadaParaDev = null;
+AppState.devolucionActualDetalle = null;
+
+async function loadDevolucionesCompras() {
+  try {
+    const res = await fetch('/api/devoluciones-compras');
+    if (!res.ok) throw new Error('Error al consultar historial de devoluciones');
+    AppState.devolucionesCompras = await res.json();
+    renderDevolucionesComprasKPIs();
+    renderDevolucionesComprasHistorial();
+    initDevolucionComprasForm();
+  } catch (err) {
+    console.error('[loadDevolucionesCompras]:', err);
+    if (typeof showToast === 'function') {
+      showToast('Error cargando historial de devoluciones a proveedores: ' + err.message, 'error');
+    }
+  }
+}
+
+function cambiarSubtabDevCompras(tab) {
+  const nuevaContainer = document.getElementById('subtabDevCompNuevaContainer');
+  const histContainer = document.getElementById('subtabDevCompHistorialContainer');
+  const btnNueva = document.getElementById('btnSubtabDevCompNueva');
+  const btnHist = document.getElementById('btnSubtabDevCompHistorial');
+
+  if (tab === 'nueva') {
+    if (nuevaContainer) nuevaContainer.classList.remove('hidden');
+    if (histContainer) histContainer.classList.add('hidden');
+    if (btnNueva) {
+      btnNueva.className = 'bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow transition flex items-center';
+    }
+    if (btnHist) {
+      btnHist.className = 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-medium shadow-sm transition flex items-center';
+    }
+    initDevolucionComprasForm();
+  } else {
+    if (nuevaContainer) nuevaContainer.classList.add('hidden');
+    if (histContainer) histContainer.classList.remove('hidden');
+    if (btnHist) {
+      btnHist.className = 'bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow transition flex items-center';
+    }
+    if (btnNueva) {
+      btnNueva.className = 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-medium shadow-sm transition flex items-center';
+    }
+    renderDevolucionesComprasHistorial();
+  }
+}
+
+async function initDevolucionComprasForm() {
+  const select = document.getElementById('devCompSelectCompra');
+  const fechaInput = document.getElementById('devCompFecha');
+  if (fechaInput && !fechaInput.value) {
+    fechaInput.value = new Date().toISOString().split('T')[0];
+  }
+  if (!select) return;
+
+  try {
+    const res = await fetch('/api/compras');
+    if (!res.ok) throw new Error('Error al cargar lista de compras');
+    const compras = await res.json();
+    
+    // Solo compras no anuladas
+    const comprasActivas = compras.filter(c => c.estado !== 'anulada');
+    
+    select.innerHTML = '<option value="">-- Selecciona una factura de compra registrada --</option>' +
+      comprasActivas.map(c => {
+        const numDoc = c.numero_factura || c.numero_control || `#${c.id}`;
+        const prov = c.proveedor_nombre || 'Proveedor';
+        const total = parseFloat(c.total || 0).toFixed(2);
+        const fStr = (c.fecha || '').split('T')[0] || (c.fecha || '').substring(0, 10);
+        return `<option value="${c.id}">[${fStr}] Factura ${escapeHtml(numDoc)} - ${escapeHtml(prov)} ($${total})</option>`;
+      }).join('');
+
+    // Resetear formulario si no hay compra seleccionada
+    if (!select.value) {
+      document.getElementById('devCompInfoCard')?.classList.add('hidden');
+      document.getElementById('devCompItemsContainer')?.classList.add('hidden');
+      AppState.compraSeleccionadaParaDev = null;
+    }
+  } catch (err) {
+    console.error('[initDevolucionComprasForm]:', err);
+  }
+}
+
+async function onSelectCompraDevolucion(compraId) {
+  if (!compraId) {
+    document.getElementById('devCompInfoCard')?.classList.add('hidden');
+    document.getElementById('devCompItemsContainer')?.classList.add('hidden');
+    AppState.compraSeleccionadaParaDev = null;
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/compras/${compraId}/items-para-devolucion`);
+    if (!res.ok) throw new Error('No se pudieron obtener los renglones de la compra');
+    const data = await res.json();
+    AppState.compraSeleccionadaParaDev = data;
+
+    // Llenar panel info
+    document.getElementById('devCompProvNombre').textContent = data.proveedor_nombre || 'Proveedor';
+    document.getElementById('devCompProvRif').textContent = `RIF: ${data.proveedor_rif || data.proveedor_cedula || 'N/A'} • Tel: ${data.proveedor_telefono || 'N/A'}`;
+    document.getElementById('devCompFacturaNum').textContent = data.numero_factura || data.numero_control || `#${data.id}`;
+    document.getElementById('devCompFechaCompra').textContent = (data.fecha || '').substring(0, 10);
+    document.getElementById('devCompTotalOriginal').textContent = `$${parseFloat(data.total || 0).toFixed(2)}`;
+    
+    const saldoCxP = data.cxp ? parseFloat(data.cxp.saldo_pendiente || 0) : parseFloat(data.saldo_pendiente || 0);
+    document.getElementById('devCompSaldoPendiente').textContent = `$${saldoCxP.toFixed(2)}`;
+
+    document.getElementById('devCompInfoCard')?.classList.remove('hidden');
+
+    // Renderizar tabla de renglones
+    const tbody = document.getElementById('devCompItemsTableBody');
+    if (!tbody) return;
+
+    if (!data.items || data.items.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="text-center py-6 text-slate-400">Esta compra no tiene renglones de inventario asociados.</td></tr>';
+      document.getElementById('devCompItemsContainer')?.classList.remove('hidden');
+      return;
+    }
+
+    tbody.innerHTML = data.items.map((it, idx) => {
+      const maxPermitido = parseFloat(it.max_permitido || 0);
+      const stockAlm = parseFloat(it.stock_almacen || 0);
+      const disableInput = maxPermitido <= 0.0001;
+      const warningBadge = disableInput 
+        ? (stockAlm <= 0.0001 ? '<span class="text-[10px] text-rose-600 font-bold block">Sin existencias en almacén</span>' : '<span class="text-[10px] text-amber-600 font-bold block">Totalmente devuelto previo</span>')
+        : '';
+
+      return `
+        <tr class="hover:bg-slate-50 transition ${disableInput ? 'opacity-60 bg-slate-50/50' : ''}">
+          <td class="py-2 px-3 font-mono text-[11px] text-slate-500">${escapeHtml(it.prod_codigo || '')}</td>
+          <td class="py-2 px-3 font-semibold text-slate-800">
+            ${escapeHtml(it.prod_nombre || it.nombre_producto || '')}
+            ${warningBadge}
+          </td>
+          <td class="py-2 px-3 text-center text-slate-600 font-medium">${parseFloat(it.cantidad_comprada || 0)}</td>
+          <td class="py-2 px-3 text-center text-slate-500">${parseFloat(it.cantidad_devuelta_previa || 0)}</td>
+          <td class="py-2 px-3 text-center font-bold text-teal-700">${stockAlm}</td>
+          <td class="py-2 px-3 text-center">
+            <input type="number" step="any" min="0" max="${maxPermitido}" value="0"
+                   id="devCant_${idx}"
+                   data-idx="${idx}"
+                   ${disableInput ? 'disabled' : ''}
+                   oninput="calcularTotalesDevolucionCompra()"
+                   class="w-24 text-center py-1 px-2 border border-slate-300 rounded-lg font-bold text-xs focus:ring-2 focus:ring-amber-500 ${disableInput ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-900'}">
+          </td>
+          <td class="py-2 px-3 text-right font-medium text-slate-700">$${parseFloat(it.costo_unitario || 0).toFixed(2)}</td>
+          <td class="py-2 px-3 text-right font-bold text-slate-900" id="devSubtotalRow_${idx}">$0.00</td>
+        </tr>
+      `;
+    }).join('');
+
+    document.getElementById('devCompItemsContainer')?.classList.remove('hidden');
+    calcularTotalesDevolucionCompra();
+  } catch (err) {
+    console.error('[onSelectCompraDevolucion]:', err);
+    if (typeof showToast === 'function') {
+      showToast('Error al cargar datos de compra: ' + err.message, 'error');
+    }
+  }
+}
+
+function onSelectMotivoDevCompra(motivo) {
+  const otroBox = document.getElementById('devCompMotivoOtroBox');
+  if (otroBox) {
+    if (motivo === 'OTRO') {
+      otroBox.classList.remove('hidden');
+      document.getElementById('devCompMotivoOtro')?.focus();
+    } else {
+      otroBox.classList.add('hidden');
+    }
+  }
+}
+
+function calcularTotalesDevolucionCompra() {
+  if (!AppState.compraSeleccionadaParaDev || !AppState.compraSeleccionadaParaDev.items) return;
+
+  const items = AppState.compraSeleccionadaParaDev.items;
+  let subtotal = 0.0;
+  let totalIva = 0.0;
+  let itemsCount = 0;
+
+  const ivaPct = (AppState.config && AppState.config.iva_porcentaje) ? (AppState.config.iva_porcentaje / 100.0) : 0.16;
+  const tasaVes = (AppState.config && AppState.config.tasa_ves) ? AppState.config.tasa_ves : 45.0;
+
+  items.forEach((it, idx) => {
+    const input = document.getElementById(`devCant_${idx}`);
+    const subtotalCell = document.getElementById(`devSubtotalRow_${idx}`);
+    if (!input) return;
+
+    let cant = parseFloat(input.value || 0);
+    const maxPerm = parseFloat(it.max_permitido || 0);
+
+    // Ajustar si excede
+    if (cant > maxPerm) {
+      cant = maxPerm;
+      input.value = maxPerm;
+    }
+    if (cant < 0) {
+      cant = 0;
+      input.value = 0;
+    }
+
+    const costo = parseFloat(it.costo_unitario || 0);
+    const subItm = cant * costo;
+    const ivaItm = (it.impuesto_tipo === 'gravado') ? (subItm * ivaPct) : 0.0;
+
+    if (cant > 0) itemsCount++;
+    subtotal += subItm;
+    totalIva += ivaItm;
+
+    if (subtotalCell) {
+      subtotalCell.textContent = `$${subItm.toFixed(2)}`;
+    }
+  });
+
+  const totalUsd = subtotal + totalIva;
+  const totalBs = totalUsd * tasaVes;
+
+  const subEl = document.getElementById('devCompSubtotalUsd');
+  if (subEl) subEl.textContent = `$${subtotal.toFixed(2)}`;
+  const ivaEl = document.getElementById('devCompIvaUsd');
+  if (ivaEl) ivaEl.textContent = `$${totalIva.toFixed(2)}`;
+  const totUsdEl = document.getElementById('devCompTotalUsd');
+  if (totUsdEl) totUsdEl.textContent = `$${totalUsd.toFixed(2)}`;
+  const totBsEl = document.getElementById('devCompTotalBs');
+  if (totBsEl) totBsEl.textContent = `${totalBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs.`;
+
+  // Calcular efecto en CxP
+  const saldoPendienteActual = AppState.compraSeleccionadaParaDev.cxp 
+    ? parseFloat(AppState.compraSeleccionadaParaDev.cxp.saldo_pendiente || 0)
+    : parseFloat(AppState.compraSeleccionadaParaDev.saldo_pendiente || 0);
+
+  const msgEl = document.getElementById('devCompCxPEffectMsg');
+  if (msgEl) {
+    if (totalUsd <= 0.0001) {
+      msgEl.innerHTML = 'Selecciona cantidades para calcular la reducción en la deuda con el proveedor.';
+    } else if (saldoPendienteActual >= totalUsd - 0.0001) {
+      const nuevoSaldo = Math.max(0.0, saldoPendienteActual - totalUsd);
+      msgEl.innerHTML = `Se descontarán <strong>$${totalUsd.toFixed(2)}</strong> de la deuda en CxP. Nuevo saldo pendiente: <strong>$${nuevoSaldo.toFixed(2)}</strong>.`;
+    } else {
+      const desc = saldoPendienteActual;
+      const saldoFavor = totalUsd - desc;
+      msgEl.innerHTML = `Se liquidará el saldo pendiente de CxP ($${desc.toFixed(2)}) y el remanente de <strong>$${saldoFavor.toFixed(2)}</strong> quedará registrado como saldo a favor del proveedor.`;
+    }
+  }
+}
+
+async function procesarDevolucionCompra() {
+  if (!AppState.compraSeleccionadaParaDev) {
+    alert('Por favor selecciona primero una factura de compra.');
+    return;
+  }
+
+  const compra = AppState.compraSeleccionadaParaDev;
+  const items = compra.items || [];
+  const itemsADevolver = [];
+
+  items.forEach((it, idx) => {
+    const input = document.getElementById(`devCant_${idx}`);
+    if (!input) return;
+    const cant = parseFloat(input.value || 0);
+    if (cant > 0.0001) {
+      itemsADevolver.push({
+        compra_detalle_id: it.id,
+        producto_id: it.producto_id,
+        cantidad: cant,
+        costo_unitario: parseFloat(it.costo_unitario || 0),
+        impuesto_tipo: it.impuesto_tipo || 'exento'
+      });
+    }
+  });
+
+  if (itemsADevolver.length === 0) {
+    alert('Debes indicar una cantidad a devolver mayor a 0 en al menos un producto.');
+    return;
+  }
+
+  let motivo = document.getElementById('devCompMotivoSelect')?.value || 'Devolución de mercancía a proveedor';
+  if (motivo === 'OTRO') {
+    const otro = document.getElementById('devCompMotivoOtro')?.value.trim();
+    if (!otro) {
+      alert('Por favor especifica el motivo de la devolución en el campo de texto.');
+      document.getElementById('devCompMotivoOtro')?.focus();
+      return;
+    }
+    motivo = otro;
+  }
+
+  const fecha = document.getElementById('devCompFecha')?.value || new Date().toISOString().split('T')[0];
+  const notas = document.getElementById('devCompNotas')?.value.trim() || '';
+
+  const confirmMsg = `¿Confirmas registrar la DEVOLUCIÓN A PROVEEDOR?\n\n• Proveedor: ${compra.proveedor_nombre}\n• Ítems a devolver: ${itemsADevolver.length}\n• Se descontará el stock físico del almacén.\n• Se rebajará la Cuenta por Pagar (CxP).`;
+  if (!confirm(confirmMsg)) return;
+
+  const btn = document.getElementById('btnProcesarDevCompra');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Procesando...';
+  }
+
+  try {
+    const res = await fetch('/api/devoluciones-compras', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        compra_id: compra.id,
+        proveedor_id: compra.proveedor_id,
+        motivo: motivo,
+        fecha: fecha,
+        items: itemsADevolver,
+        notas: notas
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || 'Error al procesar devolución');
+    }
+
+    if (typeof showToast === 'function') {
+      showToast(`✅ Devolución #${data.numero_devolucion} completada exitosamente. Stock y CxP actualizados.`, 'success');
+    } else {
+      alert(`✅ Devolución #${data.numero_devolucion} registrada exitosamente.`);
+    }
+
+    // Recargar datos y mostrar historial
+    await loadDevolucionesCompras();
+    await loadProductos();
+    await loadDashboard();
+    cambiarSubtabDevCompras('historial');
+    
+    // Abrir comprobante
+    verDetalleDevolucionCompra(data.devolucion_id);
+  } catch (err) {
+    alert('❌ ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-check-circle mr-1.5"></i><span>Completar Devolución a Proveedor</span>';
+    }
+  }
+}
+
+function renderDevolucionesComprasKPIs() {
+  const devs = AppState.devolucionesCompras || [];
+  const activas = devs.filter(d => d.estado !== 'anulada');
+
+  const count = activas.length;
+  let totalUsd = 0.0;
+  let totalBs = 0.0;
+  let totalCxp = 0.0;
+
+  activas.forEach(d => {
+    totalUsd += parseFloat(d.total_usd || 0);
+    totalBs += parseFloat(d.total_ves || 0);
+    totalCxp += parseFloat(d.monto_descontado_cxp || 0);
+  });
+
+  const countEl = document.getElementById('kpiDevCompCount');
+  if (countEl) countEl.textContent = count;
+  const totUsdEl = document.getElementById('kpiDevCompTotalUsd');
+  if (totUsdEl) totUsdEl.textContent = `$${totalUsd.toFixed(2)}`;
+  const totBsEl = document.getElementById('kpiDevCompTotalBs');
+  if (totBsEl) totBsEl.textContent = `${totalBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs.`;
+  const cxpEl = document.getElementById('kpiDevCompDescontadoCxp');
+  if (cxpEl) cxpEl.textContent = `$${totalCxp.toFixed(2)}`;
+}
+
+function renderDevolucionesComprasHistorial() {
+  const tbody = document.getElementById('devolucionesComprasTableBody');
+  if (!tbody) return;
+
+  const devs = AppState.devolucionesCompras || [];
+  const query = (document.getElementById('devCompHistorialSearchInput')?.value || '').toLowerCase().trim();
+
+  const filtradas = devs.filter(d => {
+    if (!query) return true;
+    const num = (d.numero_devolucion || '').toLowerCase();
+    const prov = (d.proveedor_nombre || '').toLowerCase();
+    const fact = (d.numero_factura_proveedor || d.numero_control_compra || '').toLowerCase();
+    const mot = (d.motivo || '').toLowerCase();
+    return num.includes(query) || prov.includes(query) || fact.includes(query) || mot.includes(query);
+  });
+
+  if (filtradas.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="9" class="text-center py-8 text-slate-400">
+          <i class="fa-solid fa-boxes-packing text-3xl mb-2 text-slate-300 block"></i>
+          No hay devoluciones registradas ${query ? 'que coincidan con la búsqueda' : 'en este momento'}.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = filtradas.map(d => {
+    const esAnulada = d.estado === 'anulada';
+    const numFact = d.numero_factura_proveedor || d.numero_control_compra || 'S/N';
+    const fecha = (d.fecha_emision || '').substring(0, 10);
+    const totalUsd = parseFloat(d.total_usd || 0).toFixed(2);
+    const descCxp = parseFloat(d.monto_descontado_cxp || 0).toFixed(2);
+
+    return `
+      <tr class="hover:bg-slate-50 transition ${esAnulada ? 'opacity-50 bg-slate-50/50' : ''}">
+        <td class="py-3 px-4 font-mono font-bold text-amber-800">
+          ${escapeHtml(d.numero_devolucion || '')}
+        </td>
+        <td class="py-3 px-4 text-slate-600">${escapeHtml(fecha)}</td>
+        <td class="py-3 px-4">
+          <div class="font-bold text-slate-800">${escapeHtml(d.proveedor_nombre || '')}</div>
+          <div class="text-[11px] text-slate-400">${escapeHtml(d.proveedor_rif || '')}</div>
+        </td>
+        <td class="py-3 px-4 text-slate-700 font-medium">${escapeHtml(numFact)}</td>
+        <td class="py-3 px-4 text-slate-600 max-w-xs truncate" title="${escapeHtml(d.motivo || '')}">${escapeHtml(d.motivo || '')}</td>
+        <td class="py-3 px-4 text-right font-extrabold text-slate-900">$${totalUsd}</td>
+        <td class="py-3 px-4 text-right font-bold text-emerald-700">$${descCxp}</td>
+        <td class="py-3 px-4 text-center">
+          ${esAnulada 
+            ? '<span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">Anulada</span>' 
+            : '<span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">Activa</span>'}
+        </td>
+        <td class="py-3 px-4 text-center">
+          <div class="inline-flex items-center space-x-1">
+            <button onclick="verDetalleDevolucionCompra(${d.id})" class="p-1.5 bg-slate-100 hover:bg-amber-100 text-slate-700 hover:text-amber-800 rounded-lg transition" title="Ver Detalle y Comprobante">
+              <i class="fa-solid fa-eye text-xs"></i>
+            </button>
+            ${!esAnulada ? `
+              <button onclick="anularDevolucionCompra(${d.id}, '${escapeHtml(d.numero_devolucion)}')" class="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg transition" title="Anular Devolución">
+                <i class="fa-solid fa-ban text-xs"></i>
+              </button>
+            ` : ''}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function verDetalleDevolucionCompra(id) {
+  try {
+    const res = await fetch(`/api/devoluciones-compras/${id}`);
+    if (!res.ok) throw new Error('No se pudo cargar el detalle de la devolución');
+    const data = await res.json();
+    AppState.devolucionActualDetalle = data;
+
+    const modal = document.getElementById('modalNotaDebitoCompra');
+    const container = document.getElementById('modalNdContenidoImprimible');
+    if (!modal || !container) return;
+
+    const fecha = (data.fecha_emision || '').substring(0, 10);
+    const totalUsd = parseFloat(data.total_usd || 0).toFixed(2);
+    const subtotalUsd = parseFloat(data.subtotal_usd || 0).toFixed(2);
+    const ivaUsd = parseFloat(data.iva_usd || 0).toFixed(2);
+    const totalBs = parseFloat(data.total_ves || 0).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const descCxp = parseFloat(data.monto_descontado_cxp || 0).toFixed(2);
+    const saldoFavor = parseFloat(data.monto_saldo_favor || 0).toFixed(2);
+    const cfg = AppState.config || {};
+
+    const detallesHtml = (data.detalles || []).map(dt => `
+      <tr class="border-b border-slate-100">
+        <td class="py-2 px-3 font-mono text-[11px]">${escapeHtml(dt.codigo || '')}</td>
+        <td class="py-2 px-3 font-medium">${escapeHtml(dt.nombre_producto || '')}</td>
+        <td class="py-2 px-3 text-center font-bold">${parseFloat(dt.cantidad)}</td>
+        <td class="py-2 px-3 text-right">$${parseFloat(dt.costo_unitario).toFixed(2)}</td>
+        <td class="py-2 px-3 text-right font-bold">$${parseFloat(dt.subtotal).toFixed(2)}</td>
+      </tr>
+    `).join('');
+
+    container.innerHTML = `
+      <!-- Encabezado Documento Oficial -->
+      <div class="flex justify-between items-start pb-4 border-b-2 border-slate-800">
+        <div>
+          <h2 class="text-base font-black text-slate-900 tracking-tight">${escapeHtml(cfg.nombre_negocio || 'EMPRESA COMERCIAL')}</h2>
+          <p class="text-xs text-slate-600 font-mono">RIF: ${escapeHtml(cfg.documento_fiscal || 'J-00000000-0')}</p>
+          <p class="text-[11px] text-slate-500">${escapeHtml(cfg.direccion || '')} • Tel: ${escapeHtml(cfg.telefono || '')}</p>
+        </div>
+        <div class="text-right">
+          <span class="inline-block bg-amber-100 text-amber-800 px-3 py-1 rounded-md text-xs font-black uppercase tracking-wider">
+            NOTA DE DÉBITO A PROVEEDOR
+          </span>
+          <p class="font-mono font-bold text-sm text-slate-900 mt-1">${escapeHtml(data.numero_devolucion)}</p>
+          <p class="text-[11px] text-slate-500">Fecha: ${escapeHtml(fecha)}</p>
+        </div>
+      </div>
+
+      <!-- Datos del Proveedor y Factura Afectada -->
+      <div class="grid grid-cols-2 gap-4 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+        <div>
+          <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">DATOS DEL PROVEEDOR</span>
+          <p class="font-bold text-slate-800 text-xs mt-0.5">${escapeHtml(data.proveedor_nombre || '')}</p>
+          <p class="text-[11px] text-slate-600 font-mono">RIF: ${escapeHtml(data.proveedor_rif || 'N/A')}</p>
+          <p class="text-[11px] text-slate-500">Tel: ${escapeHtml(data.proveedor_telefono || 'N/A')}</p>
+        </div>
+        <div>
+          <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">DOCUMENTO DE COMPRA AFECTADO</span>
+          <p class="font-bold text-slate-800 text-xs mt-0.5">Factura Proveedor: ${escapeHtml(data.numero_factura_proveedor || data.numero_control_compra || 'S/N')}</p>
+          <p class="text-[11px] text-slate-500">Fecha Compra Original: ${(data.fecha_compra_original || '').substring(0, 10)}</p>
+          <p class="text-[11px] text-slate-600 mt-0.5"><strong>Motivo:</strong> ${escapeHtml(data.motivo || '')}</p>
+        </div>
+      </div>
+
+      <!-- Tabla de Ítems Devueltos -->
+      <div class="border border-slate-200 rounded-xl overflow-hidden">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="bg-slate-100 border-b border-slate-200 text-slate-600 font-bold uppercase text-[10px]">
+              <th class="py-2 px-3">Código</th>
+              <th class="py-2 px-3">Descripción de Mercancía</th>
+              <th class="py-2 px-3 text-center">Cant.</th>
+              <th class="py-2 px-3 text-right">Costo Unit.</th>
+              <th class="py-2 px-3 text-right">Total ($)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${detallesHtml}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Resumen de Totales y Liquidación en CxP -->
+      <div class="grid grid-cols-2 gap-4 items-start pt-2">
+        <div class="bg-amber-50/70 p-3 rounded-xl border border-amber-200/80 text-[11px] text-amber-950 space-y-1">
+          <p class="font-bold flex items-center">
+            <i class="fa-solid fa-receipt mr-1 text-amber-700"></i>Afectación en Cuentas por Pagar:
+          </p>
+          <p>• Descontado directamente de deuda CxP: <strong>$${descCxp}</strong></p>
+          ${parseFloat(saldoFavor) > 0 ? `<p>• Saldo a favor pendiente con proveedor: <strong>$${saldoFavor}</strong></p>` : ''}
+          <p class="text-slate-500 text-[10px] mt-1">Este comprobante certifica la devolución formal de la mercancía y la rebaja de la cuenta pendiente.</p>
+        </div>
+
+        <div class="space-y-1 text-xs text-right">
+          <div class="flex justify-between text-slate-500">
+            <span>Subtotal:</span>
+            <span class="font-bold text-slate-800">$${subtotalUsd}</span>
+          </div>
+          <div class="flex justify-between text-slate-500">
+            <span>IVA:</span>
+            <span class="font-bold text-slate-800">$${ivaUsd}</span>
+          </div>
+          <div class="flex justify-between text-sm font-black text-slate-900 border-t border-slate-200 pt-1">
+            <span>Total Nota de Débito:</span>
+            <span class="text-rose-600">$${totalUsd}</span>
+          </div>
+          <div class="flex justify-between text-xs text-slate-500">
+            <span>Total en Bolívares (BCV):</span>
+            <span class="font-bold text-slate-700">${totalBs} Bs.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Firmas -->
+      <div class="grid grid-cols-2 gap-10 pt-8 mt-6 border-t border-dashed border-slate-300 text-center text-[11px] text-slate-500">
+        <div>
+          <div class="border-t border-slate-400 mx-6 pt-1">Entregado por / Responsable Almacén</div>
+        </div>
+        <div>
+          <div class="border-t border-slate-400 mx-6 pt-1">Recibido Conforme / Proveedor</div>
+        </div>
+      </div>
+    `;
+
+    modal.classList.remove('hidden');
+  } catch (err) {
+    alert('❌ ' + err.message);
+  }
+}
+
+function cerrarModalNotaDebitoCompra() {
+  document.getElementById('modalNotaDebitoCompra')?.classList.add('hidden');
+}
+
+function imprimirNotaDebitoCompraDirecta() {
+  const content = document.getElementById('modalNdContenidoImprimible')?.innerHTML;
+  if (!content) return;
+
+  const w = window.open('', '_blank', 'width=800,height=900');
+  w.document.write(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Nota de Débito a Proveedor</title>
+      <script src="https://cdn.tailwindcss.com"></script>
+      <style>
+        @media print {
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+      </style>
+    </head>
+    <body class="p-8 bg-white text-slate-800 font-sans" onload="window.print();">
+      ${content}
+    </body>
+    </html>
+  `);
+  w.document.close();
+}
+
+async function anularDevolucionCompra(id, numDev) {
+  const motivo = prompt(`⚠️ ATENCIÓN: Vas a ANULAR la Devolución a Proveedor #${numDev}.\n\nEfectos:\n• Las unidades devueltas se REINTEGRARÁN (+) al inventario.\n• La deuda en Cuentas por Pagar (CxP) se RESTABLECERÁ.\n\nIngresa el motivo de la anulación:`, 'Error en carga de devolución');
+  if (motivo === null) return;
+  if (!motivo.trim()) {
+    alert('Debes indicar un motivo válido para anular la devolución.');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/devoluciones-compras/${id}/anular`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: motivo.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || data.message || 'Error al anular devolución');
+    }
+
+    if (typeof showToast === 'function') {
+      showToast(`✅ Devolución #${numDev} anulada. Stock y deuda CxP restaurados.`, 'info');
+    } else {
+      alert(`✅ Devolución #${numDev} anulada exitosamente.`);
+    }
+
+    await loadDevolucionesCompras();
+    await loadProductos();
+    await loadDashboard();
+  } catch (err) {
+    alert('❌ ' + err.message);
+  }
+}
+
+window.loadDevolucionesCompras = loadDevolucionesCompras;
+window.cambiarSubtabDevCompras = cambiarSubtabDevCompras;
+window.initDevolucionComprasForm = initDevolucionComprasForm;
+window.onSelectCompraDevolucion = onSelectCompraDevolucion;
+window.onSelectMotivoDevCompra = onSelectMotivoDevCompra;
+window.calcularTotalesDevolucionCompra = calcularTotalesDevolucionCompra;
+window.procesarDevolucionCompra = procesarDevolucionCompra;
+window.renderDevolucionesComprasHistorial = renderDevolucionesComprasHistorial;
+window.verDetalleDevolucionCompra = verDetalleDevolucionCompra;
+window.cerrarModalNotaDebitoCompra = cerrarModalNotaDebitoCompra;
+window.imprimirNotaDebitoCompraDirecta = imprimirNotaDebitoCompraDirecta;
+window.anularDevolucionCompra = anularDevolucionCompra;

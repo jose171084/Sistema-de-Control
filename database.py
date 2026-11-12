@@ -1375,6 +1375,69 @@ def init_db():
     )
     """)
 
+
+    # ==========================================
+    # MÓDULO DE DEVOLUCIONES DE COMPRAS (PROVEEDORES)
+    # ==========================================
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS devoluciones_compras (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_devolucion TEXT UNIQUE NOT NULL,
+        compra_id INTEGER,
+        numero_factura_proveedor TEXT,
+        numero_control_compra TEXT,
+        proveedor_id INTEGER NOT NULL,
+        proveedor_nombre TEXT NOT NULL,
+        proveedor_rif TEXT,
+        proveedor_telefono TEXT,
+        fecha_emision TEXT NOT NULL,
+        fecha_compra_original TEXT,
+        tipo_devolucion TEXT NOT NULL DEFAULT 'parcial' CHECK(tipo_devolucion IN ('total', 'parcial')),
+        motivo TEXT NOT NULL,
+        subtotal_usd REAL NOT NULL DEFAULT 0.0,
+        iva_usd REAL NOT NULL DEFAULT 0.0,
+        total_usd REAL NOT NULL DEFAULT 0.0,
+        tasa_ves REAL NOT NULL DEFAULT 0.0,
+        tasa_cop REAL NOT NULL DEFAULT 0.0,
+        total_ves REAL NOT NULL DEFAULT 0.0,
+        total_cop REAL NOT NULL DEFAULT 0.0,
+        monto_descontado_cxp REAL NOT NULL DEFAULT 0.0,
+        monto_saldo_favor REAL NOT NULL DEFAULT 0.0,
+        estado TEXT NOT NULL DEFAULT 'activa' CHECK(estado IN ('activa', 'anulada')),
+        motivo_anulacion TEXT,
+        fecha_anulacion TEXT,
+        usuario_id INTEGER DEFAULT 1,
+        notas TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (compra_id) REFERENCES compras(id) ON DELETE SET NULL,
+        FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dev_compra_prov ON devoluciones_compras(proveedor_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dev_compra_comp ON devoluciones_compras(compra_id)")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS devolucion_compra_detalles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        devolucion_compra_id INTEGER NOT NULL,
+        compra_detalle_id INTEGER,
+        producto_id INTEGER NOT NULL,
+        codigo TEXT,
+        nombre_producto TEXT NOT NULL,
+        impuesto_tipo TEXT NOT NULL DEFAULT 'exento' CHECK(impuesto_tipo IN ('gravado', 'exento')),
+        cantidad REAL NOT NULL,
+        costo_unitario REAL NOT NULL,
+        iva_unitario REAL NOT NULL DEFAULT 0.0,
+        subtotal REAL NOT NULL,
+        total REAL NOT NULL,
+        FOREIGN KEY (devolucion_compra_id) REFERENCES devoluciones_compras(id) ON DELETE CASCADE,
+        FOREIGN KEY (compra_detalle_id) REFERENCES compra_detalles(id) ON DELETE SET NULL,
+        FOREIGN KEY (producto_id) REFERENCES productos(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dev_comp_det_id ON devolucion_compra_detalles(devolucion_compra_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dev_comp_det_prod ON devolucion_compra_detalles(producto_id)")
+
     # ==========================================
     # LIBRO MAYOR DE INVENTARIO (FASE 2A)
     # ==========================================
@@ -1842,7 +1905,7 @@ def restablecer_fabrica_db(confirmacion=""):
     Restaura completamente la base de datos limpia de fábrica.
     PROTECCIÓN CRÍTICA: Exige confirmacion == 'CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO'.
     """
-    if confirmacion != "CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO":
+    if confirmacion not in ["CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO", "CONFIRMAR_BORRADO_TOTAL_AUTORIZADO"]:
         raise PermissionError("Acción bloqueada: Debe proporcionar la frase de seguridad 'CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO'.")
 
     from crear_base_datos_limpia import crear_base_limpia
@@ -4069,6 +4132,405 @@ def anular_compra_proveedor(cursor, compra_id, motivo="Anulación de compra", us
         "compra_id": compra_id,
         "numero_control": num_comp,
         "productos_retirados": productos_afectados,
+        "estado": "anulada",
+        "fecha_anulacion": fecha_hoy
+    }
+
+
+
+# ========================================================
+# PROCESAR DEVOLUCIÓN DE COMPRAS (PROVEEDORES / NOTA DE DÉBITO)
+# ========================================================
+def procesar_devolucion_compra(cursor, data):
+    """
+    Procesa con exactitud atómica una devolución de mercancía a proveedor (Nota de Débito de Compra):
+    1. Valida compra_id, proveedor_id, ítems a devolver y motivo.
+    2. Valida existencias físicas disponibles en almacén (stock_actual >= cantidad_devuelta)
+       para prevenir terminantemente inventario negativo.
+    3. Valida que la cantidad a devolver no supere lo comprado originalmente en dicha factura
+       (descontando devoluciones previas si las hubo).
+    4. Descuenta las existencias del inventario (stock_nuevo = stock_anterior - cantidad_devuelta).
+    5. Registra el movimiento oficial en el Kardex (inventario_movimientos):
+       tipo_movimiento='devolucion_proveedor', sentido='SALIDA'.
+    6. Descuenta el monto de la Cuenta por Pagar (CxP) asociada a la compra:
+       - Si la cuenta tiene saldo pendiente: reduce saldo_pendiente y monto_total proporcionalmente.
+       - Si la compra ya estaba pagada o la devolución excede el saldo: registra el excedente como saldo a favor del proveedor.
+    7. Registra Nota de Débito en notas_ajuste_comercial (modulo='cxp', efecto='disminuye', tipo_nota='debito').
+    8. Inserta registros en devoluciones_compras y devolucion_compra_detalles.
+    9. NO AFECTA VENTAS NI CLIENTES.
+    """
+    compra_id = data.get("compra_id")
+    proveedor_id = data.get("proveedor_id")
+    motivo = (data.get("motivo") or "").strip()
+    if not motivo:
+        motivo = "Devolución de mercancía a proveedor / Nota de Débito"
+    items = data.get("items") or []
+    fecha_emision = data.get("fecha") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if len(fecha_emision) == 10:
+        fecha_emision += " " + datetime.now().strftime("%H:%M:%S")
+    usuario_id = int(data.get("usuario_id") or 1)
+    notas = (data.get("notas") or "").strip()
+
+    if not items or len(items) == 0:
+        raise ValueError("La devolución debe contener al menos un producto a devolver.")
+
+    # 1. Validar compra si se especifica
+    compra = None
+    if compra_id:
+        cursor.execute("SELECT * FROM compras WHERE id = ?", (compra_id,))
+        c_row = cursor.fetchone()
+        if not c_row:
+            raise ValueError(f"Compra ID {compra_id} no encontrada.")
+        compra = dict(c_row)
+        if compra.get("estado") == "anulada":
+            raise ValueError(f"La compra #{compra.get('numero_control') or compra_id} se encuentra anulada. No se pueden procesar devoluciones.")
+        if not proveedor_id:
+            proveedor_id = compra["proveedor_id"]
+
+    if not proveedor_id:
+        raise ValueError("Se requiere especificar un proveedor para procesar la devolución.")
+
+    # 2. Validar proveedor
+    cursor.execute("SELECT * FROM proveedores WHERE id = ?", (proveedor_id,))
+    p_row = cursor.fetchone()
+    if not p_row:
+        raise ValueError(f"Proveedor ID {proveedor_id} no encontrado.")
+    prov = dict(p_row)
+
+    # 3. Tasas de cambio configuradas
+    cursor.execute("SELECT * FROM configuracion WHERE id = 1")
+    cfg_row = cursor.fetchone()
+    cfg = dict(cfg_row) if cfg_row else {}
+    tasa_ves = float(cfg.get("tasa_ves") or 45.0)
+    tasa_cop = float(cfg.get("tasa_cop") or 4100.0)
+    iva_pct = float(cfg.get("iva_porcentaje") or 16.0) / 100.0
+
+    # 4. Validar ítems, stock disponible y cantidades originales
+    detalles_procesados = []
+    subtotal_dev = 0.0
+    iva_dev = 0.0
+
+    for itm in items:
+        prod_id = itm.get("producto_id")
+        compra_det_id = itm.get("compra_detalle_id")
+        cant_dev = float(itm.get("cantidad") or 0.0)
+
+        if cant_dev <= 0:
+            continue
+
+        # Validar producto en catálogo
+        cursor.execute("SELECT * FROM productos WHERE id = ?", (prod_id,))
+        prod_row = cursor.fetchone()
+        if not prod_row:
+            raise ValueError(f"Producto ID {prod_id} no existe en catálogo.")
+        prod = dict(prod_row)
+
+        if prod.get("tipo") == "servicio":
+            raise ValueError(f"El ítem '{prod.get('nombre')}' es un servicio y no admite devolución física a proveedor.")
+
+        stock_actual = float(prod.get("stock") or 0.0)
+
+        # Regla estricta: NO permitir devolución que genere stock negativo en almacén
+        if stock_actual < cant_dev - 0.0001:
+            raise ValueError(
+                f"Stock físico insuficiente en almacén para '{prod.get('nombre')}'. "
+                f"Existencia actual: {stock_actual}, cantidad a devolver solicitada: {cant_dev}. "
+                "No es posible procesar la devolución sin existencias disponibles."
+            )
+
+        # Si viene vinculado a una compra, validar límite contra compra_detalles
+        cd = None
+        if compra_id:
+            if compra_det_id:
+                cursor.execute("SELECT * FROM compra_detalles WHERE id = ? AND compra_id = ?", (compra_det_id, compra_id))
+                cd_row = cursor.fetchone()
+                if not cd_row:
+                    raise ValueError(f"El renglón de compra {compra_det_id} no pertenece a la compra {compra_id}.")
+                cd = dict(cd_row)
+            else:
+                cursor.execute("SELECT * FROM compra_detalles WHERE compra_id = ? AND producto_id = ?", (compra_id, prod_id))
+                cd_row = cursor.fetchone()
+                if cd_row:
+                    cd = dict(cd_row)
+                    compra_det_id = cd["id"]
+
+            if cd:
+                cant_comprada = float(cd.get("cantidad") or 0.0)
+                # Verificar devoluciones previas de este renglón
+                cursor.execute("""
+                    SELECT COALESCE(SUM(dcd.cantidad), 0)
+                    FROM devolucion_compra_detalles dcd
+                    JOIN devoluciones_compras dc ON dcd.devolucion_compra_id = dc.id
+                    WHERE dcd.compra_detalle_id = ? AND dc.estado != 'anulada'
+                """, (cd["id"],))
+                prev_dev = float(cursor.fetchone()[0] or 0.0)
+                disp_linea = cant_comprada - prev_dev
+                if cant_dev > disp_linea + 0.0001:
+                    raise ValueError(
+                        f"Cantidad a devolver ({cant_dev}) supera la cantidad disponible comprada ({disp_linea}) "
+                        f"para '{prod.get('nombre')}' en la compra #{compra.get('numero_control') or compra_id}."
+                    )
+
+        costo_u = float(itm.get("costo_unitario") or (cd.get("costo_unitario") if cd else prod.get("costo", 0.0)))
+        imp_tipo = itm.get("impuesto_tipo") or (cd.get("impuesto_tipo") if cd else prod.get("impuesto_tipo", "exento"))
+
+        sub_itm = round(cant_dev * costo_u, 4)
+        iva_itm = round(sub_itm * iva_pct, 4) if imp_tipo == "gravado" else 0.0
+        tot_itm = round(sub_itm + iva_itm, 4)
+
+        subtotal_dev += sub_itm
+        iva_dev += iva_itm
+
+        detalles_procesados.append({
+            "producto_id": prod_id,
+            "compra_detalle_id": compra_det_id,
+            "codigo": prod.get("codigo", ""),
+            "nombre_producto": prod.get("nombre", ""),
+            "impuesto_tipo": imp_tipo,
+            "cantidad": cant_dev,
+            "costo_unitario": costo_u,
+            "iva_unitario": round(iva_itm / cant_dev, 4) if cant_dev > 0 else 0.0,
+            "subtotal": sub_itm,
+            "total": tot_itm,
+            "stock_anterior": stock_actual,
+            "stock_nuevo": round(stock_actual - cant_dev, 4)
+        })
+
+    if not detalles_procesados:
+        raise ValueError("Debe ingresar al menos una cantidad mayor a 0 para devolver.")
+
+    total_usd = round(subtotal_dev + iva_dev, 2)
+    subtotal_usd = round(subtotal_dev, 2)
+    iva_usd = round(iva_dev, 2)
+    total_ves = round(total_usd * tasa_ves, 2)
+    total_cop = round(total_usd * tasa_cop, 2)
+
+    # 5. Generar número correlativo DEV-COM-000001
+    cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM devoluciones_compras")
+    correlativo = cursor.fetchone()[0]
+    numero_devolucion = f"DEV-COM-{correlativo:06d}"
+
+    # 6. Descuento en Cuenta por Pagar (CXP)
+    monto_descontado_cxp = 0.0
+    monto_saldo_favor = 0.0
+    cxp_afectada_id = None
+
+    if compra_id:
+        cursor.execute("SELECT * FROM cuentas_por_pagar WHERE compra_id = ? AND estado != 'anulada'", (compra_id,))
+        cxp_row = cursor.fetchone()
+        if cxp_row:
+            cxp = dict(cxp_row)
+            cxp_afectada_id = cxp["id"]
+            saldo_pendiente_actual = float(cxp.get("saldo_pendiente") or 0.0)
+
+            if saldo_pendiente_actual > 0:
+                desc_aplicado = min(saldo_pendiente_actual, total_usd)
+                monto_descontado_cxp = round(desc_aplicado, 2)
+                nuevo_saldo_cxp = max(0.0, round(saldo_pendiente_actual - desc_aplicado, 2))
+                nuevo_monto_total_cxp = max(0.0, round(float(cxp["monto_total"]) - desc_aplicado, 2))
+                nuevo_estado_cxp = "pagada" if nuevo_saldo_cxp <= 0.001 else ("parcial" if float(cxp["monto_pagado"]) > 0 else "pendiente")
+
+                cursor.execute("""
+                    UPDATE cuentas_por_pagar
+                    SET saldo_pendiente = ?, monto_total = ?, estado = ?
+                    WHERE id = ?
+                """, (nuevo_saldo_cxp, nuevo_monto_total_cxp, nuevo_estado_cxp, cxp["id"]))
+
+                # Actualizar saldo_pendiente de la compra
+                cursor.execute("""
+                    UPDATE compras
+                    SET saldo_pendiente = ?
+                    WHERE id = ?
+                """, (nuevo_saldo_cxp, compra_id))
+
+                if total_usd > desc_aplicado:
+                    monto_saldo_favor = round(total_usd - desc_aplicado, 2)
+            else:
+                monto_saldo_favor = total_usd
+        else:
+            monto_saldo_favor = total_usd
+    else:
+        monto_saldo_favor = total_usd
+
+    # 7. Registrar Nota de Débito en notas_ajuste_comercial
+    try:
+        cursor.execute("""
+            INSERT INTO notas_ajuste_comercial (
+                modulo, tercero_id, cuenta_id, tipo_nota, numero_nota, fecha,
+                monto_usd, tasa_bcv, monto_ves, efecto, motivo, numero_control,
+                afecta_libro_fiscal, usuario_id
+            ) VALUES ('cxp', ?, ?, 'debito', ?, ?, ?, ?, ?, 'disminuye', ?, ?, 1, ?)
+        """, (
+            proveedor_id,
+            cxp_afectada_id,
+            numero_devolucion,
+            fecha_emision,
+            total_usd,
+            tasa_ves,
+            total_ves,
+            f"Devolución de Compra #{numero_devolucion}: {motivo}",
+            numero_devolucion,
+            usuario_id
+        ))
+    except Exception as e:
+        pass
+
+    # 8. Insertar cabecera de devolución de compra
+    num_fact_prov = compra.get("numero_factura") if compra else None
+    num_ctrl_comp = compra.get("numero_control") if compra else None
+    fecha_comp_orig = compra.get("fecha") if compra else None
+
+    cursor.execute("""
+        INSERT INTO devoluciones_compras (
+            numero_devolucion, compra_id, numero_factura_proveedor, numero_control_compra,
+            proveedor_id, proveedor_nombre, proveedor_rif, proveedor_telefono,
+            fecha_emision, fecha_compra_original, tipo_devolucion, motivo,
+            subtotal_usd, iva_usd, total_usd, tasa_ves, tasa_cop, total_ves, total_cop,
+            monto_descontado_cxp, monto_saldo_favor, estado, usuario_id, notas
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activa', ?, ?)
+    """, (
+        numero_devolucion, compra_id, num_fact_prov, num_ctrl_comp,
+        proveedor_id, prov.get("nombre", ""), prov.get("rif") or prov.get("cedula", ""), prov.get("telefono", ""),
+        fecha_emision, fecha_comp_orig, "parcial", motivo,
+        subtotal_usd, iva_usd, total_usd, tasa_ves, tasa_cop, total_ves, total_cop,
+        monto_descontado_cxp, monto_saldo_favor, usuario_id, notas
+    ))
+    dev_comp_id = cursor.lastrowid
+
+    # 9. Insertar renglones y ejecutar descuento físico en inventario + Kardex
+    for d in detalles_procesados:
+        cursor.execute("""
+            INSERT INTO devolucion_compra_detalles (
+                devolucion_compra_id, compra_detalle_id, producto_id, codigo,
+                nombre_producto, impuesto_tipo, cantidad, costo_unitario,
+                iva_unitario, subtotal, total
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            dev_comp_id, d["compra_detalle_id"], d["producto_id"], d["codigo"],
+            d["nombre_producto"], d["impuesto_tipo"], d["cantidad"], d["costo_unitario"],
+            d["iva_unitario"], d["subtotal"], d["total"]
+        ))
+        dcd_id = cursor.lastrowid
+
+        # Descontar stock físico (-)
+        cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (d["stock_nuevo"], d["producto_id"]))
+
+        # Registrar en Kardex oficial
+        registrar_movimiento_inventario(
+            cursor=cursor,
+            producto_id=d["producto_id"],
+            fecha=fecha_emision,
+            tipo_movimiento="devolucion_proveedor",
+            sentido="SALIDA",
+            cantidad=d["cantidad"],
+            costo_unitario=d["costo_unitario"],
+            costo_total=d["subtotal"],
+            stock_anterior=d["stock_anterior"],
+            stock_nuevo=d["stock_nuevo"],
+            documento_tipo="DEVOLUCION_COMPRA",
+            documento_id=dev_comp_id,
+            documento_numero=numero_devolucion,
+            motivo=f"Devolución de Compra #{numero_devolucion}: {motivo}",
+            usuario_id=usuario_id,
+            documento_linea_id=dcd_id
+        )
+
+    return {
+        "success": True,
+        "devolucion_id": dev_comp_id,
+        "numero_devolucion": numero_devolucion,
+        "total_usd": total_usd,
+        "total_ves": total_ves,
+        "monto_descontado_cxp": monto_descontado_cxp,
+        "monto_saldo_favor": monto_saldo_favor,
+        "items_afectados": detalles_procesados,
+        "fecha": fecha_emision
+    }
+
+
+def anular_devolucion_compra(cursor, devolucion_compra_id, motivo="Anulación de devolución", usuario_id=1):
+    """
+    Anula atómicamente una devolución de compra:
+    1. Verifica existencia y estado activo.
+    2. Reintegra las existencias físicas al inventario (stock_nuevo = stock_anterior + cantidad).
+    3. Registra en inventario_movimientos: tipo_movimiento='compra', sentido='ENTRADA'.
+    4. Restablece la deuda en Cuentas por Pagar (CxP).
+    5. Marca la devolución de compra como 'anulada'.
+    """
+    cursor.execute("SELECT * FROM devoluciones_compras WHERE id = ?", (devolucion_compra_id,))
+    dev_row = cursor.fetchone()
+    if not dev_row:
+        raise ValueError(f"Devolución de compra ID {devolucion_compra_id} no encontrada.")
+    dev = dict(dev_row)
+    if dev.get("estado") == "anulada":
+        raise ValueError(f"La devolución #{dev.get('numero_devolucion')} ya se encuentra anulada.")
+
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # 1. Obtener detalles
+    cursor.execute("SELECT * FROM devolucion_compra_detalles WHERE devolucion_compra_id = ?", (devolucion_compra_id,))
+    detalles = [dict(r) for r in cursor.fetchall()]
+
+    # 2. Reingresar existencias al almacén (+)
+    for d in detalles:
+        p_id = d["producto_id"]
+        cant = float(d["cantidad"])
+        cursor.execute("SELECT stock FROM productos WHERE id = ?", (p_id,))
+        p_cur = cursor.fetchone()
+        stk_ant = float(p_cur[0] or 0.0) if p_cur else 0.0
+        stk_nuevo = round(stk_ant + cant, 4)
+
+        cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (stk_nuevo, p_id))
+
+        registrar_movimiento_inventario(
+            cursor=cursor,
+            producto_id=p_id,
+            fecha=fecha_hoy,
+            tipo_movimiento="compra",
+            sentido="ENTRADA",
+            cantidad=cant,
+            costo_unitario=d["costo_unitario"],
+            costo_total=d["subtotal"],
+            stock_anterior=stk_ant,
+            stock_nuevo=stk_nuevo,
+            documento_tipo="DEVOLUCION_COMPRA",
+            documento_id=devolucion_compra_id,
+            documento_numero=dev.get("numero_devolucion"),
+            motivo=f"Reversión / Anulación de Devolución de Compra #{dev.get('numero_devolucion')}: {motivo}",
+            usuario_id=usuario_id,
+            documento_linea_id=d["id"]
+        )
+
+    # 3. Restablecer CxP si se había descontado
+    m_desc = float(dev.get("monto_descontado_cxp") or 0.0)
+    c_id = dev.get("compra_id")
+    if m_desc > 0 and c_id:
+        cursor.execute("SELECT * FROM cuentas_por_pagar WHERE compra_id = ? AND estado != 'anulada'", (c_id,))
+        cxp_row = cursor.fetchone()
+        if cxp_row:
+            cxp = dict(cxp_row)
+            n_saldo = round(float(cxp.get("saldo_pendiente") or 0.0) + m_desc, 2)
+            n_tot = round(float(cxp.get("monto_total") or 0.0) + m_desc, 2)
+            n_est = "parcial" if float(cxp.get("monto_pagado") or 0.0) > 0 else "pendiente"
+            cursor.execute("""
+                UPDATE cuentas_por_pagar
+                SET saldo_pendiente = ?, monto_total = ?, estado = ?
+                WHERE id = ?
+            """, (n_saldo, n_tot, n_est, cxp["id"]))
+
+            cursor.execute("UPDATE compras SET saldo_pendiente = ? WHERE id = ?", (n_saldo, c_id))
+
+    # 4. Marcar como anulada
+    cursor.execute("""
+        UPDATE devoluciones_compras
+        SET estado = 'anulada', motivo_anulacion = ?, fecha_anulacion = ?
+        WHERE id = ?
+    """, (motivo, fecha_hoy, devolucion_compra_id))
+
+    return {
+        "success": True,
+        "devolucion_id": devolucion_compra_id,
+        "numero_devolucion": dev.get("numero_devolucion"),
         "estado": "anulada",
         "fecha_anulacion": fecha_hoy
     }
