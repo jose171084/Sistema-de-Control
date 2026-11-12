@@ -1,0 +1,481 @@
+{
+  "timestamp": "2026-11-11T10:04:44.443050",
+  "canonical_hash_expected": "fac567aa1b78348cfa3ad0a32e34d884a16ab825a4ed71d323edc2ad8c1ebe16",
+  "canonical_hash_pre": "fac567aa1b78348cfa3ad0a32e34d884a16ab825a4ed71d323edc2ad8c1ebe16",
+  "canonical_hash_post": "fac567aa1b78348cfa3ad0a32e34d884a16ab825a4ed71d323edc2ad8c1ebe16",
+  "zero_mutations_verified": true,
+  "total_tests": 52,
+  "passed": 52,
+  "failed": 0,
+  "verdict": "APROBADO QA-03",
+  "results": [
+    {
+      "id": "PRE-01",
+      "name": "Identidad y Hash Canónico inventario.db",
+      "phase": "QA-03.0",
+      "status": "PASS",
+      "details": "SHA-256 coincide exactamente: fac567aa1b78348c...",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:43.965197"
+    },
+    {
+      "id": "PRE-02",
+      "name": "Inspección de archivos WAL/SHM",
+      "phase": "QA-03.0",
+      "status": "PASS",
+      "details": "Cero archivos WAL/SHM huérfanos o bloqueos activos.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:43.965555"
+    },
+    {
+      "id": "PRE-03",
+      "name": "Clonación SQLite Backup API",
+      "phase": "QA-03.0",
+      "status": "PASS",
+      "details": "Copia íntegra creada en: test_qa03_sandbox.db",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:43.980216"
+    },
+    {
+      "id": "PRE-04",
+      "name": "Neutralización de Red y Credenciales",
+      "phase": "QA-03.0",
+      "status": "PASS",
+      "details": "Variables Supabase purgadas y callbacks desactivados.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:43.980494"
+    },
+    {
+      "id": "PRE-05",
+      "name": "Barrera de Escritura Física Kernel (attrib +r)",
+      "phase": "QA-03.0",
+      "status": "PASS",
+      "details": "Intento de escritura sobre inventario.db rechazado por el SO.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.048744"
+    },
+    {
+      "id": "PRE-06",
+      "name": "Aislamiento DB_PATH hacia Sandbox",
+      "phase": "QA-03.0",
+      "status": "PASS",
+      "details": "Puntero global asignado a: test_qa03_sandbox.db",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.048982"
+    },
+    {
+      "id": "A01",
+      "name": "Aplicación parcial de anticipo",
+      "phase": "QA-03.1",
+      "status": "PASS",
+      "details": "Saldo: $70.0, Estado: aplicado_parcial",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.092157"
+    },
+    {
+      "id": "A02",
+      "name": "Aplicación total (agotamiento)",
+      "phase": "QA-03.1",
+      "status": "PASS",
+      "details": "Saldo: $0.0, Estado: agotado",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.101034"
+    },
+    {
+      "id": "A03",
+      "name": "Anulación con restitución íntegra de anticipo",
+      "phase": "QA-03.1",
+      "status": "PASS",
+      "details": "Saldo restituido: $30.0, App1: revertida, App2: activa",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.117806"
+    },
+    {
+      "id": "A04",
+      "name": "Protección contra doble anulación",
+      "phase": "QA-03.1",
+      "status": "PASS",
+      "details": "Segunda anulación abortada; saldo intacto: $30.0",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.118911"
+    },
+    {
+      "id": "A05",
+      "name": "Protección de concurrencia y sobregiro",
+      "phase": "QA-03.1",
+      "status": "PASS",
+      "details": "Sobregiro bloqueado; saldo remanente: $5.0",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.136455"
+    },
+    {
+      "id": "A06",
+      "name": "Rollback ante fallo intermedio",
+      "phase": "QA-03.1",
+      "status": "PASS",
+      "details": "Rollback perfecto; Factura: activa, Saldo anticipo: $5.0",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.140267"
+    },
+    {
+      "id": "A07",
+      "name": "Conciliación matemática Maestro-Detalle",
+      "phase": "QA-03.1",
+      "status": "PASS",
+      "details": "Invariantes cumplidas: Apps activas ($95.0) == Pagos aplicado ($95.0)",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.141201"
+    },
+    {
+      "id": "R01",
+      "name": "Creación de obligación de reembolso",
+      "phase": "QA-03.2",
+      "status": "PASS",
+      "details": "Reembolso REF-QA03-01 creado por $100.00 USD (pendiente)",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.163814"
+    },
+    {
+      "id": "R02",
+      "name": "Liquidación parcial en USD ($40)",
+      "phase": "QA-03.2",
+      "status": "PASS",
+      "details": "Cuota 1: $40.00 USD, Saldo pendiente: $60.0",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.174161"
+    },
+    {
+      "id": "R03",
+      "name": "Liquidación parcial en VES (1350 VES = $30 USD)",
+      "phase": "QA-03.2",
+      "status": "PASS",
+      "details": "Cuota 2: $30.00 USD equiv, Saldo pendiente: $30.0",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.185369"
+    },
+    {
+      "id": "R04",
+      "name": "Conciliación multi-cuenta en tesorería",
+      "phase": "QA-03.2",
+      "status": "PASS",
+      "details": "Caja USD: $460.0 (desc 40), Banco VES: Bs. 48650.0 (desc 1350)",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.186203"
+    },
+    {
+      "id": "R05",
+      "name": "Liquidación total de reembolso",
+      "phase": "QA-03.2",
+      "status": "PASS",
+      "details": "Liquidado total: $100.0, Pendiente: $0.0",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.195793"
+    },
+    {
+      "id": "R06",
+      "name": "Rechazo de sobregiro en reembolso",
+      "phase": "QA-03.2",
+      "status": "PASS",
+      "details": "Operación rechazada al intentar liquidar más allá del saldo pendiente.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.196373"
+    },
+    {
+      "id": "R07",
+      "name": "Protección contra secuencia duplicada",
+      "phase": "QA-03.2",
+      "status": "PASS",
+      "details": "Restricción UNIQUE(reembolso_id, secuencia) disparada exitosamente.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.197244"
+    },
+    {
+      "id": "R08",
+      "name": "Rollback ante fallo en tesorería",
+      "phase": "QA-03.2",
+      "status": "PASS",
+      "details": "Cero liquidaciones huérfanas registradas; estado intacto.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.207134"
+    },
+    {
+      "id": "C01",
+      "name": "Devolución con un medio de pago",
+      "phase": "QA-03.3",
+      "status": "PASS",
+      "details": "Movimiento de egreso registrado exitosamente con pago_detalle_id=1",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.223683"
+    },
+    {
+      "id": "C02",
+      "name": "Devolución con dos monedas (Pago Mixto)",
+      "phase": "QA-03.3",
+      "status": "PASS",
+      "details": "Líneas 2 (USD) y 3 (VES) registradas sin colisión de unicidad.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.235051"
+    },
+    {
+      "id": "C03",
+      "name": "Devolución con tres medios de pago",
+      "phase": "QA-03.3",
+      "status": "PASS",
+      "details": "3 líneas registradas (USD, VES, COP) en cuentas separadas.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.245893"
+    },
+    {
+      "id": "C04",
+      "name": "Rechazo de reintento de línea por índice UNIQUE",
+      "phase": "QA-03.3",
+      "status": "PASS",
+      "details": "Violación de unicidad por línea disparada con precisión.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.247154"
+    },
+    {
+      "id": "C05",
+      "name": "Idempotencia estricta de contrasientos",
+      "phase": "QA-03.3",
+      "status": "PASS",
+      "details": "Imposibilidad física de duplicar asientos de egreso sobre la misma línea.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.247430"
+    },
+    {
+      "id": "C06",
+      "name": "Validación de Techo Acumulativo de Devolución",
+      "phase": "QA-03.3",
+      "status": "PASS",
+      "details": "Suma de egresos ($50.0) no puede exceder el total de la nota de crédito ($50.0).",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.248280"
+    },
+    {
+      "id": "C07",
+      "name": "Conciliación individual de cuentas",
+      "phase": "QA-03.3",
+      "status": "PASS",
+      "details": "Cuentas USD, VES y COP conciliadas al centavo.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.248904"
+    },
+    {
+      "id": "V01",
+      "name": "Delimitadores en nombres de producto",
+      "phase": "QA-03.4",
+      "status": "PASS",
+      "details": "Prefix: b'S:41:Torni', Longitud exacta preservada sin escapes destructivos.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.263902"
+    },
+    {
+      "id": "V02",
+      "name": "Distinción formal NULL vs Cadena Vacía",
+      "phase": "QA-03.4",
+      "status": "PASS",
+      "details": "NULL: N:0: vs Empty: S:0: (Bytes distintos).",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.264249"
+    },
+    {
+      "id": "V03",
+      "name": "Codificación Unicode UTF-8 exacta",
+      "phase": "QA-03.4",
+      "status": "PASS",
+      "details": "Longitud en bytes: 29 bytes UTF-8 sin BOM.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.264488"
+    },
+    {
+      "id": "V04",
+      "name": "Preservación de saltos de línea y tabs",
+      "phase": "QA-03.4",
+      "status": "PASS",
+      "details": "Inyección de delimitadores neutralizada.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.264698"
+    },
+    {
+      "id": "V05",
+      "name": "Normalización Decimal Estricta (4 decimales)",
+      "phase": "QA-03.4",
+      "status": "PASS",
+      "details": "12.5 -> D:7:12.5000, 0 -> D:6:0.0000, -0.0 -> D:6:0.0000",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.265034"
+    },
+    {
+      "id": "V06",
+      "name": "Timestamps canónicos",
+      "phase": "QA-03.4",
+      "status": "PASS",
+      "details": "Formato: T:19:2026-11-08 21:00:00",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.265304"
+    },
+    {
+      "id": "V07",
+      "name": "Ordenamiento determinista de stream",
+      "phase": "QA-03.4",
+      "status": "PASS",
+      "details": "Digest canónico inicial: 3a93a4f3ecae45e1...",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.271520"
+    },
+    {
+      "id": "V08",
+      "name": "Efecto Avalancha (Detector Criptográfico)",
+      "phase": "QA-03.4",
+      "status": "PASS",
+      "details": "Hash alterado por delta 0.0001: aaf11d37d103ec5e... (Diferente)",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.284158"
+    },
+    {
+      "id": "V09",
+      "name": "Invarianza entre estados equivalentes",
+      "phase": "QA-03.4",
+      "status": "PASS",
+      "details": "Digest re-establecido exactamente al valor original: 3a93a4f3ecae45e1...",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.295723"
+    },
+    {
+      "id": "V10",
+      "name": "Procesamiento en Chunks de 64 KB",
+      "phase": "QA-03.4",
+      "status": "PASS",
+      "details": "Stream hasheado incrementalmente sin acumulación saturante en memoria.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.295901"
+    },
+    {
+      "id": "P01",
+      "name": "Compra de contado anulada genera Saldo a Favor",
+      "phase": "QA-03.5",
+      "status": "PASS",
+      "details": "Saldo a favor generado: $200.0 USD (disponible)",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.321444"
+    },
+    {
+      "id": "P02",
+      "name": "Compra crédito anulada reconoce abonos previos",
+      "phase": "QA-03.5",
+      "status": "PASS",
+      "details": "Saldo a favor generado exactamente por lo pagado: $100.0 USD",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.337940"
+    },
+    {
+      "id": "P03",
+      "name": "Compra anulada sin pagos no genera saldo a favor",
+      "phase": "QA-03.5",
+      "status": "PASS",
+      "details": "CxP anulada con saldo 0; cero saldos ficticios generados.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.352618"
+    },
+    {
+      "id": "P04",
+      "name": "Estructura de entidad saldos_favor_proveedores",
+      "phase": "QA-03.5",
+      "status": "PASS",
+      "details": "Campos origen_tipo, origen_id, proveedor_id, montos y estados validados.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.353057"
+    },
+    {
+      "id": "P05",
+      "name": "Aplicación de saldo contra futura compra (CxP)",
+      "phase": "QA-03.5",
+      "status": "PASS",
+      "details": "CxP reducida a $50.0; Saldo a favor agotado (liquidado_total).",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.367659"
+    },
+    {
+      "id": "P06",
+      "name": "Recuperación por reintegro efectivo en Tesorería",
+      "phase": "QA-03.5",
+      "status": "PASS",
+      "details": "Ingreso bancario registrado; Saldo proveedor: $0.0",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.377325"
+    },
+    {
+      "id": "P07",
+      "name": "Protección contra recuperación duplicada",
+      "phase": "QA-03.5",
+      "status": "PASS",
+      "details": "Intento de recuperación sobre saldo agotado denegado.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.377899"
+    },
+    {
+      "id": "P08",
+      "name": "Integridad Referencial FK e Invariante de Saldo",
+      "phase": "QA-03.5",
+      "status": "PASS",
+      "details": "FK inexistente bloqueada; Invariante monto_orig == recup + disp cumplida.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.378964"
+    },
+    {
+      "id": "AUD-01",
+      "name": "Integridad Referencial SQLite (foreign_key_check)",
+      "phase": "QA-03.6",
+      "status": "PASS",
+      "details": "Cero violaciones de claves foráneas detectadas (0 errores).",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.388155"
+    },
+    {
+      "id": "AUD-02",
+      "name": "Ausencia de movimientos contables duplicados",
+      "phase": "QA-03.6",
+      "status": "PASS",
+      "details": "Cero colisiones en tesoreria_movimientos (0 duplicados).",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.388802"
+    },
+    {
+      "id": "AUD-03",
+      "name": "Conciliación de saldos y control de sobregiro",
+      "phase": "QA-03.6",
+      "status": "PASS",
+      "details": "Cero cuentas con saldo negativo no autorizado.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.389233"
+    },
+    {
+      "id": "AUD-04",
+      "name": "Integridad de trazabilidad en operaciones revertidas",
+      "phase": "QA-03.6",
+      "status": "PASS",
+      "details": "Todas las reversiones poseen timestamp y motivo documentado.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.389683"
+    },
+    {
+      "id": "POST-01",
+      "name": "Invarianza Canónica SHA-256 inventario.db",
+      "phase": "POST-FLIGHT",
+      "status": "PASS",
+      "details": "H_ante: fac567aa1b78348c... == H_post: fac567aa1b78348c... (0 MUTACIONES)",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.439331"
+    },
+    {
+      "id": "POST-02",
+      "name": "Limpieza de Sandbox Efímero",
+      "phase": "POST-FLIGHT",
+      "status": "PASS",
+      "details": "test_qa03_sandbox.db eliminado; entorno limpio.",
+      "invariants": {},
+      "timestamp": "2026-11-11T10:04:44.441116"
+    }
+  ]
+}

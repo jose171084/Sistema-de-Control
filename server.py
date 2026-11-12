@@ -16,6 +16,9 @@ import base64
 import time
 import re
 import shutil
+import uuid
+import email.parser
+import email.policy
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import database
@@ -162,10 +165,14 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             self.handle_api_get(path, query)
             return
 
-        # Archivos estáticos o subidos
+        # Archivos estáticos o subidos con protección anti-Path Traversal estricta
         if path.startswith("/uploads/"):
-            rel_path = path[len("/uploads/"):]
-            file_path = os.path.join(UPLOADS_DIR, rel_path)
+            rel_path = urllib.parse.unquote(path[len("/uploads/"):])
+            safe_base = os.path.abspath(UPLOADS_DIR)
+            file_path = os.path.abspath(os.path.join(safe_base, rel_path))
+            if not file_path.startswith(safe_base + os.sep) and file_path != safe_base:
+                self.send_error_json("Acceso denegado: Path traversal detectado", 403)
+                return
             self.serve_file(file_path)
             return
 
@@ -2453,84 +2460,97 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
     # CONTROLADORES DE LA API (POST)
     # ==========================================
     def handle_api_post(self, path):
+        if path == "/api/config":
+            self.handle_save_config(path)
+            return
+
         body = self.parse_body_json()
         if body is None:
             self.send_error_json("Formato JSON inválido", 400)
+            return
+
+        # 0. Mantenimiento y Gestión de Base de Datos para Beta Tester (Ejecutado sin bloqueo de conexión SQLite)
+        if path == "/api/database/clean-transactions":
+            confirmacion = (body.get("confirmacion") or "").strip()
+            if confirmacion != "CONFIRMAR_BORRADO_TOTAL_AUTORIZADO":
+                self.send_error_json(
+                    "Operación de alta seguridad bloqueada: Se requiere confirmacion='CONFIRMAR_BORRADO_TOTAL_AUTORIZADO' para prevenir borrado accidental de transacciones.",
+                    403
+                )
+                return
+            try:
+                limpiar_transacciones_db(confirmacion)
+                self.send_json({
+                    "success": True,
+                    "message": "Datos de prueba eliminados correctamente. Facturas, compras y deudas en 0. Stock reiniciado."
+                })
+            except Exception as e:
+                self.send_error_json(f"Error al limpiar transacciones: {str(e)}", 500)
+            return
+
+        elif path == "/api/database/factory-reset":
+            confirmacion = (body.get("confirmacion") or "").strip()
+            if confirmacion not in ["CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO", "CONFIRMAR_BORRADO_TOTAL_AUTORIZADO"]:
+                self.send_error_json(
+                    "Operación de alta seguridad bloqueada: Se requiere confirmacion='CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO'.",
+                    403
+                )
+                return
+            try:
+                restablecer_fabrica_db(confirmacion)
+                self.send_json({
+                    "success": True,
+                    "message": "Base de datos restablecida a valores de fábrica limpios para el Beta Tester."
+                })
+            except Exception as e:
+                self.send_error_json(f"Error al restablecer base de datos: {str(e)}", 500)
+            return
+
+        elif path == "/api/database/restore":
+            db_b64 = body.get("file_base64")
+            if not db_b64:
+                self.send_error_json("Falta file_base64 en la solicitud", 400)
+                return
+            try:
+                db_bytes = base64.b64decode(db_b64)
+                if len(db_bytes) < 100 or not db_bytes.startswith(b"SQLite format 3\x00"):
+                    self.send_error_json("El archivo subido no es una base de datos SQLite válida", 400)
+                    return
+                
+                backup_path = os.path.join(BASE_DIR, "inventario_pre_restore.db")
+                if os.path.exists(DB_PATH):
+                    shutil.copy2(DB_PATH, backup_path)
+                
+                with open(DB_PATH, "wb") as f:
+                    f.write(db_bytes)
+                
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": "Base de datos restaurada exitosamente."
+                })
+                return
+            except Exception as e:
+                self.send_error_json(f"Error al restaurar archivo: {str(e)}", 500)
+                return
+
+        elif path == "/api/database/sync-now":
+            try:
+                ok = sync_to_supabase_storage()
+                self.send_json({
+                    "success": ok,
+                    "message": "Sincronización manual con Supabase completada." if ok else "No se pudo sincronizar con Supabase (verifique credenciales)."
+                })
+            except Exception as e:
+                self.send_error_json(f"Error al sincronizar con Supabase: {str(e)}", 500)
             return
 
         conn = get_connection()
         cursor = conn.cursor()
 
         try:
-            # 0. Mantenimiento y Gestión de Base de Datos para Beta Tester (Protegido con Frases de Seguridad)
-            if path == "/api/database/clean-transactions":
-                confirmacion = (body.get("confirmacion") or "").strip()
-                if confirmacion != "CONFIRMAR_BORRADO_TOTAL_AUTORIZADO":
-                    self.send_error_json(
-                        "Operación de alta seguridad bloqueada: Se requiere confirmacion='CONFIRMAR_BORRADO_TOTAL_AUTORIZADO' para prevenir borrado accidental de transacciones.",
-                        403
-                    )
-                    return
-                limpiar_transacciones_db(confirmacion)
-                self.send_json({
-                    "success": True,
-                    "message": "Datos de prueba eliminados correctamente. Facturas, compras y deudas en 0. Stock reiniciado."
-                })
-                return
-
-            elif path == "/api/database/factory-reset":
-                confirmacion = (body.get("confirmacion") or "").strip()
-                if confirmacion not in ["CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO", "CONFIRMAR_BORRADO_TOTAL_AUTORIZADO"]:
-                    self.send_error_json(
-                        "Operación de alta seguridad bloqueada: Se requiere confirmacion='CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO'.",
-                        403
-                    )
-                    return
-                restablecer_fabrica_db(confirmacion)
-                self.send_json({
-                    "success": True,
-                    "message": "Base de datos restablecida a valores de fábrica limpios para el Beta Tester."
-                })
-                return
-
-            elif path == "/api/database/restore":
-                db_b64 = body.get("file_base64")
-                if not db_b64:
-                    self.send_error_json("Falta file_base64 en la solicitud", 400)
-                    return
-                try:
-                    db_bytes = base64.b64decode(db_b64)
-                    if len(db_bytes) < 100 or not db_bytes.startswith(b"SQLite format 3\x00"):
-                        self.send_error_json("El archivo subido no es una base de datos SQLite válida", 400)
-                        return
-                    
-                    backup_path = os.path.join(BASE_DIR, "inventario_pre_restore.db")
-                    if os.path.exists(DB_PATH):
-                        shutil.copy2(DB_PATH, backup_path)
-                    
-                    with open(DB_PATH, "wb") as f:
-                        f.write(db_bytes)
-                    
-                    schedule_cloud_sync()
-                    self.send_json({
-                        "success": True,
-                        "message": "Base de datos restaurada exitosamente."
-                    })
-                    return
-                except Exception as e:
-                    self.send_error_json(f"Error al restaurar archivo: {str(e)}", 500)
-                    return
-
-            elif path == "/api/database/sync-now":
-                ok = sync_to_supabase_storage()
-                self.send_json({
-                    "success": ok,
-                    "message": "Sincronización manual con Supabase completada." if ok else "No se pudo sincronizar con Supabase (verifique credenciales)."
-                })
-                return
-
             # 1. Crear Categoría
-            elif path == "/api/categorias":
+            if path == "/api/categorias":
                 nombre = body.get("nombre", "").strip()
                 tipo = body.get("tipo", "").strip().lower()
                 descripcion = body.get("descripcion", "").strip()
@@ -4503,6 +4523,9 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
     # CONTROLADORES DE LA API (PUT)
     # ==========================================
     def handle_api_put(self, path):
+        if path == "/api/config":
+            self.handle_save_config(path)
+            return
         body = self.parse_body_json()
         if body is None:
             self.send_error_json("Formato JSON inválido", 400)
@@ -4681,10 +4704,182 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             self.send_error_json(str(e), 500)
         finally:
             conn.close()
+    # ========================================================
+    # MOTOR MULTI-TENANT DE LOGOTIPOS Y CONFIGURACIÓN (FASE 2)
+    # BLINDAJE DE SEGURIDAD ESTRICTA (NIVEL ROJO)
+    # ========================================================
+    def handle_save_config(self, path):
+        content_type = self.headers.get("Content-Type", "")
+        content_length = int(self.headers.get("Content-Length", 0))
+
+        # 1. Protección contra saturación de memoria / DoS por tamaño de request
+        MAX_REQUEST_BYTES = 5 * 1024 * 1024  # 5MB límite total de la petición
+        if content_length > MAX_REQUEST_BYTES:
+            self.send_error_json("La solicitud supera el tamaño máximo permitido de 5MB.", 413)
+            return
+
+        body_dict = {}
+        uploaded_logo_bytes = None
+        uploaded_logo_filename = None
+        uploaded_logo_ct = None
+
+        if "multipart/form-data" in content_type:
+            try:
+                raw_bytes = self.rfile.read(content_length)
+                # Parsear usando email.parser con headers
+                header_bytes = f"Content-Type: {content_type}\r\n\r\n".encode("utf-8")
+                msg = email.parser.BytesParser(policy=email.policy.default).parsebytes(header_bytes + raw_bytes)
+                for part in msg.iter_parts():
+                    name = part.get_param("name", header="content-disposition")
+                    filename = part.get_filename()
+                    if filename:
+                        uploaded_logo_bytes = part.get_payload(decode=True)
+                        uploaded_logo_filename = filename
+                        uploaded_logo_ct = part.get_content_type()
+                    elif name:
+                        payload = part.get_payload(decode=True)
+                        if payload:
+                            body_dict[name] = payload.decode("utf-8", errors="replace").strip()
+                        else:
+                            body_dict[name] = ""
+            except Exception as e:
+                self.send_error_json(f"Error procesando formulario multipart: {str(e)}", 400)
+                return
+        else:
+            # Soporte compatible para peticiones application/json
+            body_dict = self.parse_body_json()
+            if body_dict is None:
+                self.send_error_json("Formato JSON inválido", 400)
+                return
+
+        # 2. Validación y Blindaje del Archivo de Logotipo
+        new_logo_url = None
+        if uploaded_logo_bytes and len(uploaded_logo_bytes) > 0:
+            # A. Límite de tamaño: Rechazo de archivos > 2MB
+            if len(uploaded_logo_bytes) > 2 * 1024 * 1024:
+                self.send_error_json("El archivo supera el tamaño máximo permitido de 2MB.", 413)
+                return
+
+            # B. Validación de Magic Bytes (Firma Binaria Real - Imposible de burlar renombrando extensiones)
+            safe_ext = None
+            if len(uploaded_logo_bytes) >= 8 and uploaded_logo_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+                safe_ext = ".png"
+            elif len(uploaded_logo_bytes) >= 3 and uploaded_logo_bytes.startswith(b"\xff\xd8\xff"):
+                safe_ext = ".jpg"
+            elif len(uploaded_logo_bytes) >= 12 and uploaded_logo_bytes.startswith(b"RIFF") and uploaded_logo_bytes[8:12] == b"WEBP":
+                safe_ext = ".webp"
+
+            # C. Validación MIME: Rechazar ejecutables, scripts o documentos
+            allowed_mimes = ["image/png", "image/jpeg", "image/jpg", "image/pjpeg", "image/webp"]
+            mime_ok = (uploaded_logo_ct.lower() in allowed_mimes) if uploaded_logo_ct else True
+
+            if not safe_ext or not mime_ok:
+                self.send_error_json(
+                    "Tipo de archivo no permitido. Solo se admiten imágenes válidas PNG, JPG o WEBP.",
+                    415
+                )
+                return
+
+            # D. Sanitización estricta del nombre (UUID / Hash seguro para evitar Path Traversal y sobreescrituras)
+            os.makedirs(UPLOADS_DIR, exist_ok=True)
+            safe_filename = f"logo_empresa_{int(time.time())}_{uuid.uuid4().hex[:8]}{safe_ext}"
+            file_dest = os.path.join(UPLOADS_DIR, safe_filename)
+
+            try:
+                with open(file_dest, "wb") as f_out:
+                    f_out.write(uploaded_logo_bytes)
+                new_logo_url = f"/uploads/{safe_filename}"
+            except Exception as e:
+                self.send_error_json(f"Error escribiendo archivo en disco: {str(e)}", 500)
+                return
+
+        # 3. Persistencia Atómica en SQLite
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
+            nombre = body_dict.get("nombre_negocio")
+            doc_fiscal = body_dict.get("documento_fiscal")
+            tel = body_dict.get("telefono")
+            direc = body_dict.get("direccion")
+            iva = float(body_dict.get("iva_porcentaje", 16.0)) if body_dict.get("iva_porcentaje") else 16.0
+            t_ves = float(body_dict.get("tasa_ves", 45.0)) if body_dict.get("tasa_ves") else 45.0
+            t_cop = float(body_dict.get("tasa_cop", 4100.0)) if body_dict.get("tasa_cop") else 4100.0
+            auto_sync = int(body_dict.get("sincronizacion_tasas_auto", 1)) if "sincronizacion_tasas_auto" in body_dict else None
+            quitar_logo = body_dict.get("quitar_logo") == "1"
+
+            if quitar_logo:
+                new_logo_url = None
+                if auto_sync is not None:
+                    cursor.execute("""
+                        UPDATE configuracion 
+                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?,
+                            logo_url = NULL
+                        WHERE id = 1
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync))
+                else:
+                    cursor.execute("""
+                        UPDATE configuracion 
+                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?,
+                            logo_url = NULL
+                        WHERE id = 1
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop))
+            elif new_logo_url:
+                if auto_sync is not None:
+                    cursor.execute("""
+                        UPDATE configuracion 
+                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?,
+                            logo_url = ?
+                        WHERE id = 1
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync, new_logo_url))
+                else:
+                    cursor.execute("""
+                        UPDATE configuracion 
+                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?,
+                            logo_url = ?
+                        WHERE id = 1
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, new_logo_url))
+            else:
+                if auto_sync is not None:
+                    cursor.execute("""
+                        UPDATE configuracion 
+                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?
+                        WHERE id = 1
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync))
+                else:
+                    cursor.execute("""
+                        UPDATE configuracion 
+                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?
+                        WHERE id = 1
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop))
+
+            conn.commit()
+            schedule_cloud_sync()
+
+            cursor.execute("SELECT logo_url FROM configuracion WHERE id = 1")
+            cur_row = cursor.fetchone()
+            current_logo_url = cur_row[0] if cur_row else None
+
+            self.send_json({
+                "success": True,
+                "message": "Configuración y logotipo actualizados correctamente",
+                "logo_url": current_logo_url
+            })
+        except Exception as e:
+            conn.rollback()
+            self.send_error_json(f"Error al guardar configuración: {str(e)}", 500)
 
 
 import threading
 import webbrowser
+
+
+
 
 def is_server_responding(port):
     try:
@@ -4801,3 +4996,151 @@ def run_server():
 
 if __name__ == "__main__":
     run_server()
+
+
+    # ========================================================
+    # MOTOR MULTI-TENANT DE LOGOTIPOS Y CONFIGURACIÓN (FASE 2)
+    # BLINDAJE DE SEGURIDAD ESTRICTA (NIVEL ROJO)
+    # ========================================================
+    def handle_save_config(self, path):
+        content_type = self.headers.get("Content-Type", "")
+        content_length = int(self.headers.get("Content-Length", 0))
+
+        # 1. Protección contra saturación de memoria / DoS por tamaño de request
+        MAX_REQUEST_BYTES = 5 * 1024 * 1024  # 5MB límite total de la petición
+        if content_length > MAX_REQUEST_BYTES:
+            self.send_error_json("La solicitud supera el tamaño máximo permitido de 5MB.", 413)
+            return
+
+        body_dict = {}
+        uploaded_logo_bytes = None
+        uploaded_logo_filename = None
+        uploaded_logo_ct = None
+
+        if "multipart/form-data" in content_type:
+            try:
+                raw_bytes = self.rfile.read(content_length)
+                # Parsear usando email.parser con headers
+                header_bytes = f"Content-Type: {content_type}\r\n\r\n".encode("utf-8")
+                msg = email.parser.BytesParser(policy=email.policy.default).parsebytes(header_bytes + raw_bytes)
+                for part in msg.iter_parts():
+                    name = part.get_param("name", header="content-disposition")
+                    filename = part.get_filename()
+                    if filename:
+                        uploaded_logo_bytes = part.get_payload(decode=True)
+                        uploaded_logo_filename = filename
+                        uploaded_logo_ct = part.get_content_type()
+                    elif name:
+                        body_dict[name] = part.get_payload(decode=True).decode("utf-8", errors="replace").strip()
+            except Exception as e:
+                self.send_error_json(f"Error procesando formulario multipart: {str(e)}", 400)
+                return
+        else:
+            # Soporte compatible para peticiones application/json
+            body_dict = self.parse_body_json()
+            if body_dict is None:
+                self.send_error_json("Formato JSON inválido", 400)
+                return
+
+        # 2. Validación y Blindaje del Archivo de Logotipo
+        new_logo_url = None
+        if uploaded_logo_bytes and len(uploaded_logo_bytes) > 0:
+            # A. Límite de tamaño: Rechazo de archivos > 2MB
+            if len(uploaded_logo_bytes) > 2 * 1024 * 1024:
+                self.send_error_json("El archivo supera el tamaño máximo permitido de 2MB.", 413)
+                return
+
+            # B. Validación de Magic Bytes (Firma Binaria Real - Imposible de burlar renombrando extensiones)
+            safe_ext = None
+            if len(uploaded_logo_bytes) >= 8 and uploaded_logo_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+                safe_ext = ".png"
+            elif len(uploaded_logo_bytes) >= 3 and uploaded_logo_bytes.startswith(b"\xff\xd8\xff"):
+                safe_ext = ".jpg"
+            elif len(uploaded_logo_bytes) >= 12 and uploaded_logo_bytes.startswith(b"RIFF") and uploaded_logo_bytes[8:12] == b"WEBP":
+                safe_ext = ".webp"
+
+            # C. Validación MIME: Rechazar ejecutables, scripts o documentos
+            allowed_mimes = ["image/png", "image/jpeg", "image/jpg", "image/pjpeg", "image/webp"]
+            mime_ok = (uploaded_logo_ct.lower() in allowed_mimes) if uploaded_logo_ct else True
+
+            if not safe_ext or not mime_ok:
+                self.send_error_json(
+                    "Tipo de archivo no permitido. Solo se admiten imágenes válidas PNG, JPG o WEBP.",
+                    415
+                )
+                return
+
+            # D. Sanitización estricta del nombre (UUID / Hash seguro para evitar Path Traversal y sobreescrituras)
+            os.makedirs(UPLOADS_DIR, exist_ok=True)
+            safe_filename = f"logo_empresa_{int(time.time())}_{uuid.uuid4().hex[:8]}{safe_ext}"
+            file_dest = os.path.join(UPLOADS_DIR, safe_filename)
+
+            try:
+                with open(file_dest, "wb") as f_out:
+                    f_out.write(uploaded_logo_bytes)
+                new_logo_url = f"/uploads/{safe_filename}"
+            except Exception as e:
+                self.send_error_json(f"Error escribiendo archivo en disco: {str(e)}", 500)
+                return
+
+        # 3. Persistencia Atómica en SQLite
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
+            nombre = body_dict.get("nombre_negocio")
+            doc_fiscal = body_dict.get("documento_fiscal")
+            tel = body_dict.get("telefono")
+            direc = body_dict.get("direccion")
+            iva = float(body_dict.get("iva_porcentaje", 16.0)) if body_dict.get("iva_porcentaje") else 16.0
+            t_ves = float(body_dict.get("tasa_ves", 45.0)) if body_dict.get("tasa_ves") else 45.0
+            t_cop = float(body_dict.get("tasa_cop", 4100.0)) if body_dict.get("tasa_cop") else 4100.0
+            auto_sync = int(body_dict.get("sincronizacion_tasas_auto", 1)) if "sincronizacion_tasas_auto" in body_dict else None
+
+            if new_logo_url:
+                if auto_sync is not None:
+                    cursor.execute("""
+                        UPDATE configuracion 
+                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?,
+                            logo_url = ?
+                        WHERE id = 1
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync, new_logo_url))
+                else:
+                    cursor.execute("""
+                        UPDATE configuracion 
+                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?,
+                            logo_url = ?
+                        WHERE id = 1
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, new_logo_url))
+            else:
+                if auto_sync is not None:
+                    cursor.execute("""
+                        UPDATE configuracion 
+                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?
+                        WHERE id = 1
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync))
+                else:
+                    cursor.execute("""
+                        UPDATE configuracion 
+                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?
+                        WHERE id = 1
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop))
+
+            conn.commit()
+            schedule_cloud_sync()
+
+            cursor.execute("SELECT logo_url FROM configuracion WHERE id = 1")
+            cur_row = cursor.fetchone()
+            current_logo_url = cur_row[0] if cur_row else new_logo_url
+
+            self.send_json({
+                "success": True,
+                "message": "Configuración y logotipo actualizados correctamente",
+                "logo_url": current_logo_url
+            })
+        except Exception as e:
+            conn.rollback()
+            self.send_error_json(f"Error al guardar configuración: {str(e)}", 500)

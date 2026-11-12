@@ -3,37 +3,80 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sistema de Control de Inventario y Facturación Multimoneda</title>
+  <title>TAVO CLOUD - Business Management System</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter (TAVO CLOUD Typography) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- TAVO CLOUD Enterprise Tailwind Theme Configuration -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+          },
+          colors: {
+            teal: {
+              50: '#f0f7ff',
+              100: '#e0effe',
+              200: '#bae0fd',
+              300: '#7cc5fb',
+              400: '#38a5f8',
+              500: '#087FE8', /* Azul Eléctrico TAVO CLOUD */
+              600: '#0755C9', /* Azul Corporativo TAVO CLOUD */
+              700: '#0542a1',
+              800: '#083782',
+              900: '#071B49', /* Azul Marino Profundo TAVO CLOUD */
+            },
+            slate: {
+              50: '#F5F8FC', /* Fondo base Cloud Ice TAVO CLOUD */
+            },
+            tavo: {
+              navy: '#071B49',
+              primary: '#0755C9',
+              electric: '#087FE8',
+              cyan: '#00C6E8',
+              ice: '#F5F8FC',
+              surface: '#FFFFFF',
+            }
+          }
+        }
+      }
+    };
+  </script>
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <!-- Estilos Custom Soft UI y Tematización Dinámica -->
-  <link rel="stylesheet" href="styles.css?v=3.0.0">
+  <link rel="stylesheet" href="styles.css?v=2.0.0">
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans min-h-screen antialiased overflow-x-hidden md:flex selection:bg-teal-100 selection:text-teal-900">
 
   <!-- ========================================================
        BARRA LATERAL IZQUIERDA VERTICAL (SIDEBAR SOFT UI FRESCO)
        ======================================================== -->
-  <aside id="appSidebar" class="fixed inset-y-0 left-0 z-50 w-72 max-w-[82vw] bg-white text-slate-800 flex flex-col h-full -translate-x-full transition-transform duration-300 md:translate-x-0 md:static md:sticky md:top-0 md:h-screen md:w-64 md:min-w-[16rem] md:shrink-0 md:z-40 border-r border-slate-200/80 shadow-xl md:shadow-none overflow-hidden">
+  <aside id="appSidebar" class="fixed inset-y-0 left-0 z-50 w-72 max-w-[82vw] bg-[#071B49] text-slate-100 flex flex-col h-full -translate-x-full transition-transform duration-300 md:translate-x-0 md:static md:sticky md:top-0 md:h-screen md:w-64 md:min-w-[16rem] md:shrink-0 md:z-40 border-r border-white/10 shadow-2xl md:shadow-none overflow-hidden">
     
     <!-- Encabezado / Marca en Sidebar -->
-    <div class="p-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white/50 backdrop-blur-xs">
+    <div class="p-4 border-b border-white/10 flex items-center justify-between shrink-0 bg-white/5 backdrop-blur-xs">
       <div class="flex items-center space-x-3 cursor-pointer group" onclick="navigate('dashboard')">
-        <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-teal-600 to-teal-400 text-white flex items-center justify-center shadow-md shadow-teal-500/25 group-hover:scale-105 transition-transform duration-200 shrink-0">
-          <i class="fa-solid fa-boxes-stacked text-lg"></i>
+        <!-- Logo / Isotipo TAVO CLOUD & Placeholder Multi-Tenant -->
+        <img id="businessLogoPlaceholder" src="" alt="Logo" class="hidden h-10 w-auto max-w-[140px] object-contain rounded-lg shrink-0">
+        <div id="defaultBrandIcon" class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#0755C9] to-[#00C6E8] text-white flex items-center justify-center shadow-lg shadow-[#0755C9]/30 group-hover:scale-105 transition-transform duration-200 shrink-0">
+          <i class="fa-solid fa-cloud text-lg"></i>
         </div>
         <div class="min-w-0">
-          <h1 class="font-extrabold text-sm text-slate-800 leading-tight tracking-tight truncate" id="sidebarBusinessName" data-label-key="titulo_app">Mi Negocio</h1>
+          <h1 class="font-extrabold text-sm text-white leading-tight tracking-tight truncate" id="sidebarBusinessName" data-label-key="titulo_app">TAVO CLOUD</h1>
           <div class="flex items-center space-x-1.5 mt-0.5">
-            <span class="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse"></span>
-            <p class="text-[11px] font-medium text-teal-600 truncate" id="sidebarSubtitle" data-label-key="subtitulo_app">Control Multimoneda</p>
+            <span class="w-1.5 h-1.5 rounded-full bg-[#00C6E8] animate-pulse"></span>
+            <p class="text-[11px] font-medium text-[#00C6E8] truncate" id="sidebarSubtitle" data-label-key="subtitulo_app">Business Management</p>
           </div>
         </div>
       </div>
       <!-- Botón cerrar para móvil -->
-      <button class="md:hidden text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition" onclick="toggleMobileSidebar()" aria-label="Cerrar Menú">
+      <button class="md:hidden text-slate-300 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition" onclick="toggleMobileSidebar()" aria-label="Cerrar Menú">
         <i class="fa-solid fa-xmark text-lg"></i>
       </button>
     </div>
@@ -42,154 +85,154 @@
     <nav class="flex-1 px-3 py-2 space-y-1 overflow-y-auto" id="sidebarNavList">
       
       <!-- Panel General -->
-      <button onclick="navigate('dashboard')" id="nav-dashboard" class="sidebar-nav-btn active-nav group">
-        <i class="fa-solid fa-chart-pie mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+      <button onclick="navigate('dashboard')" id="nav-dashboard" class="sidebar-nav-btn active-nav group text-slate-100 hover:bg-white/10">
+        <i class="fa-solid fa-chart-pie mr-2.5 text-[#00C6E8] group-hover:text-white transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_dashboard">Dashboard</span>
       </button>
 
       <!-- PRIMER GRUPO: INVENTARIO -->
       <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Inventario</span>
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Inventario</span>
       </div>
-      <button onclick="navigate('categorias')" id="nav-categorias" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-tags mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+      <button onclick="navigate('categorias')" id="nav-categorias" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
+        <i class="fa-solid fa-tags mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_categorias">Categorías</span>
       </button>
-      <button onclick="navigate('productos')" id="nav-productos" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-boxes-stacked mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+      <button onclick="navigate('productos')" id="nav-productos" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
+        <i class="fa-solid fa-boxes-stacked mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_productos">Productos y Servicios</span>
       </button>
 
       <!-- SEGUNDO GRUPO: CLIENTES Y VENTAS -->
       <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Clientes y Ventas</span>
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Clientes y Ventas</span>
       </div>
-      <button onclick="navigate('clientes')" id="nav-clientes" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-users mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+      <button onclick="navigate('clientes')" id="nav-clientes" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
+        <i class="fa-solid fa-users mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_clientes">Clientes</span>
       </button>
-      <button onclick="navigate('facturacion')" id="nav-facturacion" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-file-invoice-dollar mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+      <button onclick="navigate('facturacion')" id="nav-facturacion" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
+        <i class="fa-solid fa-file-invoice-dollar mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_facturacion">Facturas</span>
       </button>
-      <button onclick="navigate('devoluciones')" id="nav-devoluciones" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-arrow-rotate-left mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+      <button onclick="navigate('devoluciones')" id="nav-devoluciones" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
+        <i class="fa-solid fa-arrow-rotate-left mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_devoluciones">Devoluciones de Factura</span>
       </button>
-      <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn group" title="Cartera de Créditos y Cobros a Clientes">
-        <i class="fa-solid fa-hand-holding-dollar mr-2.5 text-emerald-600 group-hover:scale-110 transition-transform text-sm w-4 text-center"></i>
+      <button onclick="navigate('cxc')" id="nav-cxc" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10" title="Cartera de Créditos y Cobros a Clientes">
+        <i class="fa-solid fa-hand-holding-dollar mr-2.5 text-emerald-400 group-hover:scale-110 transition-transform text-sm w-4 text-center"></i>
         <span data-label-key="tab_cxc">Cuentas por Cobrar</span>
       </button>
 
       <!-- TERCER GRUPO: PROVEEDORES Y COMPRAS -->
       <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Proveedores y Compras</span>
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Proveedores y Compras</span>
       </div>
-      <button onclick="navigate('proveedores')" id="nav-proveedores" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-building-user mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+      <button onclick="navigate('proveedores')" id="nav-proveedores" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
+        <i class="fa-solid fa-building-user mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_proveedores">Proveedores</span>
       </button>
-      <button onclick="navigate('compras')" id="nav-compras" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-truck-ramp-box mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+      <button onclick="navigate('compras')" id="nav-compras" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
+        <i class="fa-solid fa-truck-ramp-box mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_compras">Compras</span>
       </button>
-      <button onclick="navigate('devolucion-compras')" id="nav-devolucion-compras" class="sidebar-nav-btn group" title="Devolución de mercancía a proveedores y anulación">
-        <i class="fa-solid fa-boxes-packing mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+      <button onclick="navigate('devolucion-compras')" id="nav-devolucion-compras" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10" title="Devolución de mercancía a proveedores y anulación">
+        <i class="fa-solid fa-boxes-packing mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_devolucion_compras">Devolución de Compras</span>
       </button>
-      <button onclick="navigate('cxp')" id="nav-cxp" class="sidebar-nav-btn group" title="Control de Pagos y Deudas con Proveedores">
-        <i class="fa-solid fa-receipt mr-2.5 text-amber-600 group-hover:scale-110 transition-transform text-sm w-4 text-center"></i>
+      <button onclick="navigate('cxp')" id="nav-cxp" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10" title="Control de Pagos y Deudas con Proveedores">
+        <i class="fa-solid fa-receipt mr-2.5 text-amber-400 group-hover:scale-110 transition-transform text-sm w-4 text-center"></i>
         <span data-label-key="tab_cxp">Cuentas por Pagar</span>
       </button>
 
       <!-- CUARTO GRUPO: FINANZAS Y TESORERÍA -->
       <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Finanzas y Tesorería</span>
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Finanzas y Tesorería</span>
       </div>
-      <button onclick="navigate('tesoreria')" id="nav-tesoreria" class="sidebar-nav-btn group">
-        <i class="fa-solid fa-vault mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+      <button onclick="navigate('tesoreria')" id="nav-tesoreria" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
+        <i class="fa-solid fa-vault mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_tesoreria">Caja y Tesorería</span>
       </button>
 
       <!-- QUINTO GRUPO: INFORMES -->
       <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-slate-400">Informes</span>
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Informes</span>
       </div>
-      <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn group role-admin-only">
-        <i class="fa-solid fa-chart-column mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors text-sm w-4 text-center"></i>
+      <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn group role-admin-only text-slate-100 hover:bg-white/10">
+        <i class="fa-solid fa-chart-column mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_reportes">Informes</span>
       </button>
 
       <!-- Botón CFO Copilot IA (Fase 3B) -->
       <div class="pt-2 px-1">
-        <button onclick="abrirModalCfoCopilot()" id="nav-cfo-copilot" class="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/40 text-white font-semibold text-xs shadow-md hover:border-indigo-400 hover:shadow-indigo-500/10 transition-all">
+        <button onclick="abrirModalCfoCopilot()" id="nav-cfo-copilot" class="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-gradient-to-r from-blue-950 via-indigo-950 to-blue-900 border border-blue-500/40 text-white font-semibold text-xs shadow-md hover:border-[#00C6E8] hover:shadow-[#00C6E8]/20 transition-all">
           <span class="flex items-center space-x-2">
             <span class="text-sm">🧠</span>
             <span class="font-bold tracking-tight">CFO Copilot IA</span>
           </span>
-          <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-indigo-500/30 text-indigo-300 border border-indigo-500/40">Audit</span>
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-[#0755C9]/50 text-cyan-300 border border-cyan-400/30">Audit</span>
         </button>
       </div>
     </nav>
 
     <!-- Tarjeta de Tasas de Cambio en Sidebar (Soft UI Mini-Card) -->
-    <div class="sidebar-widget-card p-3 mx-3 my-2 rounded-2xl bg-slate-50/90 border border-slate-200/70 text-xs space-y-2 shadow-2xs transition hover:border-slate-300">
+    <div class="sidebar-widget-card p-3 mx-3 my-2 rounded-2xl bg-white/5 border border-white/10 text-xs space-y-2 shadow-2xs transition hover:border-white/20">
       <div class="flex items-center justify-between cursor-pointer" onclick="openTasasModal()" title="Configurar Tasas y Modo de Sincronización">
-        <span class="font-bold text-slate-700 flex items-center text-[11px] uppercase tracking-wide">
-          <i class="fa-solid fa-arrow-trend-up text-teal-600 mr-1.5 text-xs"></i>
+        <span class="font-bold text-slate-200 flex items-center text-[11px] uppercase tracking-wide">
+          <i class="fa-solid fa-arrow-trend-up text-[#00C6E8] mr-1.5 text-xs"></i>
           Tasas de Cambio
         </span>
-        <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/60 flex items-center" id="badgeTasasOficiales">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1 animate-pulse"></span>Auto
+        <span class="text-[10px] font-semibold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/30 flex items-center" id="badgeTasasOficiales">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse"></span>Auto
         </span>
       </div>
       <div class="space-y-1 cursor-pointer font-mono text-xs" onclick="openTasasModal()" title="Clic para modificar tasas manualmente o cambiar modo">
-        <div class="flex justify-between items-center bg-white px-2.5 py-1.5 rounded-xl border border-slate-200/60 shadow-2xs">
-          <span class="text-slate-500 text-[11px] font-sans flex items-center font-medium">
-            <i class="fa-solid fa-landmark text-amber-500 mr-1.5 text-[11px]"></i>BCV USD:
+        <div class="flex justify-between items-center bg-black/20 px-2.5 py-1.5 rounded-xl border border-white/10 shadow-2xs">
+          <span class="text-slate-300 text-[11px] font-sans flex items-center font-medium">
+            <i class="fa-solid fa-landmark text-amber-400 mr-1.5 text-[11px]"></i>BCV USD:
           </span>
-          <strong class="text-slate-800 font-mono font-bold text-xs" id="sidebarRateVes">45.00 Bs.</strong>
+          <strong class="text-white font-mono font-bold text-xs" id="sidebarRateVes">45.00 Bs.</strong>
         </div>
-        <div class="flex justify-between items-center bg-white px-2.5 py-1.5 rounded-xl border border-slate-200/60 shadow-2xs">
-          <span class="text-slate-500 text-[11px] font-sans flex items-center font-medium">
-            <i class="fa-solid fa-scale-balanced text-teal-600 mr-1.5 text-[11px]"></i>TRM USD:
+        <div class="flex justify-between items-center bg-black/20 px-2.5 py-1.5 rounded-xl border border-white/10 shadow-2xs">
+          <span class="text-slate-300 text-[11px] font-sans flex items-center font-medium">
+            <i class="fa-solid fa-scale-balanced text-[#00C6E8] mr-1.5 text-[11px]"></i>TRM USD:
           </span>
-          <strong class="text-slate-800 font-mono font-bold text-xs" id="sidebarRateCop">4,100 COP</strong>
+          <strong class="text-white font-mono font-bold text-xs" id="sidebarRateCop">4,100 COP</strong>
         </div>
       </div>
-      <div class="grid grid-cols-2 gap-1.5 pt-1 border-t border-slate-200/60">
-        <button onclick="openTasasModal()" class="bg-white hover:bg-slate-100 text-slate-700 font-semibold py-1.5 px-2 rounded-xl text-[10px] flex items-center justify-center border border-slate-200 shadow-2xs transition" title="Modificar tasas manualmente o apagar sincronización">
-          <i class="fa-solid fa-pen-to-square mr-1 text-slate-400"></i>Editar
+      <div class="grid grid-cols-2 gap-1.5 pt-1 border-t border-white/10">
+        <button onclick="openTasasModal()" class="bg-white/10 hover:bg-white/20 text-slate-200 font-semibold py-1.5 px-2 rounded-xl text-[10px] flex items-center justify-center border border-white/10 shadow-2xs transition" title="Modificar tasas manualmente o apagar sincronización">
+          <i class="fa-solid fa-pen-to-square mr-1 text-slate-300"></i>Editar
         </button>
-        <button onclick="sincronizarTasasOficiales()" id="btnSyncTasasSidebar" class="btn-theme-primary text-white font-semibold py-1.5 px-2 rounded-xl text-[10px] flex items-center justify-center shadow-xs transition" title="Consultar BCV y TRM ahora">
+        <button onclick="sincronizarTasasOficiales()" id="btnSyncTasasSidebar" class="bg-[#0755C9] hover:bg-[#087FE8] text-white font-semibold py-1.5 px-2 rounded-xl text-[10px] flex items-center justify-center shadow-xs transition" title="Consultar BCV y TRM ahora">
           <i class="fa-solid fa-rotate mr-1" id="iconSyncTasas"></i>Sincronizar
         </button>
       </div>
     </div>
 
     <!-- Opciones del Sistema en Pie de Sidebar -->
-    <div class="p-2.5 border-t border-slate-100 space-y-1 text-xs shrink-0">
-      <button onclick="openPersonalizacionModal()" class="w-full flex items-center px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition font-medium group">
-        <i class="fa-solid fa-palette mr-2.5 text-teal-600 group-hover:scale-110 transition-transform"></i>
+    <div class="p-2.5 border-t border-white/10 space-y-1 text-xs shrink-0">
+      <button onclick="openPersonalizacionModal()" class="w-full flex items-center px-3 py-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition font-medium group">
+        <i class="fa-solid fa-palette mr-2.5 text-[#00C6E8] group-hover:scale-110 transition-transform"></i>
         <span>Personalizar Marca</span>
       </button>
-      <button onclick="openConfigModal()" class="w-full flex items-center px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition font-medium group role-admin-only">
-        <i class="fa-solid fa-sliders mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors"></i>
+      <button onclick="openConfigModal()" class="w-full flex items-center px-3 py-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition font-medium group role-admin-only">
+        <i class="fa-solid fa-sliders mr-2.5 text-slate-400 group-hover:text-white transition-colors"></i>
         <span>Configuración Negocio</span>
       </button>
-      <button onclick="openDatabaseModal()" id="btnSidebarDb" class="w-full flex items-center px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition font-medium group role-admin-only">
-        <i class="fa-solid fa-database mr-2.5 text-slate-400 group-hover:text-slate-600 transition-colors"></i>
+      <button onclick="openDatabaseModal()" id="btnSidebarDb" class="w-full flex items-center px-3 py-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition font-medium group role-admin-only">
+        <i class="fa-solid fa-database mr-2.5 text-slate-400 group-hover:text-white transition-colors"></i>
         <span>Base de Datos & Cloud</span>
       </button>
-      <button onclick="openAcercaDeModal()" class="w-full flex items-center justify-between px-3 py-2 text-slate-600 hover:text-teal-700 hover:bg-teal-50/60 rounded-xl transition font-medium group border border-slate-200/70 mt-1">
+      <button onclick="openAcercaDeModal()" class="w-full flex items-center justify-between px-3 py-2 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition font-medium group border border-white/10 mt-1">
         <div class="flex items-center">
-          <i class="fa-solid fa-circle-info mr-2.5 text-teal-600 group-hover:scale-110 transition-transform"></i>
-          <span>Acerca del Sistema</span>
+          <i class="fa-solid fa-circle-info mr-2.5 text-[#00C6E8] group-hover:scale-110 transition-transform"></i>
+          <span>Acerca de TAVO CLOUD</span>
         </div>
-        <span class="text-[9px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">v2.5 Pro</span>
+        <span class="text-[9px] font-mono font-bold bg-white/10 text-cyan-300 px-1.5 py-0.5 rounded">v3.0 SaaS</span>
       </button>
       <div class="pt-1 text-center">
-        <p class="text-[9px] text-slate-400 font-mono tracking-tight">© 2026 D-BIAN SYSTEM COMPUTER</p>
+        <p class="text-[9px] text-slate-400 font-mono tracking-tight">TAVO CLOUD © 2026 - D-BIAN SYSTEM COMPUTER</p>
       </div>
     </div>
   </aside>
@@ -4211,17 +4254,17 @@
   <footer class="app-footer no-print border-t border-slate-200/80 bg-white/90 backdrop-blur-xs px-3 sm:px-6 py-3 mt-auto">
     <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-left">
       <div class="flex flex-wrap items-center justify-center sm:justify-start gap-1.5 text-[11px] sm:text-xs text-slate-600">
-        <span class="inline-flex items-center justify-center w-5 h-5 rounded-lg bg-teal-50 text-teal-600 border border-teal-200/70">
-          <i class="fa-solid fa-laptop-code text-[10px]"></i>
+        <span class="inline-flex items-center justify-center w-5 h-5 rounded-lg bg-[#0755C9]/10 text-[#0755C9] border border-[#0755C9]/20">
+          <i class="fa-solid fa-cloud text-[10px]"></i>
         </span>
-        <span class="font-medium">Diseñado y Desarrollado por <strong class="font-extrabold text-slate-900">Ing. Jose Morales</strong></span>
+        <span class="font-bold text-slate-800">TAVO CLOUD &copy; 2026</span>
         <span class="text-slate-300">•</span>
-        <span class="font-extrabold text-teal-700 tracking-wide uppercase">D-BIAN SYSTEM COMPUTER</span>
-        <span class="font-mono font-bold text-[10px] sm:text-[11px] bg-slate-100 text-slate-800 px-2 py-0.5 rounded-md border border-slate-200">V165392830</span>
+        <span class="font-medium text-slate-600">Desarrollado por <strong class="font-extrabold text-[#0755C9] uppercase">D-BIAN SYSTEM COMPUTER</strong></span>
+        <span class="font-mono font-bold text-[10px] sm:text-[11px] bg-slate-100 text-slate-800 px-2 py-0.5 rounded-md border border-slate-200">v3.0 Enterprise SaaS</span>
       </div>
-      <div class="text-[10px] sm:text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
-        <i class="fa-solid fa-shield-halved text-emerald-500"></i>
-        <span>Arquitectura ERP & Facturación Multimoneda</span>
+      <div class="text-[10px] sm:text-[11px] text-slate-500 font-medium flex items-center gap-1.5">
+        <i class="fa-solid fa-shield-halved text-[#087FE8]"></i>
+        <span>Business Management System</span>
       </div>
     </div>
   </footer>
@@ -4688,6 +4731,25 @@
             <label class="block text-xs font-semibold text-slate-600 mb-1">Dirección Fiscal</label>
             <input type="text" id="cfgDireccion" class="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl text-sm">
           </div>
+          <!-- Campo Logotipo Multi-Tenant (Fase 2) -->
+          <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-semibold text-slate-700">Logotipo de la Empresa / Marca</label>
+              <button type="button" id="btnQuitarLogo" onclick="quitarLogoConfig()" class="text-[11px] text-rose-600 hover:text-rose-800 font-semibold hidden">
+                <i class="fa-solid fa-trash mr-1"></i>Quitar logo
+              </button>
+            </div>
+            <div class="flex items-center space-x-3.5">
+              <div id="cfgLogoPreviewContainer" class="w-16 h-16 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-2xs">
+                <img id="cfgLogoPreview" src="" alt="Vista previa logo" class="max-h-full max-w-full object-contain hidden">
+                <i id="cfgLogoPlaceholderIcon" class="fa-solid fa-cloud text-slate-300 text-2xl"></i>
+              </div>
+              <div class="flex-1 space-y-1">
+                <input type="file" id="logoUpload" accept=".png, .jpg, .jpeg, .webp" onchange="previewLogoConfig(event)" class="w-full text-xs text-slate-500 file:mr-2.5 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-[#0755C9] file:text-white hover:file:bg-[#087FE8] cursor-pointer">
+                <p class="text-[10px] text-slate-400">Formatos permitidos: PNG, JPG, JPEG, WEBP (Máx. 2MB). Se imprimirá en comprobantes y encabezados.</p>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="flex justify-between items-center pt-2">
           <button type="button" onclick="closeConfigModal(); openDatabaseModal();" class="text-xs text-emerald-600 hover:text-emerald-700 font-semibold flex items-center">
@@ -5142,6 +5204,7 @@
       <div id="printAreaFactura" class="ticket-container bg-white p-6 border border-slate-200 rounded-xl space-y-4 text-slate-800">
         <!-- Encabezado de Factura -->
         <div class="text-center border-b pb-4 space-y-1">
+          <img id="businessLogoPlaceholderTicket" class="businessLogoImg hidden h-12 w-auto max-w-[160px] mx-auto mb-2 object-contain" src="" alt="Logo">
           <h2 class="text-xl font-bold uppercase tracking-wider" id="ticketBusinessName">Mi Negocio Comercial</h2>
           <p class="text-xs text-slate-600" id="ticketBusinessRif">RIF: J-00000000-0</p>
           <p class="text-xs text-slate-600" id="ticketBusinessPhone">Tel: +58 412 0000000</p>
@@ -5268,6 +5331,7 @@
       <div id="printAreaDevolucion" class="ticket-container bg-white p-6 border border-slate-200 rounded-xl space-y-4 text-slate-800">
         <!-- Encabezado -->
         <div class="text-center border-b pb-4 space-y-1">
+          <img id="businessLogoPlaceholderDev" class="businessLogoImg hidden h-12 w-auto max-w-[160px] mx-auto mb-2 object-contain" src="" alt="Logo">
           <h2 class="text-xl font-bold uppercase tracking-wider" id="ticketDevBusinessName">Mi Negocio Comercial</h2>
           <p class="text-xs text-slate-600" id="ticketDevBusinessRif">RIF: J-00000000-0</p>
           <p class="text-xs text-slate-600" id="ticketDevBusinessPhone">Tel: +58 412 0000000</p>
@@ -6062,18 +6126,18 @@
   <div id="modalAcercaDe" class="modal-overlay hidden" onclick="if(event.target===this)closeAcercaDeModal()">
     <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden transform transition-all animate-fadeIn" onclick="event.stopPropagation()">
       <!-- Encabezado con degradado tecnológico -->
-      <div class="bg-gradient-to-r from-teal-700 via-teal-800 to-slate-900 text-white p-6 relative">
+      <div class="bg-gradient-to-r from-[#071B49] via-[#0755C9] to-[#087FE8] text-white p-6 relative">
         <button onclick="closeAcercaDeModal()" class="absolute top-4 right-4 text-white/80 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition" aria-label="Cerrar">
           <i class="fa-solid fa-xmark text-lg"></i>
         </button>
         <div class="flex items-center space-x-3.5">
-          <div class="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-teal-300 text-2xl shadow-md">
-            <i class="fa-solid fa-boxes-stacked"></i>
+          <div class="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-[#00C6E8] text-2xl shadow-md">
+            <i class="fa-solid fa-cloud"></i>
           </div>
           <div>
-            <span class="text-[10px] font-bold tracking-widest uppercase text-teal-300 bg-teal-900/60 px-2 py-0.5 rounded border border-teal-500/30">Enterprise Edition Pro</span>
-            <h3 class="text-xl font-black text-white mt-1 leading-tight">Sistema de Control & Facturación</h3>
-            <p class="text-xs text-teal-100/90 font-medium">Gestión de Inventario Multimoneda & Motor CPP</p>
+            <span class="text-[10px] font-bold tracking-widest uppercase text-cyan-300 bg-blue-950/60 px-2 py-0.5 rounded border border-cyan-400/30">Enterprise SaaS Edition</span>
+            <h3 class="text-xl font-black text-white mt-1 leading-tight">TAVO CLOUD</h3>
+            <p class="text-xs text-blue-100/90 font-medium">Business Management System & Motor Multimoneda</p>
           </div>
         </div>
       </div>
@@ -6607,7 +6671,7 @@
   <div id="areaImpresionOficial" class="hidden-on-screen" aria-hidden="true"></div>
 
   <!-- Scripts -->
-  <script src="app.js?v=3.2.0"></script>
+  <script src="app.js?v=2.0.0"></script>
 
     <!-- MODAL: DETALLE Y VOUCHER IMPRIMIBLE DE NOTA DE DÉBITO A PROVEEDOR -->
     <div id="modalNotaDebitoCompra" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 hidden">

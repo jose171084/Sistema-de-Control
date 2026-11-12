@@ -15,9 +15,44 @@ DB_BACKUP = os.path.join(BASE_DIR, "inventario_backup_actual.db")
 DB_LIMPIA = os.path.join(BASE_DIR, "inventario_limpia.db")
 
 def crear_base_limpia(destino_path=DB_LIMPIA):
-    # Si existe el archivo destino, eliminarlo para empezar 100% limpio
+    import time
+    # Si existe el archivo destino, intentar eliminarlo; si hay bloqueo transitorio, reintentar o vaciar limpiamente
     if os.path.exists(destino_path):
-        os.remove(destino_path)
+        eliminado = False
+        for intento in range(3):
+            try:
+                os.remove(destino_path)
+                eliminado = True
+                break
+            except Exception:
+                time.sleep(0.15)
+        
+        # Si no se pudo remover por bloqueo activo, vaciar todas las tablas mediante SQLite
+        if not eliminado:
+            try:
+                conn_wipe = sqlite3.connect(destino_path)
+                cur_wipe = conn_wipe.cursor()
+                cur_wipe.execute("PRAGMA foreign_keys = OFF;")
+                # Obtener todas las tablas existentes
+                cur_wipe.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+                tables = [r[0] for r in cur_wipe.fetchall()]
+                for t in tables:
+                    try:
+                        cur_wipe.execute(f"DROP TABLE IF EXISTS \"{t}\";")
+                    except Exception:
+                        pass
+                cur_wipe.execute("SELECT name FROM sqlite_master WHERE type='view';")
+                views = [r[0] for r in cur_wipe.fetchall()]
+                for v in views:
+                    try:
+                        cur_wipe.execute(f"DROP VIEW IF EXISTS \"{v}\";")
+                    except Exception:
+                        pass
+                conn_wipe.commit()
+                conn_wipe.execute("VACUUM;")
+                conn_wipe.close()
+            except Exception:
+                pass
 
     conn = sqlite3.connect(destino_path)
     conn.execute("PRAGMA foreign_keys = ON")
@@ -36,6 +71,7 @@ def crear_base_limpia(destino_path=DB_LIMPIA):
         tasa_cop REAL DEFAULT 4100.00,
         moneda_principal TEXT DEFAULT 'USD',
         tema TEXT,
+        logo_url TEXT DEFAULT NULL,
         labels TEXT,
         tema_config TEXT,
         labels_config TEXT,

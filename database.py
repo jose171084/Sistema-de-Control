@@ -111,6 +111,37 @@ def get_supabase_config():
         return {"url": url, "key": key, "bucket": bucket, "filename": filename}
     return None
 
+def ensure_supabase_bucket_exists(cfg):
+    """Intenta crear el bucket de Supabase Storage automáticamente si no existe (requiere service_role/secret key)."""
+    if not cfg:
+        return False
+    try:
+        url_create = f"{cfg['url']}/storage/v1/bucket"
+        payload = json.dumps({
+            "id": cfg["bucket"],
+            "name": cfg["bucket"],
+            "public": True
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            url_create,
+            data=payload,
+            headers={
+                "apikey": cfg["key"],
+                "Authorization": f"Bearer {cfg['key']}",
+                "Content-Type": "application/json",
+                "User-Agent": "SistemaInventario/1.0"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=8):
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code in (400, 409):  # Ya existe
+            return True
+        return False
+    except Exception:
+        return False
+
 def test_supabase_connection():
     """Realiza una prueba activa de lectura/escritura en Supabase Storage y retorna diagnóstico detallado."""
     cfg = get_supabase_config()
@@ -122,6 +153,8 @@ def test_supabase_connection():
             "error": "Variables de entorno de Supabase no configuradas en Render.",
             "detalle": "Debe agregar SUPABASE_URL y SUPABASE_KEY en la pestaña Environment de Render."
         }
+
+    is_publishable = cfg["key"].startswith("sb_publishable_")
 
     # Probar acceso al bucket u objeto
     url_test = f"{cfg['url']}/storage/v1/bucket/{cfg['bucket']}"
@@ -144,6 +177,18 @@ def test_supabase_connection():
                 "bucket": cfg["bucket"]
             }
     except urllib.error.HTTPError as e:
+        # Si el bucket no existe (404/400), intentar crearlo automáticamente
+        if e.code in (404, 400):
+            if ensure_supabase_bucket_exists(cfg):
+                return {
+                    "ok": True,
+                    "conectado": True,
+                    "success": True,
+                    "mensaje": f"Conexión exitosa a Supabase. El bucket '{cfg['bucket']}' fue creado y vinculado automáticamente.",
+                    "url": cfg["url"],
+                    "bucket": cfg["bucket"]
+                }
+
         if e.code in (401, 403):
             # Probar si el objeto existe directamente con autenticación
             url_obj = f"{cfg['url']}/storage/v1/object/authenticated/{cfg['bucket']}/{cfg['filename']}"
@@ -168,12 +213,17 @@ def test_supabase_connection():
                         "url": cfg["url"],
                         "bucket": cfg["bucket"]
                     }
+
+        detalle_msg = f"Verifique que el bucket '{cfg['bucket']}' esté creado en Supabase Storage."
+        if is_publishable:
+            detalle_msg = "Está utilizando una Publishable Key ('sb_publishable_...'). Para el backend en Render debe configurar una Secret Key (+ New secret key) o la clave service_role (View legacy API keys) y asegurarse de crear el bucket 'database' en Storage."
+
         return {
             "ok": False,
             "conectado": False,
             "success": False,
             "error": f"Error HTTP {e.code}: {e.reason}",
-            "detalle": f"Verifique que el bucket '{cfg['bucket']}' esté creado en Supabase Storage.",
+            "detalle": detalle_msg,
             "url": cfg["url"],
             "bucket": cfg["bucket"]
         }
@@ -1010,9 +1060,14 @@ def init_db():
         tasa_ves REAL DEFAULT 45.00,
         tasa_cop REAL DEFAULT 4100.00,
         moneda_principal TEXT DEFAULT 'USD',
-        sincronizacion_tasas_auto INTEGER DEFAULT 1
+        sincronizacion_tasas_auto INTEGER DEFAULT 1,
+        logo_url TEXT DEFAULT NULL
     )
     """)
+    try:
+        cursor.execute("ALTER TABLE configuracion ADD COLUMN logo_url TEXT DEFAULT NULL")
+    except Exception:
+        pass
 
     # Tabla de Categorías (Clasificadas en Servicios y Productos)
     cursor.execute("""

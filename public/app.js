@@ -2,6 +2,11 @@
  * app.js - Lógica interactiva del Sistema de Inventario y Facturación Multimoneda
  */
 
+// Limpieza de sesión de tema previo para migración visual inmediata a TAVO CLOUD
+try {
+  localStorage.removeItem('sis_tema');
+} catch (e) {}
+
 // Estado global de la aplicación
 const AppState = {
   currentView: 'dashboard',
@@ -76,20 +81,20 @@ const AppState = {
 // CONFIGURACIÓN DE TEMAS Y ETIQUETAS PERSONALIZABLES
 // ========================================================
 const THEME_PRESETS = {
-  zen_fresco: {
-    sidebarBg: '#ffffff',
-    sidebarText: '#1e293b',
-    primaryColor: '#14b8a6',
-    primaryHover: '#0d9488',
-    bgApp: '#f8fafc',
+    zen_fresco: {
+    sidebarBg: '#071B49',
+    sidebarText: '#f1f5f9',
+    primaryColor: '#0755C9',
+    primaryHover: '#087FE8',
+    bgApp: '#F5F8FC',
     headerBg: '#ffffff',
-    btnFactura: '#14b8a6',
-    btnCompra: '#0ea5e9',
+    btnFactura: '#0755C9',
+    btnCompra: '#087FE8',
     btnCxc: '#10b981',
     btnCxp: '#64748b',
-    btnDevoluciones: '#06b6d4',
-    btnKardex: '#14b8a6',
-    btnFiscal: '#0284c7'
+    btnDevoluciones: '#00C6E8',
+    btnKardex: '#0755C9',
+    btnFiscal: '#0755C9'
   },
   indigo: {
     sidebarBg: '#0f172a',
@@ -186,8 +191,8 @@ const THEME_PRESETS = {
 const DEFAULT_THEME = { ...THEME_PRESETS.zen_fresco };
 
 const DEFAULT_LABELS = {
-  titulo_app: "Inventario & Facturación",
-  subtitulo_app: "Control Multimoneda",
+  titulo_app: "TAVO CLOUD",
+  subtitulo_app: "Business Management",
   tab_dashboard: "Dashboard",
   tab_categorias: "Categorías",
   tab_productos: "Productos y Servicios",
@@ -884,6 +889,29 @@ function updateConfigUI() {
   if (hName) hName.textContent = businessName;
   const sName = document.getElementById('sidebarBusinessName');
   if (sName) sName.textContent = businessName;
+  // Hidratación Multi-Tenant del Logotipo de la Empresa
+  const logoPlaceholders = document.querySelectorAll('#businessLogoPlaceholder, .businessLogoImg');
+  const defaultBrandIcon = document.getElementById('defaultBrandIcon');
+
+  if (cfg.logo_url) {
+    logoPlaceholders.forEach(el => {
+      el.src = cfg.logo_url;
+      el.classList.remove('hidden');
+      el.style.display = 'block';
+    });
+    if (defaultBrandIcon) {
+      defaultBrandIcon.classList.add('hidden');
+    }
+  } else {
+    logoPlaceholders.forEach(el => {
+      el.classList.add('hidden');
+      el.style.display = 'none';
+    });
+    if (defaultBrandIcon) {
+      defaultBrandIcon.classList.remove('hidden');
+    }
+  }
+
 
   const docFiscal = document.getElementById('headerDocFiscal');
   if (docFiscal) docFiscal.textContent = cfg.documento_fiscal || '';
@@ -1149,17 +1177,95 @@ async function sincronizarTasasOficialesDesdeModal() {
   }
 }
 
+
+// ========================================================
+// CONTROLADOR DE LOGOTIPO MULTI-TENANT (FASE 2)
+// ========================================================
+let flagQuitarLogo = false;
+
+function previewLogoConfig(event) {
+  const input = event.target;
+  const preview = document.getElementById('cfgLogoPreview');
+  const icon = document.getElementById('cfgLogoPlaceholderIcon');
+  const btnQuitar = document.getElementById('btnQuitarLogo');
+
+  if (input.files && input.files[0]) {
+    const file = input.files[0];
+    if (file.size > 2 * 1024 * 1024) {
+      alert('⚠️ El archivo seleccionado supera el límite de 2MB. Por favor seleccione una imagen más liviana.');
+      input.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      if (preview) {
+        preview.src = e.target.result;
+        preview.classList.remove('hidden');
+        preview.style.display = 'block';
+      }
+      if (icon) icon.classList.add('hidden');
+      if (btnQuitar) btnQuitar.classList.remove('hidden');
+      flagQuitarLogo = false;
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+function quitarLogoConfig() {
+  const input = document.getElementById('logoUpload');
+  const preview = document.getElementById('cfgLogoPreview');
+  const icon = document.getElementById('cfgLogoPlaceholderIcon');
+  const btnQuitar = document.getElementById('btnQuitarLogo');
+
+  if (input) input.value = '';
+  if (preview) {
+    preview.src = '';
+    preview.classList.add('hidden');
+    preview.style.display = 'none';
+  }
+  if (icon) icon.classList.remove('hidden');
+  if (btnQuitar) btnQuitar.classList.add('hidden');
+  flagQuitarLogo = true;
+}
+
 function openConfigModal() {
-  const cfg = AppState.config;
-  document.getElementById('cfgTasaVes').value = cfg.tasa_ves;
-  document.getElementById('cfgTasaCop').value = cfg.tasa_cop;
-  document.getElementById('cfgIva').value = cfg.iva_porcentaje;
-  document.getElementById('cfgNombreNegocio').value = cfg.nombre_negocio;
-  document.getElementById('cfgRif').value = cfg.documento_fiscal;
-  document.getElementById('cfgTelefono').value = cfg.telefono;
-  document.getElementById('cfgDireccion').value = cfg.direccion;
+  const cfg = AppState.config || {};
+  document.getElementById('cfgTasaVes').value = cfg.tasa_ves || 45.0;
+  document.getElementById('cfgTasaCop').value = cfg.tasa_cop || 4100.0;
+  document.getElementById('cfgIva').value = cfg.iva_porcentaje !== undefined ? cfg.iva_porcentaje : 16.0;
+  document.getElementById('cfgNombreNegocio').value = cfg.nombre_negocio || '';
+  document.getElementById('cfgRif').value = cfg.documento_fiscal || '';
+  document.getElementById('cfgTelefono').value = cfg.telefono || '';
+  document.getElementById('cfgDireccion').value = cfg.direccion || '';
   const swAuto = document.getElementById('cfgTasasAutoSwitch');
   if (swAuto) swAuto.checked = cfg.sincronizacion_tasas_auto !== 0;
+
+  // Hidratar vista previa del logo en el modal
+  const preview = document.getElementById('cfgLogoPreview');
+  const icon = document.getElementById('cfgLogoPlaceholderIcon');
+  const btnQuitar = document.getElementById('btnQuitarLogo');
+  const inputLogo = document.getElementById('logoUpload');
+  if (inputLogo) inputLogo.value = '';
+  flagQuitarLogo = false;
+
+  if (cfg.logo_url) {
+    if (preview) {
+      preview.src = cfg.logo_url;
+      preview.classList.remove('hidden');
+      preview.style.display = 'block';
+    }
+    if (icon) icon.classList.add('hidden');
+    if (btnQuitar) btnQuitar.classList.remove('hidden');
+  } else {
+    if (preview) {
+      preview.src = '';
+      preview.classList.add('hidden');
+      preview.style.display = 'none';
+    }
+    if (icon) icon.classList.remove('hidden');
+    if (btnQuitar) btnQuitar.classList.add('hidden');
+  }
+
   document.getElementById('modalConfig').classList.remove('hidden');
 }
 
@@ -1170,32 +1276,60 @@ function closeConfigModal() {
 async function saveConfig(e) {
   e.preventDefault();
   const swAuto = document.getElementById('cfgTasasAutoSwitch');
-  const payload = {
-    tasa_ves: parseFloat(document.getElementById('cfgTasaVes').value),
-    tasa_cop: parseFloat(document.getElementById('cfgTasaCop').value),
-    iva_porcentaje: parseFloat(document.getElementById('cfgIva').value),
-    nombre_negocio: document.getElementById('cfgNombreNegocio').value,
-    documento_fiscal: document.getElementById('cfgRif').value,
-    telefono: document.getElementById('cfgTelefono').value,
-    direccion: document.getElementById('cfgDireccion').value,
-    sincronizacion_tasas_auto: swAuto ? (swAuto.checked ? 1 : 0) : 1
-  };
+  const fileInput = document.getElementById('logoUpload');
+  const logoFile = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+
+  if (logoFile && logoFile.size > 2 * 1024 * 1024) {
+    alert('El archivo de logotipo supera el límite máximo de 2MB. Por favor seleccione un archivo más liviano.');
+    return;
+  }
+
+  // Refactorización a FormData (empaqueta texto + archivo binario en la misma petición)
+  const formData = new FormData();
+  formData.append('tasa_ves', document.getElementById('cfgTasaVes').value);
+  formData.append('tasa_cop', document.getElementById('cfgTasaCop').value);
+  formData.append('iva_porcentaje', document.getElementById('cfgIva').value);
+  formData.append('nombre_negocio', document.getElementById('cfgNombreNegocio').value);
+  formData.append('documento_fiscal', document.getElementById('cfgRif').value);
+  formData.append('telefono', document.getElementById('cfgTelefono').value);
+  formData.append('direccion', document.getElementById('cfgDireccion').value);
+  formData.append('sincronizacion_tasas_auto', swAuto ? (swAuto.checked ? '1' : '0') : '1');
+
+  if (logoFile) {
+    formData.append('logo', logoFile);
+  }
+  if (flagQuitarLogo) {
+    formData.append('quitar_logo', '1');
+  }
 
   try {
     const res = await fetch('/api/config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      method: 'POST',
+      body: formData
     });
-    if (res.ok) {
-      AppState.config = { ...AppState.config, ...payload };
+    const data = await res.json();
+    if (res.ok && data.success) {
+      AppState.config = {
+        ...AppState.config,
+        nombre_negocio: document.getElementById('cfgNombreNegocio').value,
+        documento_fiscal: document.getElementById('cfgRif').value,
+        telefono: document.getElementById('cfgTelefono').value,
+        direccion: document.getElementById('cfgDireccion').value,
+        tasa_ves: parseFloat(document.getElementById('cfgTasaVes').value),
+        tasa_cop: parseFloat(document.getElementById('cfgTasaCop').value),
+        iva_porcentaje: parseFloat(document.getElementById('cfgIva').value),
+        sincronizacion_tasas_auto: swAuto ? (swAuto.checked ? 1 : 0) : 1,
+        logo_url: data.logo_url !== undefined ? data.logo_url : AppState.config.logo_url
+      };
       updateConfigUI();
       closeConfigModal();
       if (AppState.currentView === 'facturacion') updatePosTotals();
-      alert('Configuración y tasas de cambio actualizadas correctamente.');
+      alert('Configuración y logotipo de empresa guardados correctamente.');
+    } else {
+      alert('Error al guardar configuración: ' + (data.message || 'Error desconocido'));
     }
   } catch (err) {
-    alert('Error al guardar configuración: ' + err.message);
+    alert('Error al conectar con el servidor: ' + err.message);
   }
 }
 
@@ -11328,6 +11462,7 @@ const DocumentTemplates = {
     let headerHtml = `
       <div class="doc-ticket-header" style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 6px;">
         ${anuladaHtml}
+        <img id="businessLogoPlaceholder" class="hidden" src="" alt="Logo" style="max-height: 48px; max-width: 140px; margin: 0 auto 4px auto; display: none;">
         <h2 style="margin: 0; font-size: 14px; font-weight: 900; text-transform: uppercase;">${esc(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h2>
         ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 10px;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
         ${cfg.telefono ? `<p style="margin: 2px 0; font-size: 10px;">Tel: ${esc(cfg.telefono)}</p>` : ''}
@@ -11533,6 +11668,7 @@ const DocumentTemplates = {
     let headerHtml = `
       <div class="doc-header">
         <div style="max-width: 60%;">
+          <img id="businessLogoPlaceholder" class="hidden" src="" alt="Logo" style="max-height: 56px; max-width: 180px; margin-bottom: 6px; display: none;">
           <h1 class="doc-company-title">${esc(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h1>
           ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 11px; font-weight: bold; color: #475569;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
           ${cfg.direccion ? `<p style="margin: 2px 0; font-size: 11px; color: #64748b;">${esc(cfg.direccion)}</p>` : ''}
@@ -11752,6 +11888,7 @@ const DocumentTemplates = {
     // 1. Encabezado de la Empresa
     let headerHtml = `
       <div class="doc-ticket-header" style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 6px;">
+        <img id="businessLogoPlaceholder" class="hidden" src="" alt="Logo" style="max-height: 48px; max-width: 140px; margin: 0 auto 4px auto; display: none;">
         <h2 style="margin: 0; font-size: 14px; font-weight: 900; text-transform: uppercase;">${esc(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h2>
         ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 10px;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
         ${cfg.telefono ? `<p style="margin: 2px 0; font-size: 10px;">Tel: ${esc(cfg.telefono)}</p>` : ''}
@@ -11955,6 +12092,7 @@ const DocumentTemplates = {
     let headerHtml = `
       <div class="doc-header">
         <div style="max-width: 60%;">
+          <img id="businessLogoPlaceholder" class="hidden" src="" alt="Logo" style="max-height: 56px; max-width: 180px; margin-bottom: 6px; display: none;">
           <h1 class="doc-company-title">${esc(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h1>
           ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 11px; font-weight: bold; color: #475569;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
           ${cfg.direccion ? `<p style="margin: 2px 0; font-size: 11px; color: #64748b;">${esc(cfg.direccion)}</p>` : ''}
@@ -12175,6 +12313,7 @@ const DocumentTemplates = {
     // 1. Encabezado de la Empresa
     let headerHtml = `
       <div class="doc-ticket-header" style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 6px;">
+        <img id="businessLogoPlaceholder" class="hidden" src="" alt="Logo" style="max-height: 48px; max-width: 140px; margin: 0 auto 4px auto; display: none;">
         <h2 style="margin: 0; font-size: 14px; font-weight: 900; text-transform: uppercase;">${esc(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h2>
         ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 10px;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
         ${cfg.telefono ? `<p style="margin: 2px 0; font-size: 10px;">Tel: ${esc(cfg.telefono)}</p>` : ''}
@@ -12353,6 +12492,7 @@ const DocumentTemplates = {
     let headerHtml = `
       <div class="doc-header">
         <div style="max-width: 58%;">
+          <img id="businessLogoPlaceholder" class="hidden" src="" alt="Logo" style="max-height: 56px; max-width: 180px; margin-bottom: 6px; display: none;">
           <h1 class="doc-company-title">${esc(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h1>
           ${cfg.documento_fiscal ? `<p style="margin: 2px 0; font-size: 11px; font-weight: bold; color: #475569;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
           ${cfg.direccion ? `<p style="margin: 2px 0; font-size: 11px; color: #64748b;">${esc(cfg.direccion)}</p>` : ''}

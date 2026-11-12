@@ -1,24 +1,28 @@
 /* styles.css - Variables de tema, navegación vertical y reglas de impresión */
 
 :root {
-  /* Variables de Color Dinámicas - Sistema Soft UI Fresco, Relajante y Proactivo */
-  --color-primary: #14b8a6;        /* Teal 500 - Calma, claridad, frescura y proactividad */
-  --color-primary-hover: #0d9488;  /* Teal 600 */
-  --color-primary-light: #ccfbf1;  /* Teal 100 */
-  --color-sidebar: #ffffff;        /* Blanco limpio, luminoso y minimalista */
-  --color-sidebar-text: #1e293b;   /* Slate 800 - Textos nítidos y sin fatiga visual */
-  --color-sidebar-active: #14b8a6; /* Teal 500 */
-  --color-bg-app: #f8fafc;         /* Slate 50 - Fondo relajante ultra suave, sin fatiga visual */
+  /* Variables de Color Dinámicas - TAVO CLOUD Enterprise SaaS */
+  --color-primary: #0755C9;        /* Azul Corporativo TAVO CLOUD */
+  --color-primary-hover: #087FE8;  /* Azul Eléctrico TAVO CLOUD */
+  --color-primary-light: #e0effe;  /* Ice Blue tint */
+  --color-sidebar: #071B49;        /* Azul Marino Profundo TAVO CLOUD */
+  --color-sidebar-text: #f1f5f9;   /* Slate 100 - Alto contraste */
+  --color-sidebar-active: #087FE8; /* Azul Eléctrico */
+  --color-bg-app: #F5F8FC;         /* Cloud Ice ultra suave */
   --color-card-bg: #ffffff;
-  --color-text-main: #1e293b;       /* Slate 800 - Sin negro puro */
-  --color-btn-factura: #14b8a6;    /* Teal 500 positivo */
-  --color-btn-compra: #0ea5e9;     /* Sky 500 proactivo */
+  --color-text-main: #0f172a;      /* Slate 900 texto nítido */
+  --color-btn-factura: #0755C9;    /* Azul Corporativo */
+  --color-btn-compra: #087FE8;     /* Azul Eléctrico */
   --color-btn-cxc: #10b981;        /* Emerald 500 */
-  --color-btn-cxp: #64748b;        /* Slate suave */
-  --color-btn-devoluciones: #06b6d4; /* Cian refrescante */
+  --color-btn-cxp: #64748b;        /* Slate */
+  --color-btn-devoluciones: #00C6E8; /* Cian Neon TAVO CLOUD */
   --color-header-bg: #ffffff;
-  --color-btn-kardex: #14b8a6;     /* Teal 500 */
-  --color-btn-fiscal: #0284c7;     /* Sky 600 */
+  --color-btn-kardex: #0755C9;
+  --color-btn-fiscal: #0755C9;
+}
+
+body, html {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
 }
 
 body, body.bg-slate-50, body.bg-slate-100 {
@@ -150,7 +154,7 @@ header.app-header {
 }
 
 .sidebar-nav-btn.active-nav i {
-  color: #ffffff !important;
+  color: #00C6E8 !important;
 }
 
 .sidebar-nav-btn i {
