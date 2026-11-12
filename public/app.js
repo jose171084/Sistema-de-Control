@@ -16652,8 +16652,8 @@ function asegurarHtml2Pdf() {
 
 /**
  * MOTOR OFICIAL DE GENERACIÓN DE CATÁLOGO PDF (ALTA DEFINICIÓN & CERO PÁGINAS EN BLANCO)
- * Utiliza contenedor en capa positiva (z-index positivo) con overlay corporativo de compilación,
- * previniendo que html2canvas capture fondos opacos sobrepuestos.
+ * Utiliza contenedor en FLUJO NORMAL (position: static) dentro de overlay con scroll,
+ * garantizando que html2pdf/html2canvas calcule la altura exacta sin colapsar el contenedor a 0.
  */
 async function generarPdfCatalogoBlob(prods, cfg, opciones) {
   if (!prods || prods.length === 0) {
@@ -16671,46 +16671,47 @@ async function generarPdfCatalogoBlob(prods, cfg, opciones) {
     await asegurarHtml2Pdf();
   }
 
-  // 1. Overlay Corporativo de Compilación (Capa visual superior z-index: 999999)
-  let overlay = document.getElementById('catalogoCompilandoOverlay');
-  if (!overlay) {
-    overlay = document.createElement('div');
-    overlay.id = 'catalogoCompilandoOverlay';
-    overlay.className = 'fixed inset-0 bg-[#071B49]/80 backdrop-blur-xs flex flex-col items-center justify-center text-white';
-    overlay.style.zIndex = '999999';
-    overlay.innerHTML = `
-      <div class="bg-white/10 p-6 rounded-3xl border border-white/20 text-center space-y-3 max-w-sm mx-4 shadow-2xl">
-        <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#0755C9] to-[#00C6E8] text-white flex items-center justify-center mx-auto shadow-lg shadow-blue-500/30">
-          <i class="fa-solid fa-spinner fa-spin text-xl"></i>
-        </div>
-        <h4 class="font-extrabold text-sm text-white">Compilando Catálogo Oficial</h4>
-        <p class="text-[11px] text-slate-300">Generando documento en alta resolución con imágenes y precios en USD...</p>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-  }
+  // 1. Overlay a pantalla completa con fondo corporativo y barra de compilación
+  let overlay = document.getElementById('catalogoCompilacionOverlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'catalogoCompilacionOverlay';
+  overlay.className = 'fixed inset-0 bg-[#071B49]/95 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-4';
+  overlay.style.zIndex = '999999';
 
-  // 2. Contenedor Host en capa positiva z-index: 999998 (por encima del body para evitar captura en blanco)
-  let host = document.getElementById('catalogoPdfRenderHost');
-  if (host) host.remove();
-  host = document.createElement('div');
-  host.id = 'catalogoPdfRenderHost';
-  host.style.position = 'fixed';
-  host.style.top = '0';
-  host.style.left = '0';
-  host.style.width = '794px';
-  host.style.minHeight = '1123px';
-  host.style.backgroundColor = '#ffffff';
-  host.style.zIndex = '999998';
-  host.style.pointerEvents = 'none';
-  host.style.opacity = '1';
+  // Barra de progreso y estado superior
+  const statusBar = document.createElement('div');
+  statusBar.className = 'sticky top-0 bg-[#071B49] py-3 px-6 rounded-2xl border border-white/20 text-white flex items-center space-x-3 mb-4 shadow-2xl shrink-0 z-50';
+  statusBar.innerHTML = `
+    <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#0755C9] to-[#00C6E8] text-white flex items-center justify-center shadow-md shadow-blue-500/30">
+      <i class="fa-solid fa-spinner fa-spin text-sm"></i>
+    </div>
+    <div>
+      <h4 class="font-extrabold text-xs text-white">Compilando Catálogo Oficial en Alta Resolución...</h4>
+      <p class="text-[10px] text-cyan-300">Generando documento PDF oficial con fotos y precios en USD</p>
+    </div>
+  `;
+  overlay.appendChild(statusBar);
+
+  // 2. Contenedor de la hoja en FLUJO NORMAL (position: static, NO fixed)
+  const sheet = document.createElement('div');
+  sheet.id = 'catalogoPdfRenderSheet';
+  sheet.style.position = 'static'; // FLUJO NORMAL OBLIGATORIO PARA EVITAR ALTURA 0 EN HTML2PDF
+  sheet.style.width = '794px';
+  sheet.style.minHeight = '1123px';
+  sheet.style.backgroundColor = '#ffffff';
+  sheet.style.boxShadow = '0 25px 50px -12px rgba(0, 0, 0, 0.5)';
+  sheet.style.borderRadius = '4px';
+  sheet.style.overflow = 'hidden';
+  sheet.style.boxSizing = 'border-box';
 
   const htmlDoc = DocumentTemplates.catalogoProductos(prods, config, opts);
-  host.innerHTML = htmlDoc;
-  document.body.appendChild(host);
+  sheet.innerHTML = htmlDoc;
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
 
-  // Pausa técnica de renderizado DOM y fuentes
-  await new Promise(r => setTimeout(r, 220));
+  // Pausa técnica para renderizado de fuentes e imágenes
+  await new Promise(r => setTimeout(r, 260));
 
   let blob = null;
   try {
@@ -16724,15 +16725,13 @@ async function generarPdfCatalogoBlob(prods, cfg, opciones) {
         logging: false,
         backgroundColor: '#ffffff',
         scrollY: 0,
-        scrollX: 0,
-        windowWidth: 794
+        scrollX: 0
       },
       jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' }
     };
 
-    blob = await html2pdf().set(opt).from(host).outputPdf('blob');
+    blob = await html2pdf().set(opt).from(sheet).outputPdf('blob');
   } finally {
-    if (host && host.parentNode) host.parentNode.removeChild(host);
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
   }
 
@@ -16745,30 +16744,72 @@ async function verPdfEnPantalla() {
     alert('No hay productos que coincidan con los filtros seleccionados.');
     return;
   }
+
+  // ABRIR PESTAÑA SÍNCRONAMENTE EN EL CLIC (PREVIENE BLOQUEO DE POPUPS DEL NAVEGADOR)
+  let targetTab = null;
+  try {
+    targetTab = window.open('about:blank', '_blank');
+    if (targetTab) {
+      targetTab.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Compilando Catálogo Oficial - TAVO CLOUD</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+          <style>
+            body { margin: 0; padding: 0; background: #071B49; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+            .box { text-align: center; background: rgba(255,255,255,0.08); padding: 36px 44px; border-radius: 24px; border: 1px solid rgba(255,255,255,0.15); box-shadow: 0 20px 40px rgba(0,0,0,0.4); max-width: 420px; }
+            .icon { font-size: 36px; color: #00C6E8; margin-bottom: 18px; animation: spin 1.2s linear infinite; }
+            @keyframes spin { 100% { transform: rotate(360deg); } }
+            h2 { margin: 0 0 8px 0; font-size: 17px; font-weight: 800; }
+            p { margin: 0; font-size: 12px; color: #94A3B8; line-height: 1.5; }
+          </style>
+        </head>
+        <body>
+          <div class="box">
+            <div class="icon"><i class="fa-solid fa-spinner"></i></div>
+            <h2>Generando Catálogo Oficial PDF</h2>
+            <p>Compilando documento en alta resolución con imágenes y precios en USD...</p>
+          </div>
+        </body>
+        </html>
+      `);
+      targetTab.document.close();
+    }
+  } catch (e) {
+    console.warn('[Catalogo] Apertura síncrona prevenida:', e);
+  }
+
   const btn = document.getElementById('btnVerPdfPantalla');
   const origText = btn ? btn.innerHTML : '';
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Abriendo...';
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Compilando PDF...';
   }
 
   try {
     const { blob, fileName, htmlDoc } = await generarPdfCatalogoBlob(prods);
-    if (blob && blob.size > 100) {
+
+    if (blob && blob.size > 5000) {
       const blobUrl = URL.createObjectURL(blob);
-      window.open(blobUrl, '_blank');
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+      if (targetTab && !targetTab.closed) {
+        targetTab.location.href = blobUrl;
+      } else {
+        window.open(blobUrl, '_blank');
+      }
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 180000);
     } else {
-      // Fallback a impresión nativa en navegador
-      const opciones = obtenerOpcionesCatalogoActual();
-      DocumentPrinter.print({
-        type: 'letterPortrait',
-        title: fileName.replace('.pdf', ''),
-        html: htmlDoc
-      });
+      if (targetTab && !targetTab.closed) {
+        targetTab.document.body.innerHTML = htmlDoc;
+        targetTab.document.title = fileName.replace('.pdf', '');
+      } else {
+        imprimirCatalogoProductos();
+      }
     }
   } catch (err) {
     console.error('Error al generar PDF en pantalla:', err);
+    if (targetTab && !targetTab.closed) targetTab.close();
     imprimirCatalogoProductos();
   } finally {
     if (btn) {
@@ -16799,24 +16840,24 @@ async function compartirCatalogoPdfWhatsApp() {
   const origText = btn ? btn.innerHTML : '';
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Compilando y Preparando...';
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Compilando PDF...';
   }
 
   try {
     const { blob, fileName, htmlDoc } = await generarPdfCatalogoBlob(prods);
     let pdfFile = null;
-    if (blob) {
+    if (blob && blob.size > 5000) {
       pdfFile = new File([blob], fileName, { type: 'application/pdf' });
     }
 
-    // Copiar mensaje al portapapeles automáticamente
+    // 1. Copiar mensaje al portapapeles automáticamente
     if (navigator.clipboard && navigator.clipboard.writeText) {
       try {
         await navigator.clipboard.writeText(mensajeTexto);
       } catch (eClip) {}
     }
 
-    // DISPOSITIVOS MÓVILES (Android / iOS): Web Share API nativa (adjunta PDF + texto en 1 clic)
+    // 2. DISPOSITIVOS MÓVILES (Android / iOS): Web Share API nativa
     if (pdfFile && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
       try {
         await navigator.share({
@@ -16831,9 +16872,9 @@ async function compartirCatalogoPdfWhatsApp() {
       }
     }
 
-    // ESCRITORIO (Windows / Mac):
-    // 1. Descarga automática del PDF en memoria
-    if (blob) {
+    // 3. ESCRITORIO (Windows / Mac):
+    // Descarga automática inmediata del PDF compilado
+    if (blob && blob.size > 5000) {
       const blobUrl = URL.createObjectURL(blob);
       const dlLink = document.createElement('a');
       dlLink.href = blobUrl;
@@ -16844,13 +16885,13 @@ async function compartirCatalogoPdfWhatsApp() {
       setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
     }
 
-    // 2. Apertura directa de WhatsApp con número y texto precargado mediante endpoint oficial de API
+    // 4. Abrir WhatsApp con el número del cliente y el mensaje precargado en 1 clic
     const waUrl = telNorm
       ? `https://api.whatsapp.com/send?phone=${telNorm}&text=${encodeURIComponent(mensajeTexto)}`
       : `https://api.whatsapp.com/send?text=${encodeURIComponent(mensajeTexto)}`;
     window.open(waUrl, '_blank');
 
-    // 3. Guía visual de asistencia rápida
+    // 5. Mostrar la notificación modal institucional de éxito
     mostrarModalPdfListoWhatsApp(fileName, telNorm);
 
   } catch (err) {
