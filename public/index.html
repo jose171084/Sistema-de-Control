@@ -50,6 +50,8 @@
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <!-- Estilos Custom Soft UI y Tematización Dinámica -->
+  <!-- html2pdf.js para Generación y Exportación Directa de Archivo PDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <link rel="stylesheet" href="styles.css?v=2.0.0">
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans min-h-screen antialiased overflow-x-hidden md:flex selection:bg-teal-100 selection:text-teal-900">
@@ -5195,45 +5197,63 @@
 
       </div>
 
-      <!-- PANEL 2: COMPARTIR POR WHATSAPP -->
+      <!-- PANEL 2: COMPARTIR ARCHIVO PDF POR WHATSAPP -->
       <div id="panelCatalogoWhatsApp" class="space-y-4 hidden">
-        <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 flex items-start space-x-3">
-          <i class="fa-brands fa-whatsapp text-emerald-600 text-2xl mt-0.5"></i>
+        <div class="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-4 flex items-start space-x-3.5">
+          <div class="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-xl shrink-0 shadow-sm">
+            <i class="fa-brands fa-whatsapp"></i>
+          </div>
           <div class="text-xs text-emerald-950">
-            <p class="font-bold">Envío Directo a Clientes por WhatsApp</p>
-            <p class="text-emerald-800 text-[11px] mt-0.5">Selecciona un cliente de tu directorio o escribe su número de teléfono. El sistema redactará un mensaje corporativo con el catálogo listo para enviar.</p>
+            <p class="font-extrabold text-sm">Envío Directo del Archivo PDF a WhatsApp</p>
+            <p class="text-emerald-800 text-[11px] mt-0.5 leading-relaxed">
+              El sistema generará el <strong>archivo PDF oficial</strong> con las fotos, códigos y precios en dólares ordenados por categoría, y lo enviará al número telefónico seleccionado.
+            </p>
           </div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Seleccionar Cliente Registrado:</label>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Seleccionar Cliente del Directorio:</label>
             <select id="catalogoClienteSelect" onchange="seleccionarClienteParaWhatsAppCatalogo(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">
               <option value="">-- Seleccionar cliente... --</option>
             </select>
           </div>
           <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Teléfono WhatsApp Destino:</label>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Teléfono WhatsApp Destino (con código de país):</label>
             <div class="relative">
-              <i class="fa-solid fa-phone absolute left-3 top-2.5 text-slate-400 text-xs"></i>
-              <input type="tel" id="catalogoTelefonoWhatsApp" placeholder="Ej: 584121234567 o +58 412 1234567" 
+              <i class="fa-brands fa-whatsapp absolute left-3 top-2.5 text-emerald-600 text-sm"></i>
+              <input type="tel" id="catalogoTelefonoWhatsApp" onblur="autoNormalizarTelefonoInput(this)" placeholder="Ej: 04121234567 o 584121234567" 
                      class="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            </div>
+            <p class="text-[10px] text-slate-400 mt-1">Conexión automática para números nacionales (0412/0414/0424 se convierte a 58...)</p>
+          </div>
+        </div>
+
+        <!-- TARJETA VISUAL DEL ARCHIVO PDF QUE SE VA A ENVIAR -->
+        <div class="border-2 border-dashed border-emerald-300 bg-emerald-50/40 rounded-2xl p-4 flex items-center justify-between">
+          <div class="flex items-center space-x-3.5">
+            <div class="w-12 h-12 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center text-2xl shadow-sm shrink-0">
+              <i class="fa-solid fa-file-pdf"></i>
+            </div>
+            <div>
+              <div class="flex items-center space-x-2">
+                <span class="font-extrabold text-xs text-slate-900" id="catalogoArchivoPdfNombre">Catalogo_Productos_TAVO_CLOUD.pdf</span>
+                <span id="catalogoModoPdfBadge" class="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">Comercial (Sin Stock)</span>
+              </div>
+              <p class="text-[11px] text-slate-500 mt-0.5">Documento PDF oficial maquetado por categorías con fotografías, códigos y precios en USD.</p>
             </div>
           </div>
         </div>
 
         <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="block text-xs font-semibold text-slate-700">Vista Previa del Mensaje:</label>
-            <button type="button" onclick="copiarTextoCatalogoWhatsApp()" class="text-[11px] text-blue-600 hover:text-blue-800 font-bold flex items-center">
-              <i class="fa-regular fa-copy mr-1"></i>Copiar Texto
-            </button>
-          </div>
-          <textarea id="catalogoMensajeWhatsAppPreview" rows="8" readonly class="w-full bg-slate-900 text-emerald-400 font-mono text-[11px] p-3 rounded-xl border border-slate-700 focus:outline-none leading-relaxed select-all"></textarea>
-          <p class="text-[10px] text-slate-400 mt-1 italic">
-            * Tip Pro: Para enviar el PDF visual a su cliente, genere el PDF con el botón 'Imprimir / Guardar como PDF' y arrástrelo a la conversación de WhatsApp abierta.
-          </p>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Mensaje de Cortesía para el Cliente:</label>
+          <textarea id="catalogoMensajeWhatsAppPreview" rows="2" class="w-full bg-slate-50 text-slate-800 font-sans text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 leading-relaxed"></textarea>
         </div>
+
+        <button type="button" onclick="compartirCatalogoPdfWhatsApp()" id="btnCompartirPdfWhatsApp" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-3 px-4 rounded-xl shadow-md transition flex items-center justify-center space-x-2 text-sm">
+          <i class="fa-brands fa-whatsapp text-lg"></i>
+          <span>Generar y Compartir Archivo PDF en WhatsApp</span>
+        </button>
       </div>
 
       <!-- BOTONES DE ACCIÓN PRINCIPALES -->
@@ -5245,7 +5265,7 @@
           <button type="button" onclick="abrirVistaPreviaCatalogo()" class="w-full sm:w-auto px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center justify-center">
             <i class="fa-regular fa-eye mr-1.5"></i>Vista Previa
           </button>
-          <button type="button" onclick="enviarCatalogoWhatsAppDirecto()" class="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center">
+          <button type="button" onclick="compartirCatalogoPdfWhatsApp()" id="btnEnviarWhatsAppFooter" class="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center">
             <i class="fa-brands fa-whatsapp text-sm mr-1.5"></i>Enviar WhatsApp
           </button>
           <button type="button" onclick="imprimirCatalogoProductos()" class="w-full sm:w-auto px-5 py-2.5 bg-[#071B49] hover:bg-[#0755C9] text-white rounded-xl text-xs font-extrabold shadow-md transition flex items-center justify-center border border-white/10">

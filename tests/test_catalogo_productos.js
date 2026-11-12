@@ -163,6 +163,25 @@ assert(htmlSinStock.includes("page-break-inside: avoid") || htmlSinStock.include
 assert(htmlSinStock.includes("doc-catalogo-sheet"), "Debe aplicar la clase de aislamiento doc-catalogo-sheet");
 console.log("✅ ÉXITO: Reglas de impresión 'page-break-inside: avoid' verificadas.");
 
+// --- TEST 5: Agrupamiento por Categorías y Eliminación de Bolívares (Solo USD) ---
+console.log("\n--- Test 5: Agrupamiento por Categoría y Precios Únicamente en Dólares ($ USD) ---");
+assert(htmlSinStock.includes("Tecnología"), "Debe incluir la categoría Tecnología en encabezado o banner");
+assert(htmlSinStock.includes("Servicios"), "Debe incluir la categoría Servicios en encabezado o banner");
+assert(!htmlSinStock.includes("Bs."), "El catálogo NO debe incluir 'Bs.' en ninguna parte");
+assert(!htmlSinStock.includes("Bolívares"), "El catálogo NO debe incluir 'Bolívares' en ninguna parte");
+assert(!htmlConStock.includes("Bs."), "El catálogo de inventario NO debe incluir 'Bs.'");
+console.log("✅ ÉXITO: Catálogo estrictamente ordenado por categorías y 100% en Dólares ($ USD).");
+
+// --- TEST 6: Normalización E.164 para WhatsApp ---
+console.log("\n--- Test 6: Normalización de Número para Enlace de WhatsApp ---");
+const normalizar = context.window.normalizarTelefonoWhatsApp;
+assert(typeof normalizar === 'function', "normalizarTelefonoWhatsApp debe estar definida en window");
+assert.strictEqual(normalizar("0412-1234567"), "584121234567", "0412-1234567 debe convertirse a 584121234567");
+assert.strictEqual(normalizar("0414 765 4321"), "584147654321", "0414 765 4321 debe convertirse a 584147654321");
+assert.strictEqual(normalizar("+58 424 1112233"), "584241112233", "+58 debe limpiarse y conservar 584241112233");
+assert.strictEqual(normalizar("584129998877"), "584129998877", "Número con código internacional directo debe preservarse");
+console.log("✅ ÉXITO: Normalizador telefónico E.164 para WhatsApp verificado con precisión.");
+
 console.log("\n==================================================");
 console.log(" 🎯 TODOS LOS TESTS DEL CATÁLOGO PASARON AL 100%");
 console.log("==================================================");

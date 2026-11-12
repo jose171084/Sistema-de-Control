@@ -12678,6 +12678,9 @@ const DocumentTemplates = {
   // ========================================================
   // CATÁLOGO CORPORATIVO DE PRODUCTOS (EDITORIAL & ÉLITE)
   // Con condicional estricto de existencias y diseño TAVO CLOUD
+    // ========================================================
+  // CATÁLOGO CORPORATIVO DE PRODUCTOS (EDITORIAL & ÉLITE)
+  // Agrupado y ordenado por categorías, sin bolívares (Solo USD)
   // ========================================================
   catalogoProductos: function(productos, config, opciones) {
     const esc = DocumentPrinter.escape;
@@ -12702,9 +12705,8 @@ const DocumentTemplates = {
       `;
     }
 
-    // 2. Encabezado Institucional
+    // 2. Encabezado Institucional (Sin bolívares, solo USD)
     const hoyStr = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const tasaVes = parseFloat(cfg.tasa_ves || 0);
     const tituloDoc = mostrarStock ? 'CATÁLOGO DE INVENTARIO' : 'CATÁLOGO DE PRODUCTOS';
     const subtituloDoc = mostrarStock ? 'Lista Oficial con Existencias Actuales' : 'Lista Oficial de Precios al Cliente';
 
@@ -12733,14 +12735,13 @@ const DocumentTemplates = {
             ${subtituloDoc}
           </div>
           <div style="font-size: 9.5px; color: #64748B; margin-top: 2px;">
-            Emisión: <strong>${hoyStr}</strong>
-            ${tasaVes > 0 ? ` &bull; Tasa BCV: <strong>$1 = ${tasaVes.toFixed(2)} Bs.</strong>` : ''}
+            Emisión: <strong>${hoyStr}</strong> &bull; Moneda: <strong>Dólares ($ USD)</strong>
           </div>
         </div>
       </div>
     `;
 
-    // 3. Renderizado de Productos (Layout Grid vs Layout List)
+    // 3. Agrupación y Ordenamiento Estricto por Categoría
     let bodyHtml = '';
 
     if (prods.length === 0) {
@@ -12749,149 +12750,190 @@ const DocumentTemplates = {
           No hay productos disponibles para mostrar con los filtros seleccionados.
         </div>
       `;
-    } else if (layout === 'list') {
-      // Vista Lista Ejecutiva
-      let rowsHtml = '';
-      prods.forEach((p, idx) => {
-        const num = idx + 1;
-        const codigo = esc(p.codigo || '—');
-        const nombre = esc(p.nombre || 'Producto');
-        const categoria = esc(p.categoria_nombre || 'General');
-        const precioTotal = parseFloat(p.precio_total || 0).toFixed(2);
-        const precioVes = tasaVes > 0 ? (p.precio_total * tasaVes).toFixed(2) : null;
-        const stock = parseFloat(p.stock || 0);
-
-        // Miniatura
-        const imgMini = p.imagen 
-          ? `<img src="${p.imagen}" alt="${nombre}" style="width: 32px; height: 32px; object-fit: contain; border-radius: 4px; border: 1px solid #E2E8F0; background: #F8FAFC;">`
-          : `<div style="width: 32px; height: 32px; border-radius: 4px; background: #F1F5F9; border: 1px solid #E2E8F0; display: flex; align-items: center; justify-content: center; color: #94A3B8; font-size: 11px;"><i class="fa-solid fa-box"></i></div>`;
-
-        // Columna de stock condicional
-        let stockTd = '';
-        if (mostrarStock) {
-          stockTd = stock > 0
-            ? `<td style="text-align: right; font-weight: 700; color: #047857; padding: 6px 8px;">${stock} unid.</td>`
-            : `<td style="text-align: right; font-weight: 700; color: #B91C1C; padding: 6px 8px;">Agotado</td>`;
-        }
-
-        rowsHtml += `
-          <tr style="break-inside: avoid; page-break-inside: avoid; border-bottom: 1px solid #F1F5F9;">
-            <td style="text-align: center; color: #94A3B8; font-size: 9px; padding: 6px 4px;">${num}</td>
-            <td style="padding: 4px 6px; text-align: center;">${imgMini}</td>
-            <td style="font-family: monospace; font-size: 10px; font-weight: 700; color: #334155; padding: 6px 8px;">${codigo}</td>
-            <td style="padding: 6px 8px;">
-              <strong style="color: #0F172A; font-size: 11px;">${nombre}</strong>
-              ${p.descripcion ? `<div style="font-size: 9px; color: #64748B;">${esc(p.descripcion)}</div>` : ''}
-            </td>
-            <td style="font-size: 10px; color: #64748B; padding: 6px 8px;">${categoria}</td>
-            <td style="text-align: right; font-family: monospace; font-size: 11.5px; font-weight: 800; color: #0755C9; padding: 6px 8px;">
-              $${precioTotal}
-              ${precioVes ? `<div style="font-size: 9px; font-weight: normal; color: #64748B;">≈ ${precioVes} Bs.</div>` : ''}
-            </td>
-            ${stockTd}
-          </tr>
-        `;
+    } else {
+      // Agrupar por categoría
+      const categoriasMap = {};
+      prods.forEach(p => {
+        const cat = (p.categoria_nombre || 'General').trim();
+        if (!categoriasMap[cat]) categoriasMap[cat] = [];
+        categoriasMap[cat].push(p);
       });
 
-      bodyHtml = `
-        <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
-          <thead>
-            <tr style="background: #071B49; color: #FFFFFF; font-size: 10px; text-transform: uppercase;">
-              <th style="padding: 7px 4px; text-align: center; width: 4%;">#</th>
-              <th style="padding: 7px 6px; text-align: center; width: 6%;">Foto</th>
-              <th style="padding: 7px 8px; text-align: left; width: 14%;">Código</th>
-              <th style="padding: 7px 8px; text-align: left; width: 42%;">Producto</th>
-              <th style="padding: 7px 8px; text-align: left; width: 16%;">Categoría</th>
-              <th style="padding: 7px 8px; text-align: right; width: 18%;">Precio ($)</th>
-              ${mostrarStock ? '<th style="padding: 7px 8px; text-align: right; width: 12%;">Existencia</th>' : ''}
+      // Ordenar categorías alfabéticamente
+      const sortedCategories = Object.keys(categoriasMap).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+
+      // Dentro de cada categoría, ordenar productos alfabéticamente
+      sortedCategories.forEach(cat => {
+        categoriasMap[cat].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }));
+      });
+
+      if (layout === 'list') {
+        // Vista Lista Ejecutiva agrupada por categoría
+        let tablesContent = '';
+        sortedCategories.forEach(cat => {
+          const catProds = categoriasMap[cat];
+          let rowsHtml = '';
+          catProds.forEach((p, idx) => {
+            const num = idx + 1;
+            const codigo = esc(p.codigo || '—');
+            const nombre = esc(p.nombre || 'Producto');
+            const precioTotal = parseFloat(p.precio_total || 0).toFixed(2);
+            const stock = parseFloat(p.stock || 0);
+
+            const imgMini = p.imagen 
+              ? `<img src="${p.imagen}" alt="${nombre}" style="width: 32px; height: 32px; object-fit: contain; border-radius: 4px; border: 1px solid #E2E8F0; background: #F8FAFC;">`
+              : `<div style="width: 32px; height: 32px; border-radius: 4px; background: #F1F5F9; border: 1px solid #E2E8F0; display: flex; align-items: center; justify-content: center; color: #94A3B8; font-size: 11px;"><i class="fa-solid fa-box"></i></div>`;
+
+            let stockTd = '';
+            if (mostrarStock) {
+              stockTd = stock > 0
+                ? `<td style="text-align: right; font-weight: 700; color: #047857; padding: 6px 8px;">${stock} unid.</td>`
+                : `<td style="text-align: right; font-weight: 700; color: #B91C1C; padding: 6px 8px;">Agotado</td>`;
+            }
+
+            rowsHtml += `
+              <tr style="break-inside: avoid; page-break-inside: avoid; border-bottom: 1px solid #F1F5F9;">
+                <td style="text-align: center; color: #94A3B8; font-size: 9px; padding: 6px 4px;">${num}</td>
+                <td style="padding: 4px 6px; text-align: center;">${imgMini}</td>
+                <td style="font-family: monospace; font-size: 10px; font-weight: 700; color: #334155; padding: 6px 8px;">${codigo}</td>
+                <td style="padding: 6px 8px;">
+                  <strong style="color: #0F172A; font-size: 11px;">${nombre}</strong>
+                  ${p.descripcion ? `<div style="font-size: 9px; color: #64748B;">${esc(p.descripcion)}</div>` : ''}
+                </td>
+                <td style="text-align: right; font-family: monospace; font-size: 12px; font-weight: 900; color: #0755C9; padding: 6px 8px;">
+                  $${precioTotal} USD
+                </td>
+                ${stockTd}
+              </tr>
+            `;
+          });
+
+          tablesContent += `
+            <tr style="background: #F1F5F9; border-top: 2px solid #071B49; border-bottom: 1px solid #CBD5E1; break-inside: avoid; page-break-inside: avoid; page-break-after: avoid;">
+              <td colspan="${mostrarStock ? 6 : 5}" style="padding: 6px 10px; font-weight: 800; font-size: 11px; color: #071B49; text-transform: uppercase;">
+                <i class="fa-solid fa-layer-group" style="color: #0755C9; margin-right: 6px;"></i>${esc(cat)} 
+                <span style="font-size: 9px; font-weight: 600; color: #64748B; margin-left: 6px;">(${catProds.length} ${catProds.length === 1 ? 'producto' : 'productos'})</span>
+              </td>
             </tr>
-          </thead>
-          <tbody>
             ${rowsHtml}
-          </tbody>
-        </table>
-      `;
+          `;
+        });
 
-    } else {
-      // Vista Cuadrícula Editorial (Catálogo Élite 3 Columnas)
-      let cardsHtml = '';
-      prods.forEach(p => {
-        const codigo = esc(p.codigo || '—');
-        const nombre = esc(p.nombre || 'Producto');
-        const categoria = esc(p.categoria_nombre || 'General');
-        const precioTotal = parseFloat(p.precio_total || 0).toFixed(2);
-        const precioVes = tasaVes > 0 ? (p.precio_total * tasaVes).toFixed(2) : null;
-        const stock = parseFloat(p.stock || 0);
+        bodyHtml = `
+          <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
+            <thead>
+              <tr style="background: #071B49; color: #FFFFFF; font-size: 10px; text-transform: uppercase;">
+                <th style="padding: 7px 4px; text-align: center; width: 4%;">#</th>
+                <th style="padding: 7px 6px; text-align: center; width: 6%;">Foto</th>
+                <th style="padding: 7px 8px; text-align: left; width: 16%;">Código</th>
+                <th style="padding: 7px 8px; text-align: left; width: ${mostrarStock ? '46%' : '56%'};">Producto</th>
+                <th style="padding: 7px 8px; text-align: right; width: 18%;">Precio ($ USD)</th>
+                ${mostrarStock ? '<th style="padding: 7px 8px; text-align: right; width: 12%;">Existencia</th>' : ''}
+              </tr>
+            </thead>
+            <tbody>
+              ${tablesContent}
+            </tbody>
+          </table>
+        `;
 
-        // Imagen o Placeholder
-        const imgBlock = p.imagen
-          ? `<img src="${p.imagen}" alt="${nombre}" style="width: 100%; height: 100%; object-fit: contain; padding: 6px;">`
-          : `
-            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #94A3B8; font-size: 10px; font-weight: 600; gap: 4px;">
-              <i class="fa-solid fa-box" style="font-size: 26px; color: #CBD5E1;"></i>
-              <span style="font-size: 8.5px; color: #94A3B8; text-transform: uppercase;">${categoria}</span>
+      } else {
+        // Vista Cuadrícula Editorial (Catálogo Élite Agrupado por Categorías)
+        let sectionsHtml = '';
+
+        sortedCategories.forEach(cat => {
+          const catProds = categoriasMap[cat];
+          let cardsHtml = '';
+
+          catProds.forEach(p => {
+            const codigo = esc(p.codigo || '—');
+            const nombre = esc(p.nombre || 'Producto');
+            const precioTotal = parseFloat(p.precio_total || 0).toFixed(2);
+            const stock = parseFloat(p.stock || 0);
+
+            // Imagen o Placeholder
+            const imgBlock = p.imagen
+              ? `<img src="${p.imagen}" alt="${nombre}" style="width: 100%; height: 100%; object-fit: contain; padding: 6px;">`
+              : `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #94A3B8; font-size: 10px; font-weight: 600; gap: 4px;">
+                  <i class="fa-solid fa-box" style="font-size: 26px; color: #CBD5E1;"></i>
+                  <span style="font-size: 8.5px; color: #94A3B8; text-transform: uppercase;">${esc(cat)}</span>
+                </div>
+              `;
+
+            // Badge de Existencia (CONDICIONAL ESTRICTO: NO APARECE SI mostrarStock=false)
+            let stockBadgeHtml = '';
+            if (mostrarStock) {
+              if (stock > 0) {
+                stockBadgeHtml = `
+                  <div style="margin-top: 6px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46; font-size: 9.5px; font-weight: 700; padding: 2.5px 6px; border-radius: 4px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                    <span style="display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #059669;"></span>
+                    <span>Stock: <strong>${stock}</strong> unid.</span>
+                  </div>
+                `;
+              } else {
+                stockBadgeHtml = `
+                  <div style="margin-top: 6px; background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; font-size: 9.5px; font-weight: 700; padding: 2.5px 6px; border-radius: 4px; text-align: center;">
+                    ✕ Agotado (0 unid.)
+                  </div>
+                `;
+              }
+            }
+
+            cardsHtml += `
+              <div class="doc-catalogo-card" style="border: 1px solid #E2E8F0; border-radius: 8px; background: #FFFFFF; overflow: hidden; display: flex; flex-direction: column; page-break-inside: avoid; break-inside: avoid;">
+                <div style="width: 100%; height: 120px; background: #F8FAFC; border-bottom: 1px solid #F1F5F9; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                  ${imgBlock}
+                </div>
+                <div style="padding: 8px 10px; display: flex; flex-direction: column; flex: 1; justify-content: space-between;">
+                  <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                      <span style="font-family: monospace; font-size: 9px; font-weight: 700; color: #475569; background: #F1F5F9; padding: 1px 5px; border-radius: 3px;">${codigo}</span>
+                      <span style="font-size: 8px; text-transform: uppercase; color: #64748B; font-weight: 700; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(cat)}</span>
+                    </div>
+                    <h3 style="font-size: 11px; font-weight: 800; color: #0F172A; margin: 4px 0 2px 0; line-height: 1.25; min-height: 28px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+                      ${nombre}
+                    </h3>
+                    ${p.descripcion ? `<p style="font-size: 8.5px; color: #64748B; margin: 0 0 4px 0; max-height: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(p.descripcion)}</p>` : ''}
+                  </div>
+                  <div>
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; border-top: 1px dashed #E2E8F0; padding-top: 4px;">
+                      <div style="font-size: 15px; font-weight: 900; color: #0755C9;">$${precioTotal} <span style="font-size: 10px; font-weight: 700; color: #64748B;">USD</span></div>
+                    </div>
+                    ${stockBadgeHtml}
+                  </div>
+                </div>
+              </div>
+            `;
+          });
+
+          sectionsHtml += `
+            <div style="margin-top: 14px; margin-bottom: 8px; break-inside: avoid; page-break-inside: avoid; page-break-after: avoid;">
+              <div style="background: linear-gradient(135deg, #071B49 0%, #0755C9 100%); color: #FFFFFF; padding: 5px 12px; border-radius: 6px; display: flex; align-items: center; justify-content: space-between; border-left: 4px solid #00C6E8;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <i class="fa-solid fa-layer-group" style="color: #00C6E8; font-size: 10px;"></i>
+                  <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">${esc(cat)}</span>
+                </div>
+                <span style="font-size: 9px; font-weight: 700; background: rgba(255,255,255,0.2); padding: 1px 7px; border-radius: 8px;">
+                  ${catProds.length} ${catProds.length === 1 ? 'producto' : 'productos'}
+                </span>
+              </div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px;">
+              ${cardsHtml}
             </div>
           `;
+        });
 
-        // Badge de Existencia (CONDICIONAL ESTRICTO)
-        let stockBadgeHtml = '';
-        if (mostrarStock) {
-          if (stock > 0) {
-            stockBadgeHtml = `
-              <div style="margin-top: 6px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46; font-size: 9.5px; font-weight: 700; padding: 2.5px 6px; border-radius: 4px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 4px;">
-                <span style="display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #059669;"></span>
-                <span>Stock: <strong>${stock}</strong> unid.</span>
-              </div>
-            `;
-          } else {
-            stockBadgeHtml = `
-              <div style="margin-top: 6px; background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; font-size: 9.5px; font-weight: 700; padding: 2.5px 6px; border-radius: 4px; text-align: center;">
-                ✕ Agotado (0 unid.)
-              </div>
-            `;
-          }
-        }
-
-        cardsHtml += `
-          <div class="doc-catalogo-card" style="border: 1px solid #E2E8F0; border-radius: 8px; background: #FFFFFF; overflow: hidden; display: flex; flex-direction: column; page-break-inside: avoid; break-inside: avoid;">
-            <div style="width: 100%; height: 120px; background: #F8FAFC; border-bottom: 1px solid #F1F5F9; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-              ${imgBlock}
-            </div>
-            <div style="padding: 8px 10px; display: flex; flex-direction: column; flex: 1; justify-content: space-between;">
-              <div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-                  <span style="font-family: monospace; font-size: 9px; font-weight: 700; color: #475569; background: #F1F5F9; padding: 1px 5px; border-radius: 3px;">${codigo}</span>
-                  <span style="font-size: 8px; text-transform: uppercase; color: #64748B; font-weight: 700; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${categoria}</span>
-                </div>
-                <h3 style="font-size: 11px; font-weight: 800; color: #0F172A; margin: 4px 0 2px 0; line-height: 1.25; min-height: 28px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
-                  ${nombre}
-                </h3>
-                ${p.descripcion ? `<p style="font-size: 8.5px; color: #64748B; margin: 0 0 4px 0; max-height: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(p.descripcion)}</p>` : ''}
-              </div>
-              <div>
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; border-top: 1px dashed #E2E8F0; padding-top: 4px;">
-                  <div style="font-size: 14.5px; font-weight: 900; color: #0755C9;">$${precioTotal}</div>
-                  ${precioVes ? `<div style="font-size: 9px; font-weight: 600; color: #64748B;">≈ ${precioVes} Bs.</div>` : ''}
-                </div>
-                ${stockBadgeHtml}
-              </div>
-            </div>
-          </div>
-        `;
-      });
-
-      bodyHtml = `
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
-          ${cardsHtml}
-        </div>
-      `;
+        bodyHtml = sectionsHtml;
+      }
     }
 
-    // 4. Pie de Página Institucional
+    // 4. Pie de Página Institucional (Solo USD)
     let footerHtml = `
       <div style="border-top: 1px solid #CBD5E1; padding-top: 8px; margin-top: 18px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5px; color: #64748B; break-inside: avoid; page-break-inside: avoid;">
         <div>
-          <strong>TAVO CLOUD Enterprise</strong> &bull; Precios en USD sujetos a cambio sin previo aviso.
+          <strong>TAVO CLOUD Enterprise</strong> &bull; Precios expresados en Dólares Americanos (USD) sujetos a cambio sin previo aviso.
         </div>
         <div style="text-align: right;">
           ${cfg.telefono ? `<span>Contacto: <strong>${esc(cfg.telefono)}</strong></span> &bull; ` : ''}
@@ -16388,9 +16430,43 @@ window.imprimirNotaDebitoCompraDirecta = imprimirNotaDebitoCompraDirecta;
 window.anularDevolucionCompra = anularDevolucionCompra;
 
 
-// ========================================================
+// ======================================================
+
 // CONTROLADOR INTEGRAL DEL CATÁLOGO DE PRODUCTOS (PDF & WHATSAPP)
 // ========================================================
+
+function normalizarTelefonoWhatsApp(phoneStr, defaultCountry = '58') {
+  if (!phoneStr) return '';
+  let str = String(phoneStr).trim();
+  let digits = str.replace(/[^0-9]/g, '');
+  if (!digits) return '';
+
+  // Si ya tiene código 58 y longitud >= 12 (ej: 584121234567)
+  if (digits.startsWith('58') && digits.length >= 12) {
+    return digits;
+  }
+
+  // Si empieza con 0 (ej: 0412, 0414, 0424, 0416, 0426, 0212), remover el 0 y anteponer 58
+  if (digits.startsWith('0')) {
+    return defaultCountry + digits.substring(1);
+  }
+
+  // Si tiene 10 dígitos y empieza por 412, 414, 424, 416, 426, 212
+  if (digits.length === 10 && (digits.startsWith('412') || digits.startsWith('414') || digits.startsWith('424') || digits.startsWith('416') || digits.startsWith('426') || digits.startsWith('212'))) {
+    return defaultCountry + digits;
+  }
+
+  return digits;
+}
+
+function autoNormalizarTelefonoInput(inputEl) {
+  if (!inputEl) return;
+  const val = inputEl.value.trim();
+  const norm = normalizarTelefonoWhatsApp(val);
+  if (norm) {
+    inputEl.value = norm;
+  }
+}
 
 function openCatalogoModal() {
   const modal = document.getElementById('modalCatalogoProductos');
@@ -16525,96 +16601,40 @@ function seleccionarClienteParaWhatsAppCatalogo(clienteId) {
 
   const telInput = document.getElementById('catalogoTelefonoWhatsApp');
   if (telInput) {
-    telInput.value = (c.telefono || '').replace(/[^0-9+]/g, '');
+    const norm = normalizarTelefonoWhatsApp(c.telefono || '');
+    telInput.value = norm;
   }
   actualizarPreviewWhatsAppCatalogo(c.nombre);
 }
 
 function actualizarPreviewWhatsAppCatalogo(nombreCliente = '') {
   const textarea = document.getElementById('catalogoMensajeWhatsAppPreview');
-  if (!textarea) return;
+  const badgePdf = document.getElementById('catalogoModoPdfBadge');
+  const nombrePdfEl = document.getElementById('catalogoArchivoPdfNombre');
 
-  const radios = document.getElementsByName('catalogoStockOption');
-  let mostrarStock = false;
-  for (const r of radios) {
-    if (r.checked && r.value === 'con_stock') {
-      mostrarStock = true;
-      break;
-    }
-  }
-
-  const prods = obtenerProductosFiltradosCatalogo();
+  const opciones = obtenerOpcionesCatalogoActual();
   const cfg = AppState.config || {};
-  const hoyStr = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const tasaVes = parseFloat(cfg.tasa_ves || 0);
+  const nombreNegocio = cfg.nombre_negocio || 'TAVO CLOUD';
+  const cleanName = nombreNegocio.replace(/[^a-zA-Z0-9]/g, '_');
+  const fileName = opciones.mostrarStock
+    ? `Catalogo_Inventario_${cleanName}.pdf`
+    : `Catalogo_Productos_${cleanName}.pdf`;
 
-  let msg = `🌟 *CATÁLOGO OFICIAL DE PRODUCTOS* 🌟
-`;
-  msg += `🏢 *${cfg.nombre_negocio || 'TAVO CLOUD'}*
-`;
-  if (cfg.documento_fiscal) msg += `📄 RIF: ${cfg.documento_fiscal}
-`;
-  if (nombreCliente) msg += `👤 Estimado/a: *${nombreCliente}*
-`;
-  msg += `📅 Fecha: ${hoyStr}`;
-  if (tasaVes > 0) msg += ` | 💵 Tasa Oficial: ${tasaVes.toFixed(2)} Bs./$`;
-  msg += `
-
-`;
-
-  // Agrupar por categoría
-  const categoriasMap = {};
-  prods.forEach(p => {
-    const cat = p.categoria_nombre || 'General';
-    if (!categoriasMap[cat]) categoriasMap[cat] = [];
-    categoriasMap[cat].push(p);
-  });
-
-  const catNames = Object.keys(categoriasMap);
-  if (catNames.length === 0) {
-    msg += `_No hay productos registrados con los filtros seleccionados._
-
-`;
-  } else {
-    catNames.forEach(cat => {
-      msg += `📁 *${cat.toUpperCase()}*
-`;
-      msg += `━━━━━━━━━━━━━━━━━━━━━
-`;
-      categoriasMap[cat].forEach(p => {
-        const precio = parseFloat(p.precio_total || 0).toFixed(2);
-        const precioVes = tasaVes > 0 ? (p.precio_total * tasaVes).toFixed(2) : null;
-        msg += `🔹 *${p.nombre}*
-`;
-        msg += `   • Código: \`${p.codigo || '—'}\`
-`;
-        msg += `   • Precio: *$${precio} USD*`;
-        if (precioVes) msg += ` (≈ ${precioVes} Bs.)`;
-        msg += `
-`;
-        if (mostrarStock) {
-          const stk = parseFloat(p.stock || 0);
-          msg += stk > 0 
-            ? `   • Stock: _${stk} unidades disponibles_
-`
-            : `   • Stock: _Agotado_
-`;
-        }
-      });
-      msg += `
-`;
-    });
+  if (nombrePdfEl) nombrePdfEl.textContent = fileName;
+  if (badgePdf) {
+    badgePdf.textContent = opciones.mostrarStock ? 'Inventario (Con Stock)' : 'Comercial (Sin Stock)';
+    badgePdf.className = opciones.mostrarStock
+      ? 'text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800'
+      : 'text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800';
   }
 
-  msg += `━━━━━━━━━━━━━━━━━━━━━
-`;
-  if (cfg.telefono) msg += `📞 *Pedidos y Atención:* ${cfg.telefono}
-`;
-  if (cfg.direccion) msg += `📍 *Ubicación:* ${cfg.direccion}
-`;
-  msg += `_¡Estamos a tu orden para cotizaciones y pedidos directos!_`;
+  if (textarea) {
+    const saludo = nombreCliente ? `Estimado/a ${nombreCliente}` : `Estimado/a cliente`;
+    textarea.value = `¡Hola! ${saludo}, le adjuntamos nuestro Catálogo Oficial de Productos en formato PDF.
 
-  textarea.value = msg;
+Quedamos atentos a sus pedidos y cotizaciones.
+*${nombreNegocio}*`;
+  }
 }
 
 function copiarTextoCatalogoWhatsApp() {
@@ -16623,35 +16643,17 @@ function copiarTextoCatalogoWhatsApp() {
 
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(textarea.value).then(() => {
-      alert('✅ Mensaje del catálogo copiado al portapapeles. ¡Listo para pegar en WhatsApp!');
+      alert('✅ Mensaje de cortesía copiado.');
     }).catch(() => {
       textarea.select();
       document.execCommand('copy');
-      alert('✅ Mensaje del catálogo copiado.');
+      alert('✅ Mensaje copiado.');
     });
   } else {
     textarea.select();
     document.execCommand('copy');
-    alert('✅ Mensaje del catálogo copiado.');
+    alert('✅ Mensaje copiado.');
   }
-}
-
-function enviarCatalogoWhatsAppDirecto() {
-  const telInput = document.getElementById('catalogoTelefonoWhatsApp');
-  const textarea = document.getElementById('catalogoMensajeWhatsAppPreview');
-  const msg = textarea ? textarea.value : '';
-
-  if (!msg) {
-    alert('No hay información en el catálogo para enviar.');
-    return;
-  }
-
-  const rawPhone = telInput ? telInput.value.replace(/[^0-9]/g, '') : '';
-  const url = rawPhone 
-    ? `https://wa.me/${rawPhone}?text=${encodeURIComponent(msg)}`
-    : `https://wa.me/?text=${encodeURIComponent(msg)}`;
-
-  window.open(url, '_blank');
 }
 
 function obtenerOpcionesCatalogoActual() {
@@ -16674,6 +16676,164 @@ function obtenerOpcionesCatalogoActual() {
   }
 
   return { mostrarStock, layout };
+}
+
+async function compartirCatalogoPdfWhatsApp() {
+  const prods = obtenerProductosFiltradosCatalogo();
+  if (prods.length === 0) {
+    alert('No hay productos que coincidan con los filtros para generar el catálogo.');
+    return;
+  }
+
+  const telInput = document.getElementById('catalogoTelefonoWhatsApp');
+  const telRaw = telInput ? telInput.value.trim() : '';
+  const telNorm = normalizarTelefonoWhatsApp(telRaw);
+
+  const opciones = obtenerOpcionesCatalogoActual();
+  const cfg = AppState.config || {};
+  const nombreNegocio = cfg.nombre_negocio || 'TAVO CLOUD';
+  const cleanName = nombreNegocio.replace(/[^a-zA-Z0-9]/g, '_');
+  const fileName = opciones.mostrarStock
+    ? `Catalogo_Inventario_${cleanName}.pdf`
+    : `Catalogo_Productos_${cleanName}.pdf`;
+
+  const btn = document.getElementById('btnCompartirPdfWhatsApp') || document.getElementById('btnEnviarWhatsAppFooter');
+  const btnOriginalText = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Generando Archivo PDF...';
+  }
+
+  try {
+    const htmlDoc = DocumentTemplates.catalogoProductos(prods, cfg, opciones);
+
+    // Contenedor temporal aislado para renderizado
+    const tempDiv = document.createElement('div');
+    tempDiv.id = 'tempPdfContainer';
+    tempDiv.style.position = 'fixed';
+    tempDiv.style.left = '-9999px';
+    tempDiv.style.top = '0';
+    tempDiv.style.width = '794px'; // 210mm a 96dpi (ancho estándar hoja)
+    tempDiv.style.background = '#ffffff';
+    tempDiv.innerHTML = htmlDoc;
+    document.body.appendChild(tempDiv);
+
+    let pdfBlob = null;
+    let pdfFile = null;
+
+    if (typeof html2pdf !== 'undefined') {
+      const opt = {
+        margin: [6, 6, 6, 6],
+        filename: fileName,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, logging: false },
+        jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' }
+      };
+      pdfBlob = await html2pdf().set(opt).from(tempDiv).outputPdf('blob');
+      if (pdfBlob) {
+        pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
+      }
+    }
+
+    if (tempDiv.parentNode) {
+      tempDiv.parentNode.removeChild(tempDiv);
+    }
+
+    const textarea = document.getElementById('catalogoMensajeWhatsAppPreview');
+    const customMsg = textarea ? textarea.value.trim() : `Estimado/a cliente, le adjuntamos nuestro Catálogo Oficial de Productos en formato PDF.
+
+*${nombreNegocio}*`;
+    const waUrl = telNorm
+      ? `https://wa.me/${telNorm}?text=${encodeURIComponent(customMsg)}`
+      : `https://wa.me/?text=${encodeURIComponent(customMsg)}`;
+
+    // INTENTO 1: Web Share API (Móviles Android / iPhone / Windows moderno)
+    // Permite pasar el ARCHIVO BINARIO REAL (.pdf) directamente a WhatsApp
+    if (pdfFile && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+      try {
+        await navigator.share({
+          files: [pdfFile],
+          title: fileName,
+          text: customMsg
+        });
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = btnOriginalText;
+        }
+        return;
+      } catch (shareErr) {
+        if (shareErr.name !== 'AbortError') {
+          console.warn('[Catalogo] WebShare cancelado o no soportado:', shareErr);
+        }
+      }
+    }
+
+    // INTENTO 2: Descarga automática inmediata del archivo PDF + Apertura de WhatsApp
+    if (pdfBlob) {
+      const blobUrl = URL.createObjectURL(pdfBlob);
+      const downloadLink = document.createElement('a');
+      downloadLink.href = blobUrl;
+      downloadLink.download = fileName;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    }
+
+    // Abrir WhatsApp con el chat del número registrado
+    window.open(waUrl, '_blank');
+
+    // Notificación modal institucional con instrucciones asistidas
+    mostrarModalPdfListoWhatsApp(fileName, telNorm);
+
+  } catch (err) {
+    console.error('Error generando PDF de catálogo:', err);
+    imprimirCatalogoProductos();
+    const customMsg = `Estimado/a cliente, le adjuntamos nuestro Catálogo Oficial de Productos en formato PDF.
+
+*${nombreNegocio}*`;
+    const waUrl = telNorm
+      ? `https://wa.me/${telNorm}?text=${encodeURIComponent(customMsg)}`
+      : `https://wa.me/?text=${encodeURIComponent(customMsg)}`;
+    window.open(waUrl, '_blank');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = btnOriginalText;
+    }
+  }
+}
+
+function mostrarModalPdfListoWhatsApp(fileName, phone) {
+  let modalAlert = document.getElementById('modalPdfGeneradoAlerta');
+  if (modalAlert) modalAlert.remove();
+
+  const formattedPhone = phone ? `+${phone}` : 'su cliente';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modalPdfGeneradoAlerta';
+  overlay.className = 'fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4';
+  overlay.innerHTML = `
+    <div class="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-100 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
+      <div class="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center text-3xl shadow-sm">
+        <i class="fa-solid fa-file-pdf"></i>
+      </div>
+      <div>
+        <h3 class="font-extrabold text-base text-slate-900">¡Archivo PDF Generado con Éxito!</h3>
+        <p class="text-xs text-slate-600 mt-1 leading-relaxed">
+          El archivo <strong>${fileName}</strong> se ha descargado a su equipo y se abrió la conversación de WhatsApp con <strong>${formattedPhone}</strong>.
+        </p>
+      </div>
+      <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 text-left text-[11px] text-emerald-950 flex items-start space-x-2.5">
+        <i class="fa-solid fa-paperclip text-emerald-600 mt-0.5 text-base"></i>
+        <span><strong>Envío del archivo:</strong> Arrastre el archivo descargado directamente a la ventana de WhatsApp abierta, o haga clic en el ícono de <strong>Adjuntar (📎 Documento)</strong> para enviarlo en 1 segundo.</span>
+      </div>
+      <button onclick="this.closest('#modalPdfGeneradoAlerta').remove()" class="w-full bg-[#071B49] hover:bg-[#0755C9] text-white py-2.5 rounded-xl font-bold text-xs transition shadow-sm">
+        Entendido
+      </button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
 }
 
 function imprimirCatalogoProductos() {
@@ -16735,7 +16895,9 @@ window.actualizarContadorCatalogo = actualizarContadorCatalogo;
 window.seleccionarClienteParaWhatsAppCatalogo = seleccionarClienteParaWhatsAppCatalogo;
 window.actualizarPreviewWhatsAppCatalogo = actualizarPreviewWhatsAppCatalogo;
 window.copiarTextoCatalogoWhatsApp = copiarTextoCatalogoWhatsApp;
-window.enviarCatalogoWhatsAppDirecto = enviarCatalogoWhatsAppDirecto;
+window.compartirCatalogoPdfWhatsApp = compartirCatalogoPdfWhatsApp;
+window.normalizarTelefonoWhatsApp = normalizarTelefonoWhatsApp;
+window.autoNormalizarTelefonoInput = autoNormalizarTelefonoInput;
 window.imprimirCatalogoProductos = imprimirCatalogoProductos;
 window.abrirVistaPreviaCatalogo = abrirVistaPreviaCatalogo;
 window.cerrarVistaPreviaCatalogo = cerrarVistaPreviaCatalogo;
