@@ -180,6 +180,8 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         rel_path = path.lstrip("/")
         if not rel_path or rel_path == "":
             rel_path = "index.html"
+        elif rel_path in ["catalogo", "catalogo/"]:
+            rel_path = "catalogo.html"
         file_path = os.path.join(PUBLIC_DIR, rel_path)
         if not os.path.exists(file_path) or os.path.isdir(file_path):
             file_path = os.path.join(PUBLIC_DIR, "index.html")
