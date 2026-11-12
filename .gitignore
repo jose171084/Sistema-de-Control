@@ -1,0 +1,19 @@
+# Dependencias y temporales
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.bak
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# Bases de datos obsoletas o backups
+inventario_backup*.db
+inventario_cloud*.db
+inventario_limpia*.db
+
+# Directorios de pruebas
+tests/
+.pytest_cache/

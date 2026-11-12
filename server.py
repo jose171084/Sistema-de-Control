@@ -2536,6 +2536,31 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 self.send_error_json(f"Error al restaurar archivo: {str(e)}", 500)
                 return
 
+        elif path == "/api/catalogo/subir-pdf":
+            pdf_b64 = body.get("pdf_base64")
+            if not pdf_b64:
+                self.send_error_json("Falta pdf_base64 en la solicitud", 400)
+                return
+            try:
+                if "," in pdf_b64:
+                    pdf_b64 = pdf_b64.split(",", 1)[1]
+                pdf_bytes = base64.b64decode(pdf_b64)
+                
+                os.makedirs(UPLOADS_DIR, exist_ok=True)
+                pdf_filename = "Catalogo_Oficial_Productos.pdf"
+                pdf_filepath = os.path.join(UPLOADS_DIR, pdf_filename)
+                with open(pdf_filepath, "wb") as f_pdf:
+                    f_pdf.write(pdf_bytes)
+                
+                self.send_json({
+                    "success": True,
+                    "url": f"/uploads/{pdf_filename}?v={int(time.time())}",
+                    "size_bytes": len(pdf_bytes)
+                })
+            except Exception as e:
+                self.send_error_json(f"Error guardando catálogo PDF: {str(e)}", 500)
+            return
+
         elif path == "/api/database/sync-now":
             try:
                 ok = sync_to_supabase_storage()
