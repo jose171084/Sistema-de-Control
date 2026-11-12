@@ -52,7 +52,7 @@
   <!-- Estilos Custom Soft UI y Tematización Dinámica -->
   <!-- html2pdf.js para Generación y Exportación Directa de Archivo PDF -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-  <link rel="stylesheet" href="styles.css?v=2.1.0">
+  <link rel="stylesheet" href="styles.css?v=2.2.0">
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans min-h-screen antialiased overflow-x-hidden md:flex selection:bg-teal-100 selection:text-teal-900">
 
@@ -5085,203 +5085,128 @@
         </button>
       </div>
 
-      <!-- Navegación de Pestañas: Opciones de Formato vs Compartir WhatsApp -->
-      <div class="flex items-center space-x-2 border-b border-slate-200 pb-2">
-        <button type="button" onclick="setCatalogoTab('formato')" id="tabBtnCatalogoFormato" class="px-4 py-2 rounded-xl text-xs font-bold transition flex items-center bg-[#071B49] text-white shadow-xs">
-          <i class="fa-solid fa-sliders mr-2 text-cyan-300"></i>1. Opciones & Filtros del Catálogo
-        </button>
-        <button type="button" onclick="setCatalogoTab('whatsapp')" id="tabBtnCatalogoWhatsApp" class="px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center bg-slate-100 text-slate-600 hover:bg-slate-200">
-          <i class="fa-brands fa-whatsapp mr-2 text-emerald-600"></i>2. Compartir por WhatsApp
-        </button>
-      </div>
-
-      <!-- PANEL 1: OPCIONES Y FILTROS DEL CATÁLOGO -->
-      <div id="panelCatalogoFormato" class="space-y-4">
+      <!-- MODAL UNIFICADO CORPORATIVO (VISTA EJECUTIVA LIMPIA, SIN PESTAÑAS REDUNDANTES) -->
+      <div class="space-y-4">
         
-        <!-- CONTROL CRÍTICO: CONDICIONAL DE EXISTENCIAS -->
+        <!-- 1. MODO DE CATÁLOGO (CONTROL ESTRICTO DE EXISTENCIAS) -->
         <div>
           <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 flex items-center">
-            <i class="fa-solid fa-boxes-stacked mr-1.5 text-blue-600"></i>Control de Visibilidad de Existencias (Stock):
+            <i class="fa-solid fa-layer-group mr-1.5 text-[#0755C9]"></i>Tipo de Catálogo a Generar:
           </label>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <!-- Opción A: Sin Existencias (Comercial) -->
-            <label class="cursor-pointer border-2 border-blue-600 bg-blue-50/50 rounded-2xl p-3.5 flex flex-col justify-between transition relative" id="cardStockOculto">
+            <!-- Opción A: Sin Existencias (Comercial / Clientes) -->
+            <label class="cursor-pointer border-2 border-[#0755C9] bg-blue-50/40 rounded-2xl p-3.5 flex flex-col justify-between transition relative hover:shadow-xs" id="cardStockOculto">
               <div class="flex items-start justify-between">
                 <div class="flex items-center space-x-2.5">
-                  <div class="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-sm">
-                    <i class="fa-solid fa-briefcase text-blue-600"></i>
+                  <div class="w-8 h-8 rounded-xl bg-blue-100 text-[#0755C9] flex items-center justify-center font-bold text-sm">
+                    <i class="fa-solid fa-briefcase"></i>
                   </div>
                   <div>
                     <span class="block font-bold text-xs text-slate-900 leading-snug">Catálogo Comercial</span>
-                    <span class="inline-block text-[10px] font-semibold text-blue-700 bg-blue-100 px-1.5 py-0.2 rounded mt-0.5">Recomendado Clientes</span>
+                    <span class="inline-block text-[10px] font-bold text-[#0755C9] bg-blue-100 px-2 py-0.5 rounded-full mt-0.5">Recomendado para Clientes</span>
                   </div>
                 </div>
-                <input type="radio" name="catalogoStockOption" value="sin_stock" checked onchange="actualizarModoStockCatalogo()" class="mt-1 text-blue-600 focus:ring-blue-500">
+                <input type="radio" name="catalogoStockOption" value="sin_stock" checked onchange="actualizarModoStockCatalogo()" class="mt-1 text-[#0755C9] focus:ring-blue-500">
               </div>
               <p class="text-[11px] text-slate-500 mt-2 leading-relaxed">
-                <strong>Oculta las existencias.</strong> Muestra fotos, códigos y precios oficiales sin revelar el inventario disponible en almacén.
+                <strong>Oculta existencias.</strong> Muestra fotos, códigos y precios oficiales en USD sin revelar el stock disponible en almacén.
               </p>
             </label>
 
-            <!-- Opción B: Con Existencias (Almacén / Mayorista) -->
-            <label class="cursor-pointer border-2 border-slate-200 rounded-2xl p-3.5 flex flex-col justify-between transition relative hover:border-slate-300" id="cardStockVisible">
+            <!-- Opción B: Con Existencias (Almacén / Mayoristas) -->
+            <label class="cursor-pointer border-2 border-slate-200 rounded-2xl p-3.5 flex flex-col justify-between transition relative hover:border-slate-300 hover:shadow-xs" id="cardStockVisible">
               <div class="flex items-start justify-between">
                 <div class="flex items-center space-x-2.5">
-                  <div class="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-sm">
-                    <i class="fa-solid fa-warehouse text-emerald-600"></i>
+                  <div class="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-sm">
+                    <i class="fa-solid fa-warehouse"></i>
                   </div>
                   <div>
                     <span class="block font-bold text-xs text-slate-900 leading-snug">Catálogo de Inventario</span>
-                    <span class="inline-block text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded mt-0.5">Uso Interno & Mayorista</span>
+                    <span class="inline-block text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full mt-0.5">Uso Interno & Mayoristas</span>
                   </div>
                 </div>
-                <input type="radio" name="catalogoStockOption" value="con_stock" onchange="actualizarModoStockCatalogo()" class="mt-1 text-blue-600 focus:ring-blue-500">
+                <input type="radio" name="catalogoStockOption" value="con_stock" onchange="actualizarModoStockCatalogo()" class="mt-1 text-[#0755C9] focus:ring-blue-500">
               </div>
               <p class="text-[11px] text-slate-500 mt-2 leading-relaxed">
-                <strong>Muestra existencias actuales.</strong> Incluye el badge con el stock físico disponible en tiempo real por cada producto.
+                <strong>Muestra existencias.</strong> Incluye el indicador de stock físico disponible en tiempo real por cada producto.
               </p>
             </label>
           </div>
         </div>
 
-        <!-- Filtros adicionales de productos -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-          <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1">Categoría</label>
-            <select id="catalogoFilterCategoria" onchange="actualizarContadorCatalogo()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <!-- 2. FILTROS & DESTINATARIO (2 COLUMNAS ORGANIZADAS) -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80">
+          <!-- Columna Izquierda: Filtro de Categoría y Resumen -->
+          <div class="space-y-2">
+            <label class="block text-xs font-bold text-slate-700 flex items-center justify-between">
+              <span><i class="fa-solid fa-filter mr-1 text-[#0755C9]"></i>Categoría de Productos:</span>
+              <span id="catalogoTotalItemsBadge" class="font-extrabold text-[10px] text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">0 productos</span>
+            </label>
+            <select id="catalogoFilterCategoria" onchange="actualizarContadorCatalogo()" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs">
               <option value="">Todas las Categorías</option>
             </select>
+            <div class="flex items-center space-x-3 text-[11px] text-slate-500 pt-0.5">
+              <span class="flex items-center"><i class="fa-solid fa-check text-emerald-600 mr-1"></i>Fotos HD</span>
+              <span class="flex items-center"><i class="fa-solid fa-check text-emerald-600 mr-1"></i>Precios en USD</span>
+              <span class="flex items-center"><i class="fa-solid fa-check text-emerald-600 mr-1"></i>Por Categoría</span>
+            </div>
           </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1">Tipo de Ítem</label>
-            <select id="catalogoFilterTipo" onchange="actualizarContadorCatalogo()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="producto">Solo Productos Físicos</option>
-              <option value="">Productos & Servicios</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1">Disponibilidad</label>
-            <select id="catalogoFilterDisponibilidad" onchange="actualizarContadorCatalogo()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="todos">Todos los ítems activos</option>
-              <option value="con_stock">Solo con Stock > 0</option>
-            </select>
-          </div>
-        </div>
 
-        <!-- Formato de Maquetación Visual -->
-        <div class="pt-1">
-          <label class="block text-xs font-semibold text-slate-600 mb-1">Estilo de Presentación del Documento:</label>
-          <div class="grid grid-cols-2 gap-3">
-            <label class="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer p-2.5 border rounded-xl hover:bg-slate-50 bg-slate-50/50">
-              <input type="radio" name="catalogoLayout" value="grid" checked class="text-blue-600 focus:ring-blue-500">
-              <div>
-                <span class="font-bold block">Cuadrícula Editorial (Élite)</span>
-                <span class="text-[10px] text-slate-400">Tarjetas visuales con fotografía destacada</span>
-              </div>
+          <!-- Columna Derecha: Destinatario WhatsApp -->
+          <div class="space-y-1.5">
+            <label class="block text-xs font-bold text-slate-700 flex items-center">
+              <i class="fa-brands fa-whatsapp mr-1 text-emerald-600"></i>Destinatario para WhatsApp:
             </label>
-            <label class="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer p-2.5 border rounded-xl hover:bg-slate-50">
-              <input type="radio" name="catalogoLayout" value="list" class="text-blue-600 focus:ring-blue-500">
-              <div>
-                <span class="font-bold block">Lista Ejecutiva de Precios</span>
-                <span class="text-[10px] text-slate-400">Filas corporativas compactas con miniaturas</span>
-              </div>
-            </label>
-          </div>
-        </div>
-
-        <!-- Indicador de Resumen de Productos a Incluir -->
-        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs">
-          <span class="text-slate-600 font-medium">Ítems a incluir en el catálogo:</span>
-          <span id="catalogoTotalItemsBadge" class="font-extrabold text-blue-700 bg-blue-100 px-2.5 py-0.5 rounded-full text-xs">0 productos</span>
-        </div>
-
-      </div>
-
-      <!-- PANEL 2: COMPARTIR ARCHIVO PDF POR WHATSAPP -->
-      <div id="panelCatalogoWhatsApp" class="space-y-4 hidden">
-        <div class="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-4 flex items-start space-x-3.5">
-          <div class="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-xl shrink-0 shadow-sm">
-            <i class="fa-brands fa-whatsapp"></i>
-          </div>
-          <div class="text-xs text-emerald-950">
-            <p class="font-extrabold text-sm">Envío Directo del Archivo PDF a WhatsApp</p>
-            <p class="text-emerald-800 text-[11px] mt-0.5 leading-relaxed">
-              El sistema generará el <strong>archivo PDF oficial</strong> con las fotos, códigos y precios en dólares ordenados por categoría, y lo enviará al número telefónico seleccionado.
-            </p>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Seleccionar Cliente del Directorio:</label>
-            <select id="catalogoClienteSelect" onchange="seleccionarClienteParaWhatsAppCatalogo(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">
-              <option value="">-- Seleccionar cliente... --</option>
+            <select id="catalogoClienteSelect" onchange="seleccionarClienteParaWhatsAppCatalogo(this.value)" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs">
+              <option value="">-- Seleccionar cliente del directorio... --</option>
             </select>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Teléfono WhatsApp Destino (con código de país):</label>
             <div class="relative">
-              <i class="fa-brands fa-whatsapp absolute left-3 top-2.5 text-emerald-600 text-sm"></i>
-              <input type="tel" id="catalogoTelefonoWhatsApp" onblur="autoNormalizarTelefonoInput(this)" placeholder="Ej: 04121234567 o 584121234567" 
-                     class="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+              <i class="fa-solid fa-phone absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+              <input type="tel" id="catalogoTelefonoWhatsApp" onblur="autoNormalizarTelefonoInput(this)" placeholder="Teléfono WhatsApp (Ej: 04121234567)" 
+                     class="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs">
             </div>
-            <p class="text-[10px] text-slate-400 mt-1">Conexión automática para números nacionales (0412/0414/0424 se convierte a 58...)</p>
           </div>
         </div>
 
-        <!-- TARJETA VISUAL DEL ARCHIVO PDF QUE SE VA A ENVIAR -->
-        <div class="border-2 border-dashed border-emerald-300 bg-emerald-50/50 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
-          <div class="flex items-center space-x-3.5">
-            <div class="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center text-2xl shadow-xs shrink-0">
-              <i class="fa-solid fa-file-pdf"></i>
-            </div>
-            <div>
-              <div class="flex items-center space-x-2 flex-wrap gap-1">
-                <span class="font-black text-xs text-slate-900 tracking-tight" id="catalogoArchivoPdfNombre">Catalogo_Productos_TAVO_CLOUD.pdf</span>
-                <span id="catalogoModoPdfBadge" class="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">Comercial (Sin Stock)</span>
-              </div>
-              <p class="text-[11px] text-slate-600 mt-0.5">Documento PDF oficial organizado por categorías con fotos, códigos y precios en USD.</p>
-            </div>
-          </div>
-          <button type="button" onclick="descargarPdfCatalogoDirecto()" id="btnDescargarPdfDirecto" class="w-full sm:w-auto px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-800 font-bold text-xs rounded-xl border border-slate-300 shadow-2xs transition flex items-center justify-center shrink-0">
-            <i class="fa-solid fa-download mr-1.5 text-rose-600"></i>Descargar PDF
-          </button>
-        </div>
-
+        <!-- 3. MENSAJE OFICIAL PARA WHATSAPP & ACCESO EN LA NUBE -->
         <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="block text-xs font-bold text-slate-800">Mensaje Oficial de Presentación (WhatsApp):</label>
-            <button type="button" onclick="copiarMensajeWhatsAppCatalogo()" class="text-[11px] text-emerald-700 hover:text-emerald-800 font-bold flex items-center hover:underline">
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="block text-xs font-bold text-slate-700 flex items-center">
+              <i class="fa-solid fa-comment-dots mr-1 text-emerald-600"></i>Mensaje Oficial de Presentación:
+            </label>
+            <button type="button" onclick="copiarMensajeWhatsAppCatalogo()" class="text-[11px] text-blue-700 hover:text-blue-800 font-bold flex items-center hover:underline cursor-pointer">
               <i class="fa-regular fa-copy mr-1"></i>Copiar Mensaje
             </button>
           </div>
-          <textarea id="catalogoMensajeWhatsAppPreview" rows="6" class="w-full bg-slate-50 text-slate-800 font-sans text-xs p-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 leading-relaxed font-normal shadow-2xs"></textarea>
-          <p class="text-[10px] text-slate-400 mt-1">El mensaje se personaliza automáticamente con el nombre de tu empresa, RIF y el cliente seleccionado.</p>
+          <textarea id="catalogoMensajeWhatsAppPreview" rows="4" class="w-full bg-slate-50 text-slate-800 font-sans text-xs p-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed font-normal shadow-2xs resize-none"></textarea>
+          <div class="flex items-center justify-between text-[10px] text-slate-400 mt-1">
+            <span>Personalizado con nombre de empresa, RIF y cliente.</span>
+            <span class="flex items-center text-blue-600 font-medium">
+              <i class="fa-solid fa-globe mr-1"></i>Catálogo en vivo: <strong class="ml-1">/catalogo</strong>
+            </span>
+          </div>
         </div>
 
-        <button type="button" onclick="compartirCatalogoPdfWhatsApp()" id="btnCompartirPdfWhatsApp" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 px-4 rounded-xl shadow-md hover:shadow-lg transition flex items-center justify-center space-x-2 text-sm cursor-pointer">
-          <i class="fa-brands fa-whatsapp text-xl"></i>
-          <span>Generar Archivo PDF y Enviar a WhatsApp</span>
-        </button>
       </div>
 
-      <!-- BOTONES DE ACCIÓN PRINCIPALES -->
-      <div class="flex flex-col sm:flex-row items-center justify-between gap-2.5 pt-3 border-t border-slate-100">
-        <button type="button" onclick="closeCatalogoModal()" class="w-full sm:w-auto px-4 py-2.5 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 text-xs font-bold transition">
+      <!-- FOOTER CORPORATIVO: EXACTAMENTE 3 BOTONES LIMPIOS Y FUNCIONALES -->
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-100">
+        <!-- 1. Cerrar -->
+        <button type="button" onclick="closeCatalogoModal()" class="w-full sm:w-auto px-5 py-2.5 border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-bold transition cursor-pointer">
           Cerrar
         </button>
-        <div class="flex items-center gap-2 w-full sm:w-auto justify-end flex-wrap">
-          <button type="button" onclick="verPdfEnPantalla()" id="btnVerPdfPantalla" class="w-full sm:w-auto px-3.5 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl text-xs font-bold transition flex items-center justify-center border border-blue-200 shadow-2xs" title="Ver el archivo PDF directamente en una pestaña sin descargarlo">
-            <i class="fa-solid fa-arrow-up-right-from-square mr-1.5 text-blue-600"></i>Ver PDF en Pantalla
+
+        <div class="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+          <!-- 2. Ver PDF en Pantalla (Abre en una pestaña blob: sin guardarlo en disco) -->
+          <button type="button" onclick="verPdfEnPantalla()" id="btnVerPdfPantalla" class="w-full sm:w-auto px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-xl text-xs font-bold transition flex items-center justify-center shadow-2xs cursor-pointer" title="Ver el archivo PDF directamente en una pestaña sin descargarlo en el computador">
+            <i class="fa-solid fa-arrow-up-right-from-square mr-1.5 text-[#0755C9]"></i>
+            <span>Ver PDF en Pantalla</span>
           </button>
-          <button type="button" onclick="abrirVistaPreviaCatalogo()" class="w-full sm:w-auto px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center justify-center">
-            <i class="fa-regular fa-eye mr-1.5"></i>Vista Rápida
-          </button>
-          <button type="button" onclick="compartirCatalogoPdfWhatsApp()" id="btnEnviarWhatsAppFooter" class="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center">
-            <i class="fa-brands fa-whatsapp text-sm mr-1.5"></i>Enviar WhatsApp
-          </button>
-          <button type="button" onclick="imprimirCatalogoProductos()" class="w-full sm:w-auto px-4 py-2.5 bg-[#071B49] hover:bg-[#0755C9] text-white rounded-xl text-xs font-extrabold shadow-md transition flex items-center justify-center border border-white/10">
-            <i class="fa-solid fa-print mr-1.5 text-cyan-300"></i>Imprimir
+
+          <!-- 3. Enviar Catálogo por WhatsApp (Compila PDF + abre WhatsApp con mensaje y archivo en 1 clic) -->
+          <button type="button" onclick="compartirCatalogoPdfWhatsApp()" id="btnCompartirWhatsApp" class="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold shadow-md hover:shadow-lg transition flex items-center justify-center cursor-pointer">
+            <i class="fa-brands fa-whatsapp text-base mr-2"></i>
+            <span>Enviar Catálogo por WhatsApp</span>
           </button>
         </div>
       </div>
@@ -6927,7 +6852,7 @@
   <div id="areaImpresionOficial" class="hidden-on-screen" aria-hidden="true"></div>
 
   <!-- Scripts -->
-  <script src="app.js?v=2.1.0"></script>
+  <script src="app.js?v=2.2.0"></script>
 
     <!-- MODAL: DETALLE Y VOUCHER IMPRIMIBLE DE NOTA DE DÉBITO A PROVEEDOR -->
     <div id="modalNotaDebitoCompra" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 hidden">

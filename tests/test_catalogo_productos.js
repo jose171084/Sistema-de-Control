@@ -182,6 +182,24 @@ assert.strictEqual(normalizar("+58 424 1112233"), "584241112233", "+58 debe limp
 assert.strictEqual(normalizar("584129998877"), "584129998877", "Número con código internacional directo debe preservarse");
 console.log("✅ ÉXITO: Normalizador telefónico E.164 para WhatsApp verificado con precisión.");
 
+// --- TEST 7: Mensaje Oficial y Persuasivo de WhatsApp (Psicología Lingüística y Emojis) ---
+console.log("\n--- Test 7: Mensaje Oficial para WhatsApp con Nombre, RIF y Psicología Lingüística ---");
+const construirMensaje = context.window.construirMensajeWhatsAppCatalogo;
+assert(typeof construirMensaje === 'function', "construirMensajeWhatsAppCatalogo debe estar definida en window");
+
+const msgConCliente = construirMensaje("Inversiones El Éxito C.A.", mockConfig);
+assert(msgConCliente.includes("DISTRIBUIDORA TAVO CLOUD C.A."), "El mensaje debe incluir el nombre de la empresa");
+assert(msgConCliente.includes(mockConfig.documento_fiscal), "El mensaje debe incluir el RIF de la empresa");
+assert(msgConCliente.includes("Estimado/a cliente *Inversiones El Éxito C.A.*"), "Debe saludar al cliente por su nombre");
+assert(msgConCliente.includes("Nos complace compartirle nuestro **Catálogo Oficial de Productos**"), "Debe incluir la frase clave requerida");
+assert(msgConCliente.includes("🏢") && msgConCliente.includes("📋") && msgConCliente.includes("📄") && msgConCliente.includes("💵"), "Debe incluir emojis corporativos");
+assert(msgConCliente.includes("rentabilidad") || msgConCliente.includes("potenciar su negocio"), "Debe aplicar psicología lingüística orientada a beneficio");
+assert(msgConCliente.includes("¡Le deseamos un excelente día y el mayor de los éxitos!"), "Debe incluir saludo cordial final");
+
+const msgSinCliente = construirMensaje("", mockConfig);
+assert(msgSinCliente.includes("Estimado/a cliente 👋"), "Debe manejar fallback cordial cuando no se especifica cliente");
+console.log("✅ ÉXITO: Generación de mensaje oficial de WhatsApp validada con exactitud.");
+
 console.log("\n==================================================");
 console.log(" 🎯 TODOS LOS TESTS DEL CATÁLOGO PASARON AL 100%");
 console.log("==================================================");

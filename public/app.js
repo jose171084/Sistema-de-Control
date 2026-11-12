@@ -12881,7 +12881,7 @@ const DocumentTemplates = {
             }
 
             cardsHtml += `
-              <div class="doc-catalogo-card" style="border: 1px solid #E2E8F0; border-radius: 8px; background: #FFFFFF; overflow: hidden; display: flex; flex-direction: column; page-break-inside: avoid; break-inside: avoid;">
+              <div class="doc-catalogo-card" style="width: calc(33.333% - 10px); margin: 5px; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 8px; background: #FFFFFF; overflow: hidden; display: flex; flex-direction: column; page-break-inside: avoid; break-inside: avoid;">
                 <div style="width: 100%; height: 120px; background: #F8FAFC; border-bottom: 1px solid #F1F5F9; display: flex; align-items: center; justify-content: center; overflow: hidden;">
                   ${imgBlock}
                 </div>
@@ -12919,7 +12919,7 @@ const DocumentTemplates = {
                 </span>
               </div>
             </div>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px;">
+            <div style="display: flex; flex-wrap: wrap; margin-left: -5px; margin-right: -5px; margin-bottom: 12px;">
               ${cardsHtml}
             </div>
           `;
@@ -16486,10 +16486,7 @@ function openCatalogoModal() {
       AppState.clientes.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)} (${escapeHtml(c.cedula)}) - ${escapeHtml(c.telefono || 'Sin telf')}</option>`).join('');
   }
 
-  // 3. Resetear pestaña a Formato
-  setCatalogoTab('formato');
-
-  // 4. Actualizar estado visual de los radios y contador
+  // 3. Actualizar modo de stock, contador y previsualización de mensaje
   actualizarModoStockCatalogo();
   actualizarContadorCatalogo();
 
@@ -16499,34 +16496,6 @@ function openCatalogoModal() {
 function closeCatalogoModal() {
   const modal = document.getElementById('modalCatalogoProductos');
   if (modal) modal.classList.add('hidden');
-}
-
-function setCatalogoTab(tab) {
-  const btnFormato = document.getElementById('tabBtnCatalogoFormato');
-  const btnWhatsApp = document.getElementById('tabBtnCatalogoWhatsApp');
-  const panelFormato = document.getElementById('panelCatalogoFormato');
-  const panelWhatsApp = document.getElementById('panelCatalogoWhatsApp');
-
-  if (tab === 'whatsapp') {
-    if (btnFormato) {
-      btnFormato.className = 'px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center bg-slate-100 text-slate-600 hover:bg-slate-200';
-    }
-    if (btnWhatsApp) {
-      btnWhatsApp.className = 'px-4 py-2 rounded-xl text-xs font-bold transition flex items-center bg-[#071B49] text-white shadow-xs';
-    }
-    if (panelFormato) panelFormato.classList.add('hidden');
-    if (panelWhatsApp) panelWhatsApp.classList.remove('hidden');
-    actualizarPreviewWhatsAppCatalogo();
-  } else {
-    if (btnFormato) {
-      btnFormato.className = 'px-4 py-2 rounded-xl text-xs font-bold transition flex items-center bg-[#071B49] text-white shadow-xs';
-    }
-    if (btnWhatsApp) {
-      btnWhatsApp.className = 'px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center bg-slate-100 text-slate-600 hover:bg-slate-200';
-    }
-    if (panelFormato) panelFormato.classList.remove('hidden');
-    if (panelWhatsApp) panelWhatsApp.classList.add('hidden');
-  }
 }
 
 function actualizarModoStockCatalogo() {
@@ -16544,17 +16513,17 @@ function actualizarModoStockCatalogo() {
 
   if (selected === 'con_stock') {
     if (cardVisible) {
-      cardVisible.className = 'cursor-pointer border-2 border-emerald-600 bg-emerald-50/50 rounded-2xl p-3.5 flex flex-col justify-between transition relative';
+      cardVisible.className = 'cursor-pointer border-2 border-emerald-600 bg-emerald-50/40 rounded-2xl p-3.5 flex flex-col justify-between transition relative hover:shadow-xs';
     }
     if (cardOculto) {
-      cardOculto.className = 'cursor-pointer border-2 border-slate-200 rounded-2xl p-3.5 flex flex-col justify-between transition relative hover:border-slate-300';
+      cardOculto.className = 'cursor-pointer border-2 border-slate-200 rounded-2xl p-3.5 flex flex-col justify-between transition relative hover:border-slate-300 hover:shadow-xs';
     }
   } else {
     if (cardOculto) {
-      cardOculto.className = 'cursor-pointer border-2 border-blue-600 bg-blue-50/50 rounded-2xl p-3.5 flex flex-col justify-between transition relative';
+      cardOculto.className = 'cursor-pointer border-2 border-[#0755C9] bg-blue-50/40 rounded-2xl p-3.5 flex flex-col justify-between transition relative hover:shadow-xs';
     }
     if (cardVisible) {
-      cardVisible.className = 'cursor-pointer border-2 border-slate-200 rounded-2xl p-3.5 flex flex-col justify-between transition relative hover:border-slate-300';
+      cardVisible.className = 'cursor-pointer border-2 border-slate-200 rounded-2xl p-3.5 flex flex-col justify-between transition relative hover:border-slate-300 hover:shadow-xs';
     }
   }
 
@@ -16564,9 +16533,6 @@ function actualizarModoStockCatalogo() {
 
 function obtenerProductosFiltradosCatalogo() {
   const catId = document.getElementById('catalogoFilterCategoria')?.value || '';
-  const tipo = document.getElementById('catalogoFilterTipo')?.value || '';
-  const disp = document.getElementById('catalogoFilterDisponibilidad')?.value || 'todos';
-
   let list = AppState.productos || [];
 
   // Filtrar solo activos
@@ -16574,12 +16540,6 @@ function obtenerProductosFiltradosCatalogo() {
 
   if (catId) {
     list = list.filter(p => String(p.categoria_id) === String(catId));
-  }
-  if (tipo) {
-    list = list.filter(p => p.tipo === tipo);
-  }
-  if (disp === 'con_stock') {
-    list = list.filter(p => parseFloat(p.stock || 0) > 0);
   }
 
   return list;
@@ -16611,8 +16571,7 @@ function construirMensajeWhatsAppCatalogo(nombreCliente, config) {
   const cfg = config || AppState.config || {};
   const nombreEmpresa = (cfg.nombre_negocio || 'TAVO CLOUD').trim().toUpperCase();
   const rif = (cfg.documento_fiscal || '').trim();
-  const lineaRif = rif ? `📋 *RIF:* ${rif}
-` : '';
+  const lineaRif = rif ? `📋 *RIF:* ${rif}\n` : '';
   const clienteStr = (nombreCliente && nombreCliente.trim()) ? `*${nombreCliente.trim()}*` : '';
   const saludoCliente = clienteStr ? `Estimado/a cliente ${clienteStr}` : `Estimado/a cliente`;
 
@@ -16637,24 +16596,7 @@ function actualizarPreviewWhatsAppCatalogo(nombreCliente = '') {
   }
 
   const textarea = document.getElementById('catalogoMensajeWhatsAppPreview');
-  const badgePdf = document.getElementById('catalogoModoPdfBadge');
-  const nombrePdfEl = document.getElementById('catalogoArchivoPdfNombre');
-
-  const opciones = obtenerOpcionesCatalogoActual();
   const cfg = AppState.config || {};
-  const nombreNegocio = cfg.nombre_negocio || 'TAVO CLOUD';
-  const cleanName = nombreNegocio.replace(/[^a-zA-Z0-9]/g, '_');
-  const fileName = opciones.mostrarStock
-    ? `Catalogo_Inventario_${cleanName}.pdf`
-    : `Catalogo_Productos_${cleanName}.pdf`;
-
-  if (nombrePdfEl) nombrePdfEl.textContent = fileName;
-  if (badgePdf) {
-    badgePdf.textContent = opciones.mostrarStock ? 'Inventario (Con Stock)' : 'Comercial (Sin Stock)';
-    badgePdf.className = opciones.mostrarStock
-      ? 'text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800'
-      : 'text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800';
-  }
 
   if (textarea) {
     textarea.value = construirMensajeWhatsAppCatalogo(nombreCliente, cfg);
@@ -16667,7 +16609,7 @@ function copiarMensajeWhatsAppCatalogo() {
 
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(textarea.value).then(() => {
-      alert('📋 Mensaje oficial copiado al portapapeles.');
+      alert('📋 Mensaje corporativo copiado al portapapeles.');
     }).catch(() => {
       textarea.select();
       document.execCommand('copy');
@@ -16694,16 +16636,7 @@ function obtenerOpcionesCatalogoActual() {
     }
   }
 
-  const radiosLayout = document.getElementsByName('catalogoLayout');
-  let layout = 'grid';
-  for (const r of radiosLayout) {
-    if (r.checked) {
-      layout = r.value;
-      break;
-    }
-  }
-
-  return { mostrarStock, layout };
+  return { mostrarStock, layout: 'grid' };
 }
 
 function asegurarHtml2Pdf() {
@@ -16717,123 +16650,126 @@ function asegurarHtml2Pdf() {
   });
 }
 
+/**
+ * MOTOR OFICIAL DE GENERACIÓN DE CATÁLOGO PDF (ALTA DEFINICIÓN & CERO PÁGINAS EN BLANCO)
+ * Utiliza contenedor en capa positiva (z-index positivo) con overlay corporativo de compilación,
+ * previniendo que html2canvas capture fondos opacos sobrepuestos.
+ */
+async function generarPdfCatalogoBlob(prods, cfg, opciones) {
+  if (!prods || prods.length === 0) {
+    throw new Error('No hay productos para generar el catálogo.');
+  }
+  const config = cfg || AppState.config || {};
+  const opts = opciones || obtenerOpcionesCatalogoActual();
+  const nombreNegocio = config.nombre_negocio || 'TAVO CLOUD';
+  const cleanName = nombreNegocio.replace(/[^a-zA-Z0-9]/g, '_');
+  const fileName = opts.mostrarStock
+    ? `Catalogo_Inventario_${cleanName}.pdf`
+    : `Catalogo_Productos_${cleanName}.pdf`;
+
+  if (typeof html2pdf === 'undefined') {
+    await asegurarHtml2Pdf();
+  }
+
+  // 1. Overlay Corporativo de Compilación (Capa visual superior z-index: 999999)
+  let overlay = document.getElementById('catalogoCompilandoOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'catalogoCompilandoOverlay';
+    overlay.className = 'fixed inset-0 bg-[#071B49]/80 backdrop-blur-xs flex flex-col items-center justify-center text-white';
+    overlay.style.zIndex = '999999';
+    overlay.innerHTML = `
+      <div class="bg-white/10 p-6 rounded-3xl border border-white/20 text-center space-y-3 max-w-sm mx-4 shadow-2xl">
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#0755C9] to-[#00C6E8] text-white flex items-center justify-center mx-auto shadow-lg shadow-blue-500/30">
+          <i class="fa-solid fa-spinner fa-spin text-xl"></i>
+        </div>
+        <h4 class="font-extrabold text-sm text-white">Compilando Catálogo Oficial</h4>
+        <p class="text-[11px] text-slate-300">Generando documento en alta resolución con imágenes y precios en USD...</p>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  }
+
+  // 2. Contenedor Host en capa positiva z-index: 999998 (por encima del body para evitar captura en blanco)
+  let host = document.getElementById('catalogoPdfRenderHost');
+  if (host) host.remove();
+  host = document.createElement('div');
+  host.id = 'catalogoPdfRenderHost';
+  host.style.position = 'fixed';
+  host.style.top = '0';
+  host.style.left = '0';
+  host.style.width = '794px';
+  host.style.minHeight = '1123px';
+  host.style.backgroundColor = '#ffffff';
+  host.style.zIndex = '999998';
+  host.style.pointerEvents = 'none';
+  host.style.opacity = '1';
+
+  const htmlDoc = DocumentTemplates.catalogoProductos(prods, config, opts);
+  host.innerHTML = htmlDoc;
+  document.body.appendChild(host);
+
+  // Pausa técnica de renderizado DOM y fuentes
+  await new Promise(r => setTimeout(r, 220));
+
+  let blob = null;
+  try {
+    const opt = {
+      margin: [6, 6, 6, 6],
+      filename: fileName,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        scrollY: 0,
+        scrollX: 0,
+        windowWidth: 794
+      },
+      jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' }
+    };
+
+    blob = await html2pdf().set(opt).from(host).outputPdf('blob');
+  } finally {
+    if (host && host.parentNode) host.parentNode.removeChild(host);
+    if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+  }
+
+  return { blob, fileName, htmlDoc };
+}
+
 async function verPdfEnPantalla() {
   const prods = obtenerProductosFiltradosCatalogo();
   if (prods.length === 0) {
     alert('No hay productos que coincidan con los filtros seleccionados.');
     return;
   }
-  const opciones = obtenerOpcionesCatalogoActual();
-  const cfg = AppState.config || {};
-  const nombreNegocio = cfg.nombre_negocio || 'TAVO CLOUD';
-  const cleanName = nombreNegocio.replace(/[^a-zA-Z0-9]/g, '_');
-  const fileName = opciones.mostrarStock
-    ? `Catalogo_Inventario_${cleanName}.pdf`
-    : `Catalogo_Productos_${cleanName}.pdf`;
-
   const btn = document.getElementById('btnVerPdfPantalla');
   const origText = btn ? btn.innerHTML : '';
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Abriendo PDF...';
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Abriendo...';
   }
 
   try {
-    if (typeof html2pdf === 'undefined') {
-      await asegurarHtml2Pdf();
-    }
-    const htmlDoc = DocumentTemplates.catalogoProductos(prods, cfg, opciones);
-    const tempDiv = document.createElement('div');
-    tempDiv.style.position = 'fixed';
-    tempDiv.style.top = '0';
-    tempDiv.style.left = '0';
-    tempDiv.style.zIndex = '-9999';
-    tempDiv.style.width = '794px';
-    tempDiv.style.background = '#ffffff';
-    tempDiv.style.pointerEvents = 'none';
-    tempDiv.innerHTML = htmlDoc;
-    document.body.appendChild(tempDiv);
-
-    const opt = {
-      margin: [6, 6, 6, 6],
-      filename: fileName,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false, scrollY: 0, scrollX: 0 },
-      jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' }
-    };
-
-    const pdfBlob = await html2pdf().set(opt).from(tempDiv).outputPdf('blob');
-    if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
-
-    if (pdfBlob) {
-      const blobUrl = URL.createObjectURL(pdfBlob);
+    const { blob, fileName, htmlDoc } = await generarPdfCatalogoBlob(prods);
+    if (blob && blob.size > 100) {
+      const blobUrl = URL.createObjectURL(blob);
       window.open(blobUrl, '_blank');
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
     } else {
-      abrirVistaPreviaCatalogo();
+      // Fallback a impresión nativa en navegador
+      const opciones = obtenerOpcionesCatalogoActual();
+      DocumentPrinter.print({
+        type: 'letterPortrait',
+        title: fileName.replace('.pdf', ''),
+        html: htmlDoc
+      });
     }
   } catch (err) {
-    console.error('Error al abrir PDF en pantalla:', err);
-    abrirVistaPreviaCatalogo();
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = origText;
-    }
-  }
-}
-
-async function descargarPdfCatalogoDirecto() {
-  const prods = obtenerProductosFiltradosCatalogo();
-  if (prods.length === 0) {
-    alert('No hay productos que coincidan con los filtros seleccionados.');
-    return;
-  }
-  const opciones = obtenerOpcionesCatalogoActual();
-  const cfg = AppState.config || {};
-  const nombreNegocio = cfg.nombre_negocio || 'TAVO CLOUD';
-  const cleanName = nombreNegocio.replace(/[^a-zA-Z0-9]/g, '_');
-  const fileName = opciones.mostrarStock
-    ? `Catalogo_Inventario_${cleanName}.pdf`
-    : `Catalogo_Productos_${cleanName}.pdf`;
-
-  const btn = document.getElementById('btnDescargarPdfDirecto');
-  const origText = btn ? btn.innerHTML : '';
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Generando...';
-  }
-
-  try {
-    if (typeof html2pdf === 'undefined') {
-      await asegurarHtml2Pdf();
-    }
-    const htmlDoc = DocumentTemplates.catalogoProductos(prods, cfg, opciones);
-    const tempDiv = document.createElement('div');
-    tempDiv.style.position = 'fixed';
-    tempDiv.style.top = '0';
-    tempDiv.style.left = '0';
-    tempDiv.style.zIndex = '-9999';
-    tempDiv.style.width = '794px';
-    tempDiv.style.background = '#ffffff';
-    tempDiv.style.pointerEvents = 'none';
-    tempDiv.innerHTML = htmlDoc;
-    document.body.appendChild(tempDiv);
-
-    const opt = {
-      margin: [6, 6, 6, 6],
-      filename: fileName,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false, scrollY: 0, scrollX: 0 },
-      jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' }
-    };
-
-    await html2pdf().set(opt).from(tempDiv).save();
-
-    if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
-  } catch (err) {
-    console.error('Error al descargar PDF:', err);
-    alert('Error al generar el PDF: ' + err.message);
+    console.error('Error al generar PDF en pantalla:', err);
+    imprimirCatalogoProductos();
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -16853,78 +16789,34 @@ async function compartirCatalogoPdfWhatsApp() {
   const telRaw = telInput ? telInput.value.trim() : '';
   const telNorm = normalizarTelefonoWhatsApp(telRaw);
 
-  const opciones = obtenerOpcionesCatalogoActual();
   const cfg = AppState.config || {};
-  const nombreNegocio = cfg.nombre_negocio || 'TAVO CLOUD';
-  const cleanName = nombreNegocio.replace(/[^a-zA-Z0-9]/g, '_');
-  const fileName = opciones.mostrarStock
-    ? `Catalogo_Inventario_${cleanName}.pdf`
-    : `Catalogo_Productos_${cleanName}.pdf`;
+  const textarea = document.getElementById('catalogoMensajeWhatsAppPreview');
+  const mensajeTexto = (textarea && textarea.value.trim())
+    ? textarea.value.trim()
+    : construirMensajeWhatsAppCatalogo('', cfg);
 
-  const btn = document.getElementById('btnCompartirPdfWhatsApp') || document.getElementById('btnEnviarWhatsAppFooter');
-  const btnOriginalText = btn ? btn.innerHTML : '';
+  const btn = document.getElementById('btnCompartirWhatsApp');
+  const origText = btn ? btn.innerHTML : '';
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Generando Archivo PDF...';
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Compilando y Preparando...';
   }
 
   try {
-    if (typeof html2pdf === 'undefined') {
-      await asegurarHtml2Pdf();
-    }
-
-    const htmlDoc = DocumentTemplates.catalogoProductos(prods, cfg, opciones);
-
-    // Contenedor temporal en el DOM para renderizado de html2canvas (en capas inferiores del viewport)
-    const tempDiv = document.createElement('div');
-    tempDiv.id = 'tempPdfContainer';
-    tempDiv.style.position = 'fixed';
-    tempDiv.style.top = '0';
-    tempDiv.style.left = '0';
-    tempDiv.style.zIndex = '-9999';
-    tempDiv.style.width = '794px';
-    tempDiv.style.background = '#ffffff';
-    tempDiv.style.pointerEvents = 'none';
-    tempDiv.innerHTML = htmlDoc;
-    document.body.appendChild(tempDiv);
-
-    let pdfBlob = null;
+    const { blob, fileName, htmlDoc } = await generarPdfCatalogoBlob(prods);
     let pdfFile = null;
+    if (blob) {
+      pdfFile = new File([blob], fileName, { type: 'application/pdf' });
+    }
 
-    const opt = {
-      margin: [6, 6, 6, 6],
-      filename: fileName,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false, scrollY: 0, scrollX: 0 },
-      jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' }
-    };
-
-    if (typeof html2pdf !== 'undefined') {
+    // Copiar mensaje al portapapeles automáticamente
+    if (navigator.clipboard && navigator.clipboard.writeText) {
       try {
-        pdfBlob = await html2pdf().set(opt).from(tempDiv).outputPdf('blob');
-        if (pdfBlob) {
-          pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
-        }
-      } catch (eBlob) {
-        console.warn('[Catalogo] outputPdf(blob) falló:', eBlob);
-      }
+        await navigator.clipboard.writeText(mensajeTexto);
+      } catch (eClip) {}
     }
 
-    if (tempDiv.parentNode) {
-      tempDiv.parentNode.removeChild(tempDiv);
-    }
-
-    const textarea = document.getElementById('catalogoMensajeWhatsAppPreview');
-    const mensajeTexto = (textarea && textarea.value.trim())
-      ? textarea.value.trim()
-      : construirMensajeWhatsAppCatalogo('', cfg);
-
-    const waUrl = telNorm
-      ? `https://wa.me/${telNorm}?text=${encodeURIComponent(mensajeTexto)}`
-      : `https://wa.me/?text=${encodeURIComponent(mensajeTexto)}`;
-
-    // INTENTO 1: Web Share API en dispositivos compatibles (Móviles Android / iOS)
-    let compartido = false;
+    // DISPOSITIVOS MÓVILES (Android / iOS): Web Share API nativa (adjunta PDF + texto en 1 clic)
     if (pdfFile && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
       try {
         await navigator.share({
@@ -16932,50 +16824,46 @@ async function compartirCatalogoPdfWhatsApp() {
           title: fileName,
           text: mensajeTexto
         });
-        compartido = true;
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = btnOriginalText;
-        }
         return;
       } catch (shareErr) {
         if (shareErr.name === 'AbortError') return;
-        console.warn('[Catalogo] WebShare no completado, activando descarga directa:', shareErr);
+        console.warn('[Catalogo] WebShare cancelado o no soportado, continuando con apertura directa:', shareErr);
       }
     }
 
-    // INTENTO 2: Descarga automática inmediata del archivo PDF + Apertura de WhatsApp Web
-    if (pdfBlob) {
-      const blobUrl = URL.createObjectURL(pdfBlob);
-      const downloadLink = document.createElement('a');
-      downloadLink.href = blobUrl;
-      downloadLink.download = fileName;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      document.body.removeChild(downloadLink);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
-    } else if (typeof html2pdf !== 'undefined') {
-      await html2pdf().set(opt).from(tempDiv).save();
+    // ESCRITORIO (Windows / Mac):
+    // 1. Descarga automática del PDF en memoria
+    if (blob) {
+      const blobUrl = URL.createObjectURL(blob);
+      const dlLink = document.createElement('a');
+      dlLink.href = blobUrl;
+      dlLink.download = fileName;
+      document.body.appendChild(dlLink);
+      dlLink.click();
+      document.body.removeChild(dlLink);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
     }
 
-    // Abrir WhatsApp con el número del cliente y el mensaje estructurado
+    // 2. Apertura directa de WhatsApp con número y texto precargado mediante endpoint oficial de API
+    const waUrl = telNorm
+      ? `https://api.whatsapp.com/send?phone=${telNorm}&text=${encodeURIComponent(mensajeTexto)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(mensajeTexto)}`;
     window.open(waUrl, '_blank');
 
-    // Notificación modal institucional con instrucciones asistidas
+    // 3. Guía visual de asistencia rápida
     mostrarModalPdfListoWhatsApp(fileName, telNorm);
 
   } catch (err) {
-    console.error('Error generando PDF de catálogo:', err);
+    console.error('Error al compartir catálogo por WhatsApp:', err);
     imprimirCatalogoProductos();
-    const mensajeTexto = construirMensajeWhatsAppCatalogo('', cfg);
     const waUrl = telNorm
-      ? `https://wa.me/${telNorm}?text=${encodeURIComponent(mensajeTexto)}`
-      : `https://wa.me/?text=${encodeURIComponent(mensajeTexto)}`;
+      ? `https://api.whatsapp.com/send?phone=${telNorm}&text=${encodeURIComponent(mensajeTexto)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(mensajeTexto)}`;
     window.open(waUrl, '_blank');
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = btnOriginalText;
+      btn.innerHTML = origText;
     }
   }
 }
@@ -16997,12 +16885,12 @@ function mostrarModalPdfListoWhatsApp(fileName, phone) {
       <div>
         <h3 class="font-extrabold text-base text-slate-900">¡Archivo PDF Generado con Éxito!</h3>
         <p class="text-xs text-slate-600 mt-1 leading-relaxed">
-          El archivo <strong>${fileName}</strong> se ha descargado en su equipo y se abrió el chat de WhatsApp con <strong>${formattedPhone}</strong>.
+          El archivo <strong>${fileName}</strong> se ha generado en su equipo y se abrió el chat de WhatsApp con <strong>${formattedPhone}</strong>.
         </p>
       </div>
       <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 text-left text-[11px] text-emerald-950 flex items-start space-x-2.5">
         <i class="fa-solid fa-paperclip text-emerald-600 mt-0.5 text-base"></i>
-        <span><strong>Paso final:</strong> Arrastre el archivo PDF recién descargado a la ventana de WhatsApp abierta (o use el botón <strong>Adjuntar 📎</strong>) para enviarlo a su cliente junto con el mensaje oficial precargado.</span>
+        <span><strong>Paso final:</strong> El mensaje oficial ha sido <strong>copiado al portapapeles</strong> y el archivo PDF está en sus descargas. Simplemente adjunte el PDF o péguelo en el chat abierto.</span>
       </div>
       <button onclick="this.closest('#modalPdfGeneradoAlerta').remove()" class="w-full bg-[#071B49] hover:bg-[#0755C9] text-white py-2.5 rounded-xl font-bold text-xs transition shadow-sm cursor-pointer">
         Entendido
@@ -17033,28 +16921,7 @@ function imprimirCatalogoProductos() {
 }
 
 function abrirVistaPreviaCatalogo() {
-  const prods = obtenerProductosFiltradosCatalogo();
-  const opciones = obtenerOpcionesCatalogoActual();
-  const cfg = AppState.config || {};
-  const htmlDoc = DocumentTemplates.catalogoProductos(prods, cfg, opciones);
-
-  const modal = document.getElementById('modalVistaPreviaCatalogo');
-  const container = document.getElementById('vistaPreviaCatalogoContenido');
-  const titulo = document.getElementById('vistaPreviaCatalogoTitulo');
-
-  if (titulo) {
-    titulo.textContent = opciones.mostrarStock 
-      ? 'Vista Previa: Catálogo de Inventario (Con Existencias)' 
-      : 'Vista Previa: Catálogo Comercial (Sin Existencias)';
-  }
-
-  if (container) {
-    container.innerHTML = htmlDoc;
-  }
-
-  if (modal) {
-    modal.classList.remove('hidden');
-  }
+  verPdfEnPantalla();
 }
 
 function cerrarVistaPreviaCatalogo() {
@@ -17065,7 +16932,6 @@ function cerrarVistaPreviaCatalogo() {
 // Exportar al ámbito global para llamadas onclick desde el DOM
 window.openCatalogoModal = openCatalogoModal;
 window.closeCatalogoModal = closeCatalogoModal;
-window.setCatalogoTab = setCatalogoTab;
 window.actualizarModoStockCatalogo = actualizarModoStockCatalogo;
 window.actualizarContadorCatalogo = actualizarContadorCatalogo;
 window.seleccionarClienteParaWhatsAppCatalogo = seleccionarClienteParaWhatsAppCatalogo;
@@ -17073,12 +16939,11 @@ window.actualizarPreviewWhatsAppCatalogo = actualizarPreviewWhatsAppCatalogo;
 window.copiarTextoCatalogoWhatsApp = copiarTextoCatalogoWhatsApp;
 window.copiarMensajeWhatsAppCatalogo = copiarMensajeWhatsAppCatalogo;
 window.construirMensajeWhatsAppCatalogo = construirMensajeWhatsAppCatalogo;
-window.descargarPdfCatalogoDirecto = descargarPdfCatalogoDirecto;
 window.compartirCatalogoPdfWhatsApp = compartirCatalogoPdfWhatsApp;
 window.normalizarTelefonoWhatsApp = normalizarTelefonoWhatsApp;
 window.autoNormalizarTelefonoInput = autoNormalizarTelefonoInput;
 window.imprimirCatalogoProductos = imprimirCatalogoProductos;
 window.abrirVistaPreviaCatalogo = abrirVistaPreviaCatalogo;
 window.cerrarVistaPreviaCatalogo = cerrarVistaPreviaCatalogo;
-
+window.generarPdfCatalogoBlob = generarPdfCatalogoBlob;
 window.verPdfEnPantalla = verPdfEnPantalla;
