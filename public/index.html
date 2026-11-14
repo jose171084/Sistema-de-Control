@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TAVO CLOUD - Business Management System</title>
+  <!-- Favicon Oficial TAVO CLOUD (SVG Inline de Alta Fidelidad) -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23071B49'/%3E%3Cpath d='M16 8a5 5 0 0 1 4.9 4A4.5 4.5 0 0 1 24.5 16a4.5 4.5 0 0 1-4.5 4.5H11A4 4 0 0 1 7 16.5 4 4 0 0 1 10.2 12.6 5 5 0 0 1 16 8z' fill='url(%23g)'/%3E%3Cdefs%3E%3ClinearGradient id='g' x1='7' y1='8' x2='25' y2='21' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%230755C9'/%3E%3Cstop offset='1' stop-color='%2300C6E8'/%3E%3C/linearGradient%3E%3C/defs%3E%3C/svg%3E">
+
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Google Fonts: Inter (TAVO CLOUD Typography) -->
@@ -52,7 +55,7 @@
   <!-- Estilos Custom Soft UI y Tematización Dinámica -->
   <!-- html2pdf.js para Generación y Exportación Directa de Archivo PDF -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-  <link rel="stylesheet" href="styles.css?v=2.3.0">
+  <link rel="stylesheet" href="styles.css?v=3.0.0">
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans min-h-screen antialiased overflow-x-hidden md:flex selection:bg-teal-100 selection:text-teal-900">
 
@@ -117,6 +120,10 @@
         <i class="fa-solid fa-file-invoice-dollar mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_facturacion">Facturas</span>
       </button>
+      <button onclick="navigate('fuerza-ventas')" id="nav-fuerza-ventas" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
+        <i class="fa-solid fa-users-line mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
+        <span>Fuerza de Ventas</span>
+      </button>
       <button onclick="navigate('devoluciones')" id="nav-devoluciones" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
         <i class="fa-solid fa-arrow-rotate-left mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_devoluciones">Devoluciones de Factura</span>
@@ -167,7 +174,14 @@
 
       <!-- Botón CFO Copilot IA (Fase 3B) -->
       <div class="pt-2 px-1">
-        <button onclick="abrirModalCfoCopilot()" id="nav-cfo-copilot" class="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-gradient-to-r from-blue-950 via-indigo-950 to-blue-900 border border-blue-500/40 text-white font-semibold text-xs shadow-md hover:border-[#00C6E8] hover:shadow-[#00C6E8]/20 transition-all">
+        <div class="pt-3 pb-1 px-2.5">
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Seguridad & Sistema</span>
+      </div>
+      <button onclick="navigate('usuarios')" id="nav-usuarios" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
+        <i class="fa-solid fa-user-shield mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
+        <span>Usuarios & Roles</span>
+      </button>
+      <button onclick="abrirModalCfoCopilot()" id="nav-cfo-copilot" class="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-gradient-to-r from-blue-950 via-indigo-950 to-blue-900 border border-blue-500/40 text-white font-semibold text-xs shadow-md hover:border-[#00C6E8] hover:shadow-[#00C6E8]/20 transition-all">
           <span class="flex items-center space-x-2">
             <span class="text-sm">🧠</span>
             <span class="font-bold tracking-tight">CFO Copilot IA</span>
@@ -4252,7 +4266,254 @@
       </div>
     </section>
 
-  </main>
+  
+    <!-- ========================================================
+         VISTA 14: FUERZA DE VENTAS, VENDEDORES Y COMISIONES (ERP)
+         ======================================================== -->
+    <section id="view-fuerza-ventas" class="hidden space-y-6">
+      <!-- Encabezado del Módulo -->
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
+        <div class="flex items-center space-x-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#071B49] to-[#0755C9] text-white flex items-center justify-center shadow-lg shadow-blue-900/20 shrink-0">
+            <i class="fa-solid fa-users-line text-cyan-300 text-xl"></i>
+          </div>
+          <div>
+            <h2 class="text-xl font-extrabold text-slate-900 tracking-tight">Fuerza de Ventas & Comisiones</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Gestión de asesores comerciales, control de cuotas mensuales y liquidación de comisiones devengadas.</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-2.5 w-full sm:w-auto justify-end">
+          <button onclick="abrirModalNuevoVendedor()" class="px-4 py-2 bg-[#0755C9] hover:bg-blue-600 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition flex items-center">
+            <i class="fa-solid fa-plus mr-1.5"></i>Registrar Vendedor
+          </button>
+        </div>
+      </div>
+
+      <!-- KPI Cards: Métricas Comerciales en USD -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-slate-500 uppercase">Ventas del Mes</span>
+            <div class="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-sm font-bold">
+              <i class="fa-solid fa-dollar-sign"></i>
+            </div>
+          </div>
+          <div id="kpiFvVentasMes" class="text-xl font-extrabold text-slate-900 mt-2">$0.00 USD</div>
+          <div class="text-[11px] text-slate-400 mt-0.5">Ventas acumuladas facturadas</div>
+        </div>
+
+        <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-slate-500 uppercase">Comisiones Devengadas</span>
+            <div class="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-sm font-bold">
+              <i class="fa-solid fa-hand-holding-dollar"></i>
+            </div>
+          </div>
+          <div id="kpiFvComisionesDevengadas" class="text-xl font-extrabold text-emerald-600 mt-2">$0.00 USD</div>
+          <div class="text-[11px] text-emerald-600 font-semibold mt-0.5">Listas para liquidación (Contado)</div>
+        </div>
+
+        <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-slate-500 uppercase">Comisiones Pendientes</span>
+            <div class="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-sm font-bold">
+              <i class="fa-solid fa-clock-rotate-left"></i>
+            </div>
+          </div>
+          <div id="kpiFvComisionesPendientes" class="text-xl font-extrabold text-amber-600 mt-2">$0.00 USD</div>
+          <div class="text-[11px] text-amber-600 font-semibold mt-0.5">Sujetas a cobranza en CXC</div>
+        </div>
+
+        <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-slate-500 uppercase">Fuerza Activa</span>
+            <div class="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-sm font-bold">
+              <i class="fa-solid fa-id-badge"></i>
+            </div>
+          </div>
+          <div id="kpiFvTotalVendedores" class="text-xl font-extrabold text-purple-700 mt-2">0 Asesores</div>
+          <div class="text-[11px] text-slate-400 mt-0.5">Vendedores comerciales registrados</div>
+        </div>
+      </div>
+
+      <!-- Pestañas Internas del Módulo -->
+      <div class="flex items-center space-x-2 border-b border-slate-200">
+        <button type="button" onclick="cambiarSubtabFuerzaVentas('vendedores')" id="subtabFvVendedores" class="px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition">
+          <i class="fa-solid fa-user-tie mr-1.5"></i>Directorio & Cuotas
+        </button>
+        <button type="button" onclick="cambiarSubtabFuerzaVentas('comisiones')" id="subtabFvComisiones" class="px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition">
+          <i class="fa-solid fa-file-invoice-dollar mr-1.5"></i>Reporte Detallado de Comisiones
+        </button>
+      </div>
+
+      <!-- Subtab 1: Tabla de Vendedores -->
+      <div id="panelFvVendedores" class="bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-600 font-bold uppercase text-[11px] border-b border-slate-200">
+              <tr>
+                <th class="py-3 px-4">Código</th>
+                <th class="py-3 px-4">Nombre del Asesor</th>
+                <th class="py-3 px-4">Teléfono / Contacto</th>
+                <th class="py-3 px-4 text-center">% Comisión</th>
+                <th class="py-3 px-4 text-right">Meta Mensual</th>
+                <th class="py-3 px-4 text-right">Ventas Mes</th>
+                <th class="py-3 px-4 text-center">Cumplimiento</th>
+                <th class="py-3 px-4 text-center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tablaVendedoresBody" class="divide-y divide-slate-100">
+              <tr><td colspan="8" class="text-center py-8 text-slate-400">Cargando directorio de vendedores...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Subtab 2: Reporte de Comisiones por Factura -->
+      <div id="panelFvComisiones" class="hidden bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden p-4 space-y-4">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <h3 class="font-extrabold text-sm text-slate-800">Comisiones Asociadas a Ventas</h3>
+          <div class="flex items-center space-x-2">
+            <label class="text-xs font-bold text-slate-600">Período:</label>
+            <input type="month" id="filtroMesComisiones" onchange="cargarReporteComisiones()" class="text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-600 font-bold uppercase text-[11px] border-b border-slate-200">
+              <tr>
+                <th class="py-3 px-4">Factura</th>
+                <th class="py-3 px-4">Fecha</th>
+                <th class="py-3 px-4">Cliente</th>
+                <th class="py-3 px-4">Vendedor</th>
+                <th class="py-3 px-4 text-right">Total Factura</th>
+                <th class="py-3 px-4 text-center">% Com.</th>
+                <th class="py-3 px-4 text-right">Monto Com. USD</th>
+                <th class="py-3 px-4 text-center">Estado Comisión</th>
+              </tr>
+            </thead>
+            <tbody id="tablaComisionesBody" class="divide-y divide-slate-100">
+              <tr><td colspan="8" class="text-center py-8 text-slate-400">Cargando reporte de comisiones...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
+         VISTA 15: GESTIÓN DE USUARIOS Y CONTROL DE ACCESO (RBAC)
+         ======================================================== -->
+    <section id="view-usuarios" class="hidden space-y-6">
+      <!-- Encabezado del Módulo -->
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
+        <div class="flex items-center space-x-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#071B49] to-[#0755C9] text-white flex items-center justify-center shadow-lg shadow-blue-900/20 shrink-0">
+            <i class="fa-solid fa-user-shield text-cyan-300 text-xl"></i>
+          </div>
+          <div>
+            <h2 class="text-xl font-extrabold text-slate-900 tracking-tight">Gestión de Usuarios & Roles (RBAC)</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Control de acceso granular por organigrama, permisos operacionales críticos y bitácora de auditoría.</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-2.5 w-full sm:w-auto justify-end">
+          <button onclick="abrirModalNuevoUsuario()" class="px-4 py-2 bg-[#0755C9] hover:bg-blue-600 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition flex items-center">
+            <i class="fa-solid fa-user-plus mr-1.5"></i>Crear Nuevo Usuario
+          </button>
+        </div>
+      </div>
+
+      <!-- Pestañas Internas del Módulo -->
+      <div class="flex items-center space-x-2 border-b border-slate-200">
+        <button type="button" onclick="cambiarSubtabUsuarios('usuarios')" id="subtabUsrUsuarios" class="px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition">
+          <i class="fa-solid fa-users mr-1.5"></i>Usuarios Activos
+        </button>
+        <button type="button" onclick="cambiarSubtabUsuarios('roles')" id="subtabUsrRoles" class="px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition">
+          <i class="fa-solid fa-shield-halved mr-1.5"></i>Matriz de Roles & Permisos
+        </button>
+        <button type="button" onclick="cambiarSubtabUsuarios('auditoria')" id="subtabUsrAuditoria" class="px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition">
+          <i class="fa-solid fa-clipboard-list mr-1.5"></i>Bitácora de Auditoría Forense
+        </button>
+      </div>
+
+      <!-- Subtab 1: Directorio de Usuarios -->
+      <div id="panelUsrUsuarios" class="bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-600 font-bold uppercase text-[11px] border-b border-slate-200">
+              <tr>
+                <th class="py-3 px-4">ID</th>
+                <th class="py-3 px-4">Usuario</th>
+                <th class="py-3 px-4">Nombre Completo</th>
+                <th class="py-3 px-4">Rol en Organigrama</th>
+                <th class="py-3 px-4">Email / Contacto</th>
+                <th class="py-3 px-4 text-center">Estado</th>
+                <th class="py-3 px-4">Último Acceso</th>
+                <th class="py-3 px-4 text-center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tablaUsuariosBody" class="divide-y divide-slate-100">
+              <tr><td colspan="8" class="text-center py-8 text-slate-400">Cargando directorio de usuarios...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Subtab 2: Matriz de Roles & Permisos Granulares -->
+      <div id="panelUsrRoles" class="hidden bg-white rounded-2xl border border-slate-200/80 shadow-2xs p-5 space-y-4">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div>
+            <h3 class="font-extrabold text-sm text-slate-900">Matriz de Control de Acceso Granular (RBAC)</h3>
+            <p class="text-xs text-slate-500">Configure los procesos críticos permitidos por cada nivel del organigrama.</p>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-700 font-bold uppercase text-[10px] border-b border-slate-200">
+              <tr>
+                <th class="py-3 px-4">Rol</th>
+                <th class="py-3 px-4 text-center">Facturar en Negativo</th>
+                <th class="py-3 px-4 text-center">Autorizar Devoluciones</th>
+                <th class="py-3 px-4 text-center">Modificar Precios POS</th>
+                <th class="py-3 px-4 text-center">Ver Costos & Utilidad</th>
+                <th class="py-3 px-4 text-center">Anular Transacciones</th>
+                <th class="py-3 px-4 text-center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tablaRolesBody" class="divide-y divide-slate-100">
+              <tr><td colspan="7" class="text-center py-8 text-slate-400">Cargando matriz de roles...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Subtab 3: Bitácora de Auditoría -->
+      <div id="panelUsrAuditoria" class="hidden bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden">
+        <div class="p-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-700"><i class="fa-solid fa-shield-virus mr-1 text-[#0755C9]"></i>Últimos 100 Eventos Registrados</span>
+          <button onclick="cargarAuditoriaSeguridad()" class="text-xs font-bold text-blue-700 hover:underline cursor-pointer">
+            <i class="fa-solid fa-rotate-right mr-1"></i>Actualizar Bitácora
+          </button>
+        </div>
+        <div class="overflow-x-auto max-h-[500px]">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-100/80 text-slate-700 font-bold uppercase text-[10px] sticky top-0 border-b border-slate-200">
+              <tr>
+                <th class="py-2.5 px-3">Fecha y Hora</th>
+                <th class="py-2.5 px-3">Usuario</th>
+                <th class="py-2.5 px-3">Acción</th>
+                <th class="py-2.5 px-3">Módulo</th>
+                <th class="py-2.5 px-3">Detalles</th>
+                <th class="py-2.5 px-3">IP</th>
+              </tr>
+            </thead>
+            <tbody id="tablaAuditoriaBody" class="divide-y divide-slate-100 font-mono text-[11px]">
+              <tr><td colspan="6" class="text-center py-8 text-slate-400">Cargando bitácora de auditoría...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+</main>
 
   <!-- ========================================================
        PIE DE PÁGINA OFICIAL DE AUTORÍA E INGENIERÍA DE SISTEMAS
@@ -6852,7 +7113,7 @@
   <div id="areaImpresionOficial" class="hidden-on-screen" aria-hidden="true"></div>
 
   <!-- Scripts -->
-  <script src="app.js?v=2.3.0"></script>
+  <script src="app.js?v=3.0.0"></script>
 
     <!-- MODAL: DETALLE Y VOUCHER IMPRIMIBLE DE NOTA DE DÉBITO A PROVEEDOR -->
     <div id="modalNotaDebitoCompra" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 hidden">
@@ -6895,5 +7156,222 @@
       </div>
     </div>
 
+
+  <!-- ========================================================
+       MODAL 1: INICIAR SESIÓN / CAMBIO DE USUARIO (RBAC)
+       ======================================================== -->
+  <div id="modalLogin" class="modal-overlay hidden" style="z-index: 90;">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 space-y-5 m-4 border border-slate-100">
+      <div class="flex items-start justify-between border-b border-slate-100 pb-3">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#071B49] to-[#0755C9] text-white flex items-center justify-center shadow-md">
+            <i class="fa-solid fa-lock text-cyan-300"></i>
+          </div>
+          <div>
+            <h3 class="font-extrabold text-base text-slate-900 tracking-tight">Acceso Seguro al Sistema</h3>
+            <p class="text-xs text-slate-500">Inicie sesión para acceder a las funciones de su rol.</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeLoginModal()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <form id="formLoginUsuario" onsubmit="ejecutarLogin(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Nombre de Usuario:</label>
+          <div class="relative">
+            <i class="fa-solid fa-user absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+            <input type="text" id="loginUsername" required placeholder="Ej: admin, cajero1" class="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Contraseña de Acceso:</label>
+          <div class="relative">
+            <i class="fa-solid fa-key absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+            <input type="password" id="loginPassword" required placeholder="••••••••" class="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs">
+          </div>
+        </div>
+
+        <div id="loginErrorMsg" class="hidden text-xs font-bold text-red-600 bg-red-50 p-2.5 rounded-xl border border-red-200 flex items-center">
+          <i class="fa-solid fa-circle-exclamation mr-1.5"></i><span id="loginErrorText">Credenciales inválidas</span>
+        </div>
+
+        <div class="flex items-center justify-between pt-2">
+          <button type="button" onclick="cerrarSesionActual()" class="text-xs font-bold text-slate-500 hover:text-red-600 transition">
+            <i class="fa-solid fa-arrow-right-from-bracket mr-1"></i>Cerrar Sesión
+          </button>
+          <button type="submit" class="px-5 py-2.5 bg-[#0755C9] hover:bg-blue-600 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition">
+            Iniciar Sesión
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MODAL 2: CREAR / EDITAR USUARIO (RBAC)
+       ======================================================== -->
+  <div id="modalUsuarioForm" class="modal-overlay hidden" style="z-index: 85;">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4 border border-slate-100">
+      <div class="flex items-start justify-between border-b border-slate-100 pb-3">
+        <h3 id="modalUsuarioTitulo" class="font-extrabold text-base text-slate-900">Registrar Nuevo Usuario</h3>
+        <button type="button" onclick="closeUsuarioModal()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <form id="formUsuarioData" onsubmit="guardarUsuarioData(event)" class="space-y-3.5">
+        <input type="hidden" id="usuarioFormId" value="">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Nombre de Usuario (Login):</label>
+            <input type="text" id="usrFormUsername" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Contraseña:</label>
+            <input type="password" id="usrFormPassword" placeholder="Dejar en blanco si no cambia" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Nombre Completo del Operador:</label>
+          <input type="text" id="usrFormNombreCompleto" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Rol en Organigrama:</label>
+            <select id="usrFormRolSelect" required class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Estado de la Cuenta:</label>
+            <select id="usrFormActivoSelect" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+              <option value="1">Activo (Habilitado)</option>
+              <option value="0">Suspendido (Bloqueado)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Correo Electrónico:</label>
+            <input type="email" id="usrFormEmail" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Teléfono:</label>
+            <input type="tel" id="usrFormTelefono" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end space-x-2 pt-3 border-t border-slate-100">
+          <button type="button" onclick="closeUsuarioModal()" class="px-4 py-2 border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-[#0755C9] hover:bg-blue-600 text-white rounded-xl text-xs font-bold shadow-md">Guardar Usuario</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MODAL 3: REGISTRAR / EDITAR VENDEDOR
+       ======================================================== -->
+  <div id="modalVendedorForm" class="modal-overlay hidden" style="z-index: 85;">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 space-y-4 m-4 border border-slate-100">
+      <div class="flex items-start justify-between border-b border-slate-100 pb-3">
+        <h3 id="modalVendedorTitulo" class="font-extrabold text-base text-slate-900">Registrar Vendedor Comercial</h3>
+        <button type="button" onclick="closeVendedorModal()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <form id="formVendedorData" onsubmit="guardarVendedorData(event)" class="space-y-3.5">
+        <input type="hidden" id="vendedorFormId" value="">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Código Vendedor:</label>
+            <input type="text" id="vendedorFormCodigo" required placeholder="Ej: VEN-002" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 uppercase">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Cédula / Documento:</label>
+            <input type="text" id="vendedorFormDoc" placeholder="V-12345678" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Nombre Completo:</label>
+          <input type="text" id="vendedorFormNombre" required placeholder="Ej: Carlos Pérez" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">% Comisión Base (%):</label>
+            <input type="number" step="0.1" id="vendedorFormPct" required value="3.0" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Meta Mensual ($ USD):</label>
+            <input type="number" step="100" id="vendedorFormMeta" required value="5000" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Teléfono:</label>
+            <input type="tel" id="vendedorFormTel" placeholder="04121234567" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Correo Electrónico:</label>
+            <input type="email" id="vendedorFormEmail" placeholder="vendedor@empresa.com" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end space-x-2 pt-3 border-t border-slate-100">
+          <button type="button" onclick="closeVendedorModal()" class="px-4 py-2 border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Cancelar</button>
+          <button type="submit" class="px-5 py-2 bg-[#0755C9] hover:bg-blue-600 text-white rounded-xl text-xs font-bold shadow-md">Guardar Vendedor</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MODAL 4: LIQUIDACIÓN DE COMISIONES
+       ======================================================== -->
+  <div id="modalLiquidarComisiones" class="modal-overlay hidden" style="z-index: 85;">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 space-y-4 m-4 border border-slate-100">
+      <div class="flex items-start justify-between border-b border-slate-100 pb-3">
+        <h3 class="font-extrabold text-base text-slate-900">Liquidar Comisiones Devengadas</h3>
+        <button type="button" onclick="closeLiquidarModal()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3">
+        <div class="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-500">Vendedor:</span>
+            <span id="liqVendedorNombre" class="font-bold text-slate-800">-</span>
+          </div>
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-500">Comisiones Devengadas a Pagar:</span>
+            <span id="liqMontoPagar" class="font-extrabold text-emerald-600 text-sm">$0.00 USD</span>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Notas de la Liquidación / Referencia de Pago:</label>
+          <input type="text" id="liqNotasInput" placeholder="Ej: Pago móvil o transferencia ref #12345" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800">
+        </div>
+
+        <input type="hidden" id="liqVendedorId" value="">
+        <input type="hidden" id="liqMontoUsd" value="0">
+
+        <div class="flex items-center justify-end space-x-2 pt-3 border-t border-slate-100">
+          <button type="button" onclick="closeLiquidarModal()" class="px-4 py-2 border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Cancelar</button>
+          <button type="button" onclick="confirmarLiquidacionComisiones()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md">Confirmar Liquidación</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

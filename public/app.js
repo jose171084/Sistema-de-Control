@@ -1,3 +1,26 @@
+// ==============================================================================
+// INTERCEPTOR GLOBAL DE SEGURIDAD HTTP (TOKEN BEARER EN TODAS LAS PETICIONES)
+// ==============================================================================
+const originalFetch = window.fetch;
+window.fetch = function(url, options = {}) {
+  const token = localStorage.getItem('tavo_auth_token');
+  if (token) {
+    options.headers = options.headers || {};
+    if (options.headers instanceof Headers) {
+      if (!options.headers.has('Authorization')) {
+        options.headers.set('Authorization', `Bearer ${token}`);
+      }
+    } else if (Array.isArray(options.headers)) {
+      options.headers.push(['Authorization', `Bearer ${token}`]);
+    } else {
+      if (!options.headers['Authorization']) {
+        options.headers['Authorization'] = `Bearer ${token}`;
+      }
+    }
+  }
+  return originalFetch.call(this, url, options);
+};
+
 /**
  * app.js - Lógica interactiva del Sistema de Inventario y Facturación Multimoneda
  */
@@ -81,6 +104,21 @@ const AppState = {
 // CONFIGURACIÓN DE TEMAS Y ETIQUETAS PERSONALIZABLES
 // ========================================================
 const THEME_PRESETS = {
+  tavo_cloud: {
+    sidebarBg: '#071B49',
+    sidebarText: '#f1f5f9',
+    primaryColor: '#0755C9',
+    primaryHover: '#087FE8',
+    bgApp: '#F5F8FC',
+    headerBg: '#ffffff',
+    btnFactura: '#0755C9',
+    btnCompra: '#087FE8',
+    btnCxc: '#10b981',
+    btnCxp: '#64748b',
+    btnDevoluciones: '#00C6E8',
+    btnKardex: '#0755C9',
+    btnFiscal: '#0755C9'
+  },
     zen_fresco: {
     sidebarBg: '#071B49',
     sidebarText: '#f1f5f9',
@@ -232,6 +270,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadDashboard();
   await loadDatabaseStatus();
   initRolUsuario();
+  initAuth();
+  cargarVendedoresEnPos();
 
   // Fecha por defecto en compras (hoy)
   const today = new Date().toISOString().split('T')[0];
@@ -372,19 +412,19 @@ function aplicarTema(tema) {
     document.head.appendChild(styleTag);
   }
 
-  const pColor = tema.primaryColor || '#14b8a6';
-  const pHover = tema.primaryHover || '#0d9488';
-  const sBg = tema.sidebarBg || '#ffffff';
-  const sText = tema.sidebarText || '#1e293b';
-  const bgApp = tema.bgApp || '#f8fafc';
+  const pColor = tema.primaryColor || '#0755C9';
+  const pHover = tema.primaryHover || '#087FE8';
+  const sBg = tema.sidebarBg || '#071B49';
+  const sText = tema.sidebarText || '#f1f5f9';
+  const bgApp = tema.bgApp || '#F5F8FC';
   const hBg = tema.headerBg || '#ffffff';
-  const bFactura = tema.btnFactura || '#14b8a6';
-  const bCompra = tema.btnCompra || '#0ea5e9';
+  const bFactura = tema.btnFactura || '#0755C9';
+  const bCompra = tema.btnCompra || '#087FE8';
   const bCxc = tema.btnCxc || '#10b981';
   const bCxp = tema.btnCxp || '#64748b';
-  const bDev = tema.btnDevoluciones || '#06b6d4';
-  const bKardex = tema.btnKardex || '#14b8a6';
-  const bFiscal = tema.btnFiscal || '#0284c7';
+  const bDev = tema.btnDevoluciones || '#00C6E8';
+  const bKardex = tema.btnKardex || '#0755C9';
+  const bFiscal = tema.btnFiscal || '#0755C9';
 
   function isHexDark(hex) {
     if (!hex || typeof hex !== 'string' || !hex.startsWith('#')) return false;
@@ -789,7 +829,7 @@ function navigate(viewName) {
     if (backdrop) backdrop.classList.add('hidden');
   }
 
-  const views = ['dashboard', 'categorias', 'productos', 'clientes', 'facturacion', 'devoluciones', 'compras', 'devolucion-compras', 'proveedores', 'cxc', 'cxp', 'reportes', 'tesoreria'];
+  const views = ['dashboard', 'categorias', 'productos', 'clientes', 'facturacion', 'devoluciones', 'compras', 'devolucion-compras', 'proveedores', 'cxc', 'cxp', 'reportes', 'tesoreria', 'fuerza-ventas', 'usuarios'];
   views.forEach(v => {
     const el = document.getElementById(`view-${v}`);
     const navBtn = document.getElementById(`nav-${v}`);
@@ -860,6 +900,9 @@ function navigate(viewName) {
     loadCxp();
   }
   if (viewName === 'tesoreria') loadTesoreria();
+  if (viewName === 'fuerza-ventas') loadFuerzaVentas();
+  if (viewName === 'usuarios') loadUsuariosYRoles();
+  if (viewName === 'facturacion') cargarVendedoresEnPos();
   if (viewName === 'reportes') {
     loadReportes();
   }
@@ -12687,54 +12730,53 @@ const DocumentTemplates = {
     const cfg = config || AppState.config || {};
     const opts = opciones || {};
     const mostrarStock = Boolean(opts.mostrarStock);
-    const layout = opts.layout || 'grid'; // 'grid' | 'list'
+    const layout = opts.layout || 'grid';
     const prods = Array.isArray(productos) ? productos : [];
+    const nombreEmpresa = (cfg.nombre_negocio || 'Empresa Comercial').trim();
 
-    // 1. Logotipo Corporativo
+    // 1. Logotipo Corporativo de la Empresa (Estrictamente de la empresa, NUNCA del sistema)
     let logoHtml = '';
     if (cfg.logo_url) {
-      logoHtml = `<img src="${esc(cfg.logo_url)}" alt="Logo" style="max-height: 48px; max-width: 150px; object-fit: contain; margin-bottom: 2px;">`;
+      logoHtml = `<img src="${esc(cfg.logo_url)}" alt="${esc(nombreEmpresa)}" style="max-height: 56px; max-width: 160px; object-fit: contain;">`;
     } else {
+      const inicial = nombreEmpresa.charAt(0).toUpperCase() || 'E';
       logoHtml = `
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-          <div style="width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #071B49, #0755C9); color: #00C6E8; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 16px; border: 1px solid #00C6E8;">
-            TC
-          </div>
-          <span style="font-size: 13px; font-weight: 900; color: #071B49; letter-spacing: 0.5px;">TAVO CLOUD</span>
+        <div style="width: 46px; height: 46px; border-radius: 8px; background: #0755C9; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 22px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          ${inicial}
         </div>
       `;
     }
 
-    // 2. Encabezado Institucional (Sin bolívares, solo USD)
+    // 2. Encabezado de la Empresa (Estrictamente datos de la empresa, sin datos del sistema)
     const hoyStr = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const tituloDoc = mostrarStock ? 'CATÁLOGO DE INVENTARIO' : 'CATÁLOGO DE PRODUCTOS';
-    const subtituloDoc = mostrarStock ? 'Lista Oficial con Existencias Actuales' : 'Lista Oficial de Precios al Cliente';
+    const subtituloDoc = mostrarStock ? 'Lista Oficial con Existencias en Stock' : 'Lista Oficial de Precios al Cliente';
 
     let headerHtml = `
-      <div style="border-bottom: 2px solid #071B49; padding-bottom: 12px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
+      <div style="border-bottom: 2px solid #0755C9; padding-bottom: 12px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
         <div style="display: flex; align-items: center; gap: 14px;">
           ${logoHtml}
           <div>
-            <h1 style="margin: 0; font-size: 17px; font-weight: 900; color: #071B49; text-transform: uppercase; letter-spacing: -0.2px;">
-              ${esc(cfg.nombre_negocio || 'TAVO CLOUD')}
+            <h1 style="margin: 0; font-size: 18px; font-weight: 900; color: #0F172A; text-transform: uppercase; letter-spacing: -0.3px; line-height: 1.15;">
+              ${esc(nombreEmpresa)}
             </h1>
-            ${cfg.documento_fiscal ? `<p style="margin: 2px 0 0 0; font-size: 11px; font-weight: 700; color: #334155;">RIF: ${esc(cfg.documento_fiscal)}</p>` : ''}
-            <p style="margin: 2px 0 0 0; font-size: 10px; color: #64748B;">
-              ${cfg.telefono ? `<span><i class="fa-solid fa-phone" style="font-size: 9px; margin-right: 3px;"></i>${esc(cfg.telefono)}</span>` : ''}
+            ${cfg.documento_fiscal ? `<div style="margin: 3px 0 0 0; font-size: 11px; font-weight: 700; color: #334155;">RIF: ${esc(cfg.documento_fiscal)}</div>` : ''}
+            <div style="margin: 3px 0 0 0; font-size: 10px; color: #64748B; line-height: 1.35;">
+              ${cfg.telefono ? `<span><strong>Tel:</strong> ${esc(cfg.telefono)}</span>` : ''}
               ${cfg.telefono && cfg.direccion ? ' &bull; ' : ''}
-              ${cfg.direccion ? `<span>${esc(cfg.direccion)}</span>` : ''}
-            </p>
+              ${cfg.direccion ? `<span><strong>Dir:</strong> ${esc(cfg.direccion)}</span>` : ''}
+            </div>
           </div>
         </div>
 
         <div style="text-align: right; shrink-0;">
-          <div style="display: inline-block; background: #071B49; color: #FFFFFF; font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 6px; letter-spacing: 0.5px; text-transform: uppercase;">
+          <div style="display: inline-block; background: #0755C9; color: #FFFFFF; font-size: 11px; font-weight: 800; padding: 5px 14px; border-radius: 6px; letter-spacing: 0.8px; text-transform: uppercase;">
             ${tituloDoc}
           </div>
-          <div style="font-size: 9.5px; font-weight: 600; color: ${mostrarStock ? '#047857' : '#0755C9'}; margin-top: 3px;">
+          <div style="font-size: 10px; font-weight: 700; color: ${mostrarStock ? '#047857' : '#0755C9'}; margin-top: 4px;">
             ${subtituloDoc}
           </div>
-          <div style="font-size: 9.5px; color: #64748B; margin-top: 2px;">
+          <div style="font-size: 9.5px; color: #64748B; margin-top: 3px;">
             Emisión: <strong>${hoyStr}</strong> &bull; Moneda: <strong>Dólares ($ USD)</strong>
           </div>
         </div>
@@ -12751,7 +12793,6 @@ const DocumentTemplates = {
         </div>
       `;
     } else {
-      // Agrupar por categoría
       const categoriasMap = {};
       prods.forEach(p => {
         const cat = (p.categoria_nombre || 'General').trim();
@@ -12759,16 +12800,13 @@ const DocumentTemplates = {
         categoriasMap[cat].push(p);
       });
 
-      // Ordenar categorías alfabéticamente
       const sortedCategories = Object.keys(categoriasMap).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
 
-      // Dentro de cada categoría, ordenar productos alfabéticamente
       sortedCategories.forEach(cat => {
         categoriasMap[cat].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }));
       });
 
       if (layout === 'list') {
-        // Vista Lista Ejecutiva agrupada por categoría
         let tablesContent = '';
         sortedCategories.forEach(cat => {
           const catProds = categoriasMap[cat];
@@ -12781,8 +12819,8 @@ const DocumentTemplates = {
             const stock = parseFloat(p.stock || 0);
 
             const imgMini = p.imagen 
-              ? `<img src="${p.imagen}" alt="${nombre}" style="width: 32px; height: 32px; object-fit: contain; border-radius: 4px; border: 1px solid #E2E8F0; background: #F8FAFC;">`
-              : `<div style="width: 32px; height: 32px; border-radius: 4px; background: #F1F5F9; border: 1px solid #E2E8F0; display: flex; align-items: center; justify-content: center; color: #94A3B8; font-size: 11px;"><i class="fa-solid fa-box"></i></div>`;
+              ? `<img src="${p.imagen}" alt="${nombre}" style="width: 32px; height: 32px; object-fit: contain; border-radius: 4px; border: 1px solid #E2E8F0; background: #FFFFFF;">`
+              : `<div style="width: 32px; height: 32px; border-radius: 4px; background: #F8FAFC; border: 1px solid #E2E8F0; display: flex; align-items: center; justify-content: center; color: #94A3B8; font-size: 11px;"><i class="fa-solid fa-box"></i></div>`;
 
             let stockTd = '';
             if (mostrarStock) {
@@ -12809,8 +12847,8 @@ const DocumentTemplates = {
           });
 
           tablesContent += `
-            <tr style="background: #F1F5F9; border-top: 2px solid #071B49; border-bottom: 1px solid #CBD5E1; break-inside: avoid; page-break-inside: avoid; page-break-after: avoid;">
-              <td colspan="${mostrarStock ? 6 : 5}" style="padding: 6px 10px; font-weight: 800; font-size: 11px; color: #071B49; text-transform: uppercase;">
+            <tr style="background: #F1F5F9; border-top: 2px solid #0755C9; border-bottom: 1px solid #CBD5E1; break-inside: avoid; page-break-inside: avoid; page-break-after: avoid;">
+              <td colspan="${mostrarStock ? 6 : 5}" style="padding: 6px 10px; font-weight: 800; font-size: 11px; color: #0755C9; text-transform: uppercase;">
                 <i class="fa-solid fa-layer-group" style="color: #0755C9; margin-right: 6px;"></i>${esc(cat)} 
                 <span style="font-size: 9px; font-weight: 600; color: #64748B; margin-left: 6px;">(${catProds.length} ${catProds.length === 1 ? 'producto' : 'productos'})</span>
               </td>
@@ -12822,7 +12860,7 @@ const DocumentTemplates = {
         bodyHtml = `
           <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
             <thead>
-              <tr style="background: #071B49; color: #FFFFFF; font-size: 10px; text-transform: uppercase;">
+              <tr style="background: #0755C9; color: #FFFFFF; font-size: 10px; text-transform: uppercase;">
                 <th style="padding: 7px 4px; text-align: center; width: 4%;">#</th>
                 <th style="padding: 7px 6px; text-align: center; width: 6%;">Foto</th>
                 <th style="padding: 7px 8px; text-align: left; width: 16%;">Código</th>
@@ -12838,7 +12876,7 @@ const DocumentTemplates = {
         `;
 
       } else {
-        // Vista Cuadrícula Editorial (Catálogo Élite Agrupado por Categorías)
+        // Vista Cuadrícula Editorial Diseñada para Hoja Carta (3 columnas exactas)
         let sectionsHtml = '';
 
         sortedCategories.forEach(cat => {
@@ -12851,29 +12889,28 @@ const DocumentTemplates = {
             const precioTotal = parseFloat(p.precio_total || 0).toFixed(2);
             const stock = parseFloat(p.stock || 0);
 
-            // Imagen o Placeholder
+            // Imagen con contenedor de alta fidelidad
             const imgBlock = p.imagen
-              ? `<img src="${p.imagen}" alt="${nombre}" style="width: 100%; height: 100%; object-fit: contain; padding: 6px;">`
+              ? `<img src="${p.imagen}" alt="${nombre}" style="width: 100%; height: 100%; object-fit: contain; padding: 4px; box-sizing: border-box;">`
               : `
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #94A3B8; font-size: 10px; font-weight: 600; gap: 4px;">
-                  <i class="fa-solid fa-box" style="font-size: 26px; color: #CBD5E1;"></i>
-                  <span style="font-size: 8.5px; color: #94A3B8; text-transform: uppercase;">${esc(cat)}</span>
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #94A3B8; background: #F8FAFC;">
+                  <i class="fa-solid fa-image" style="font-size: 24px; color: #CBD5E1; margin-bottom: 4px;"></i>
+                  <span style="font-size: 8px; color: #94A3B8; font-weight: 600; text-transform: uppercase;">Sin Foto</span>
                 </div>
               `;
 
-            // Badge de Existencia (CONDICIONAL ESTRICTO: NO APARECE SI mostrarStock=false)
+            // Badge de Existencia (Condicional estricto)
             let stockBadgeHtml = '';
             if (mostrarStock) {
               if (stock > 0) {
                 stockBadgeHtml = `
-                  <div style="margin-top: 6px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46; font-size: 9.5px; font-weight: 700; padding: 2.5px 6px; border-radius: 4px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 4px;">
-                    <span style="display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #059669;"></span>
-                    <span>Stock: <strong>${stock}</strong> unid.</span>
+                  <div style="margin-top: 5px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-align: center;">
+                    Stock Disponible: <strong>${stock}</strong> unid.
                   </div>
                 `;
               } else {
                 stockBadgeHtml = `
-                  <div style="margin-top: 6px; background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; font-size: 9.5px; font-weight: 700; padding: 2.5px 6px; border-radius: 4px; text-align: center;">
+                  <div style="margin-top: 5px; background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-align: center;">
                     ✕ Agotado (0 unid.)
                   </div>
                 `;
@@ -12881,24 +12918,24 @@ const DocumentTemplates = {
             }
 
             cardsHtml += `
-              <div class="doc-catalogo-card" style="width: calc(33.333% - 10px); margin: 5px; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 8px; background: #FFFFFF; overflow: hidden; display: flex; flex-direction: column; page-break-inside: avoid; break-inside: avoid;">
-                <div style="width: 100%; height: 120px; background: #F8FAFC; border-bottom: 1px solid #F1F5F9; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+              <div class="doc-catalogo-card" style="width: calc(33.333% - 10px); margin: 5px; box-sizing: border-box; border: 1px solid #CBD5E1; border-radius: 8px; background: #FFFFFF; overflow: hidden; display: flex; flex-direction: column; page-break-inside: avoid; break-inside: avoid; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+                <div style="width: 100%; height: 115px; background: #FFFFFF; border-bottom: 1px solid #F1F5F9; display: flex; align-items: center; justify-content: center; overflow: hidden;">
                   ${imgBlock}
                 </div>
-                <div style="padding: 8px 10px; display: flex; flex-direction: column; flex: 1; justify-content: space-between;">
+                <div style="padding: 8px 10px; display: flex; flex-direction: column; flex: 1; justify-content: space-between; background: #FAFAFA;">
                   <div>
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-                      <span style="font-family: monospace; font-size: 9px; font-weight: 700; color: #475569; background: #F1F5F9; padding: 1px 5px; border-radius: 3px;">${codigo}</span>
+                      <span style="font-family: monospace; font-size: 9px; font-weight: 700; color: #0755C9; background: #EFF6FF; padding: 1px 5px; border-radius: 3px; border: 1px solid #DBEAFE;">${codigo}</span>
                       <span style="font-size: 8px; text-transform: uppercase; color: #64748B; font-weight: 700; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(cat)}</span>
                     </div>
-                    <h3 style="font-size: 11px; font-weight: 800; color: #0F172A; margin: 4px 0 2px 0; line-height: 1.25; min-height: 28px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+                    <h3 style="font-size: 11px; font-weight: 800; color: #0F172A; margin: 4px 0 2px 0; line-height: 1.25; min-height: 28px; max-height: 28px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
                       ${nombre}
                     </h3>
-                    ${p.descripcion ? `<p style="font-size: 8.5px; color: #64748B; margin: 0 0 4px 0; max-height: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(p.descripcion)}</p>` : ''}
+                    ${p.descripcion ? `<p style="font-size: 8.5px; color: #64748B; margin: 0 0 3px 0; max-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(p.descripcion)}</p>` : ''}
                   </div>
                   <div>
-                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; border-top: 1px dashed #E2E8F0; padding-top: 4px;">
-                      <div style="font-size: 15px; font-weight: 900; color: #0755C9;">$${precioTotal} <span style="font-size: 10px; font-weight: 700; color: #64748B;">USD</span></div>
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; border-top: 1px dashed #CBD5E1; padding-top: 4px;">
+                      <div style="font-size: 15px; font-weight: 900; color: #0755C9;">$${precioTotal} <span style="font-size: 9.5px; font-weight: 700; color: #64748B;">USD</span></div>
                     </div>
                     ${stockBadgeHtml}
                   </div>
@@ -12909,17 +12946,17 @@ const DocumentTemplates = {
 
           sectionsHtml += `
             <div style="margin-top: 14px; margin-bottom: 8px; break-inside: avoid; page-break-inside: avoid; page-break-after: avoid;">
-              <div style="background: linear-gradient(135deg, #071B49 0%, #0755C9 100%); color: #FFFFFF; padding: 5px 12px; border-radius: 6px; display: flex; align-items: center; justify-content: space-between; border-left: 4px solid #00C6E8;">
+              <div style="background: #0F172A; color: #FFFFFF; padding: 6px 14px; border-radius: 6px; display: flex; align-items: center; justify-content: space-between; border-left: 4px solid #0755C9;">
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <i class="fa-solid fa-layer-group" style="color: #00C6E8; font-size: 10px;"></i>
                   <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">${esc(cat)}</span>
                 </div>
-                <span style="font-size: 9px; font-weight: 700; background: rgba(255,255,255,0.2); padding: 1px 7px; border-radius: 8px;">
+                <span style="font-size: 9px; font-weight: 700; background: rgba(255,255,255,0.2); padding: 1.5px 8px; border-radius: 10px;">
                   ${catProds.length} ${catProds.length === 1 ? 'producto' : 'productos'}
                 </span>
               </div>
             </div>
-            <div style="display: flex; flex-wrap: wrap; margin-left: -5px; margin-right: -5px; margin-bottom: 12px;">
+            <div style="display: flex; flex-wrap: wrap; margin-left: -5px; margin-right: -5px; margin-bottom: 10px;">
               ${cardsHtml}
             </div>
           `;
@@ -12929,11 +12966,11 @@ const DocumentTemplates = {
       }
     }
 
-    // 4. Pie de Página Institucional (Solo USD)
+    // 4. Pie de Página de la Empresa (Sin datos del sistema)
     let footerHtml = `
       <div style="border-top: 1px solid #CBD5E1; padding-top: 8px; margin-top: 18px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5px; color: #64748B; break-inside: avoid; page-break-inside: avoid;">
         <div>
-          <strong>TAVO CLOUD Enterprise</strong> &bull; Precios expresados en Dólares Americanos (USD) sujetos a cambio sin previo aviso.
+          <strong>${esc(nombreEmpresa)}</strong> &bull; Catálogo Oficial &bull; Precios en Dólares ($ USD) sujetos a cambio sin previo aviso.
         </div>
         <div style="text-align: right;">
           ${cfg.telefono ? `<span>Contacto: <strong>${esc(cfg.telefono)}</strong></span> &bull; ` : ''}
@@ -12943,7 +12980,7 @@ const DocumentTemplates = {
     `;
 
     return `
-      <div class="doc-sheet doc-letterPortrait doc-catalogo-sheet" style="padding: 10px; background: #FFFFFF;">
+      <div class="doc-sheet doc-letterPortrait doc-catalogo-sheet" style="width: 780px; box-sizing: border-box; padding: 18px 22px; background: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #0F172A;">
         ${headerHtml}
         ${bodyHtml}
         ${footerHtml}
@@ -16567,13 +16604,26 @@ function seleccionarClienteParaWhatsAppCatalogo(clienteId) {
   actualizarPreviewWhatsAppCatalogo(c.nombre);
 }
 
-function construirMensajeWhatsAppCatalogo(nombreCliente, config) {
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function construirMensajeWhatsAppCatalogo(nombreCliente, config, pdfUrl = '') {
   const cfg = config || AppState.config || {};
-  const nombreEmpresa = (cfg.nombre_negocio || 'TAVO CLOUD').trim().toUpperCase();
+  const nombreEmpresa = (cfg.nombre_negocio || 'Empresa Comercial').trim().toUpperCase();
   const rif = (cfg.documento_fiscal || '').trim();
   const lineaRif = rif ? `📋 *RIF:* ${rif}\n` : '';
   const clienteStr = (nombreCliente && nombreCliente.trim()) ? `*${nombreCliente.trim()}*` : '';
   const saludoCliente = clienteStr ? `Estimado/a cliente ${clienteStr}` : `Estimado/a cliente`;
+
+  const origin = window.location.origin;
+  const finalPdfUrl = pdfUrl || `${origin}/uploads/Catalogo_Oficial_Productos.pdf`;
+  const finalWebUrl = `${origin}/catalogo.html`;
 
   return `🏢 *${nombreEmpresa}*
 ${lineaRif}━━━━━━━━━━━━━━━━━━━━━
@@ -16581,7 +16631,13 @@ ${saludoCliente} 👋
 
 Nos complace compartirle nuestro **Catálogo Oficial de Productos** 📄✨.
 
-Le invitamos cordialmente a explorar el archivo PDF adjunto para conocer nuestra amplia variedad, excelente calidad y los mejores precios actualizados en USD 💵📈, diseñados especialmente para potenciar su negocio.
+Le invitamos cordialmente a explorar nuestra oferta con precios actualizados en dólares ($ USD) 💵📈:
+
+📥 *Descargar Catálogo (PDF Carta):*
+${finalPdfUrl}
+
+🌐 *Ver Catálogo Online Interactivo:*
+${finalWebUrl}
 
 Quedamos a su entera disposición para responder cualquier consulta y atender sus pedidos con la máxima prontitud 🤝💼.
 
@@ -16651,9 +16707,8 @@ function asegurarHtml2Pdf() {
 }
 
 /**
- * MOTOR OFICIAL DE GENERACIÓN DE CATÁLOGO PDF (ALTA DEFINICIÓN & CERO PÁGINAS EN BLANCO)
- * Utiliza contenedor en FLUJO NORMAL (position: static) dentro de overlay con scroll,
- * garantizando que html2pdf/html2canvas calcule la altura exacta sin colapsar el contenedor a 0.
+ * MOTOR OFICIAL DE GENERACIÓN DE CATÁLOGO PDF CARTA (ALTA DEFINICIÓN & CERO PÁGINAS EN BLANCO)
+ * Utiliza formato Carta exacto (8.5 x 11 in) con contenedor estático de 780px.
  */
 async function generarPdfCatalogoBlob(prods, cfg, opciones) {
   if (!prods || prods.length === 0) {
@@ -16661,7 +16716,7 @@ async function generarPdfCatalogoBlob(prods, cfg, opciones) {
   }
   const config = cfg || AppState.config || {};
   const opts = opciones || obtenerOpcionesCatalogoActual();
-  const nombreNegocio = config.nombre_negocio || 'TAVO CLOUD';
+  const nombreNegocio = config.nombre_negocio || 'Empresa';
   const cleanName = nombreNegocio.replace(/[^a-zA-Z0-9]/g, '_');
   const fileName = opts.mostrarStock
     ? `Catalogo_Inventario_${cleanName}.pdf`
@@ -16671,7 +16726,7 @@ async function generarPdfCatalogoBlob(prods, cfg, opciones) {
     await asegurarHtml2Pdf();
   }
 
-  // 1. Overlay a pantalla completa con fondo corporativo y barra de compilación
+  // 1. Overlay a pantalla completa con fondo corporativo y barra de progreso
   let overlay = document.getElementById('catalogoCompilacionOverlay');
   if (overlay) overlay.remove();
   overlay = document.createElement('div');
@@ -16679,7 +16734,6 @@ async function generarPdfCatalogoBlob(prods, cfg, opciones) {
   overlay.className = 'fixed inset-0 bg-[#071B49]/95 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-4';
   overlay.style.zIndex = '999999';
 
-  // Barra de progreso y estado superior
   const statusBar = document.createElement('div');
   statusBar.className = 'sticky top-0 bg-[#071B49] py-3 px-6 rounded-2xl border border-white/20 text-white flex items-center space-x-3 mb-4 shadow-2xl shrink-0 z-50';
   statusBar.innerHTML = `
@@ -16687,23 +16741,24 @@ async function generarPdfCatalogoBlob(prods, cfg, opciones) {
       <i class="fa-solid fa-spinner fa-spin text-sm"></i>
     </div>
     <div>
-      <h4 class="font-extrabold text-xs text-white">Compilando Catálogo Oficial en Alta Resolución...</h4>
-      <p class="text-[10px] text-cyan-300">Generando documento PDF oficial con fotos y precios en USD</p>
+      <h4 class="font-extrabold text-xs text-white">Compilando Catálogo Oficial Formato Carta...</h4>
+      <p class="text-[10px] text-cyan-300">Generando documento PDF en alta resolución con imágenes y precios en USD</p>
     </div>
   `;
   overlay.appendChild(statusBar);
 
-  // 2. Contenedor de la hoja en FLUJO NORMAL (position: static, NO fixed)
+  // 2. Contenedor de la hoja en FLUJO NORMAL (position: static) diseñado para Hoja Carta (780px)
   const sheet = document.createElement('div');
   sheet.id = 'catalogoPdfRenderSheet';
-  sheet.style.position = 'static'; // FLUJO NORMAL OBLIGATORIO PARA EVITAR ALTURA 0 EN HTML2PDF
-  sheet.style.width = '794px';
-  sheet.style.minHeight = '1123px';
-  sheet.style.backgroundColor = '#ffffff';
+  sheet.style.position = 'static';
+  sheet.style.width = '780px';
+  sheet.style.minHeight = '1010px';
+  sheet.style.backgroundColor = '#FFFFFF';
   sheet.style.boxShadow = '0 25px 50px -12px rgba(0, 0, 0, 0.5)';
   sheet.style.borderRadius = '4px';
   sheet.style.overflow = 'hidden';
   sheet.style.boxSizing = 'border-box';
+  sheet.style.margin = '0 auto';
 
   const htmlDoc = DocumentTemplates.catalogoProductos(prods, config, opts);
   sheet.innerHTML = htmlDoc;
@@ -16716,14 +16771,14 @@ async function generarPdfCatalogoBlob(prods, cfg, opciones) {
   let blob = null;
   try {
     const opt = {
-      margin: [6, 6, 6, 6],
+      margin: [8, 8, 8, 8],
       filename: fileName,
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: {
         scale: 2,
         useCORS: true,
         logging: false,
-        backgroundColor: '#ffffff',
+        backgroundColor: '#FFFFFF',
         scrollY: 0,
         scrollX: 0
       },
@@ -16754,7 +16809,7 @@ async function verPdfEnPantalla() {
         <!DOCTYPE html>
         <html>
         <head>
-          <title>Compilando Catálogo Oficial - TAVO CLOUD</title>
+          <title>Compilando Catálogo Oficial - Formato Carta</title>
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
           <style>
@@ -16769,7 +16824,7 @@ async function verPdfEnPantalla() {
         <body>
           <div class="box">
             <div class="icon"><i class="fa-solid fa-spinner"></i></div>
-            <h2>Generando Catálogo Oficial PDF</h2>
+            <h2>Generando Catálogo Oficial Carta</h2>
             <p>Compilando documento en alta resolución con imágenes y precios en USD...</p>
           </div>
         </body>
@@ -16830,11 +16885,29 @@ async function compartirCatalogoPdfWhatsApp() {
   const telRaw = telInput ? telInput.value.trim() : '';
   const telNorm = normalizarTelefonoWhatsApp(telRaw);
 
-  const cfg = AppState.config || {};
-  const textarea = document.getElementById('catalogoMensajeWhatsAppPreview');
-  const mensajeTexto = (textarea && textarea.value.trim())
-    ? textarea.value.trim()
-    : construirMensajeWhatsAppCatalogo('', cfg);
+  // 1. ABRIR VENTANA SÍNCRONAMENTE EN EL CLIC (CERO BLOQUEOS POR POPUP BLOCKER DE CHROME/FIREFOX/SAFARI)
+  let waTab = null;
+  try {
+    waTab = window.open('about:blank', '_blank');
+    if (waTab) {
+      waTab.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head><title>Conectando con WhatsApp...</title><meta charset="utf-8"></head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0; background:#071B49; color:#fff;">
+          <div style="text-align:center; padding:32px 40px; background:rgba(255,255,255,0.08); border-radius:20px; border:1px solid rgba(255,255,255,0.15); max-width:420px; box-shadow: 0 20px 40px rgba(0,0,0,0.4);">
+            <div style="font-size:32px; color:#00C6E8; margin-bottom:14px;"><i class="fa-solid fa-spinner fa-spin"></i></div>
+            <h3 style="margin:0 0 8px 0; font-size:16px; font-weight:800;">Generando Catálogo Carta...</h3>
+            <p style="margin:0; color:#94A3B8; font-size:12px; line-height:1.5;">Compilando documento en alta resolución y abriendo WhatsApp con el mensaje corporativo.</p>
+          </div>
+        </body>
+        </html>
+      `);
+      waTab.document.close();
+    }
+  } catch (eTab) {
+    console.warn('[Catalogo] Ventana síncrona prevenida:', eTab);
+  }
 
   const btn = document.getElementById('btnCompartirWhatsApp');
   const origText = btn ? btn.innerHTML : '';
@@ -16844,63 +16917,103 @@ async function compartirCatalogoPdfWhatsApp() {
   }
 
   try {
+    // 2. Compilar PDF Carta Oficial
     const { blob, fileName, htmlDoc } = await generarPdfCatalogoBlob(prods);
+
+    // 3. Subir PDF al servidor para generar enlace público permanente
+    let publicPdfUrl = `${window.location.origin}/uploads/Catalogo_Oficial_Productos.pdf`;
+    try {
+      const b64 = await blobToBase64(blob);
+      const resUpload = await fetch('/api/catalogo/subir-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdf_base64: b64, filename: fileName })
+      });
+      if (resUpload.ok) {
+        const uploadData = await resUpload.json();
+        if (uploadData.url) {
+          publicPdfUrl = window.location.origin + uploadData.url;
+        }
+      }
+    } catch (eUpload) {
+      console.warn('[Catalogo] No se pudo subir el PDF al servidor:', eUpload);
+    }
+
+    // 4. Redactar Mensaje WhatsApp con Enlace Público al PDF y al Catálogo Digital
+    const cliSel = document.getElementById('catalogoClienteSelect');
+    let nombreCli = '';
+    if (cliSel && cliSel.value) {
+      const cl = (AppState.clientes || []).find(c => String(c.id) === String(cliSel.value));
+      if (cl) nombreCli = cl.nombre;
+    }
+    const mensajeFinal = construirMensajeWhatsAppCatalogo(nombreCli, AppState.config, publicPdfUrl);
+
+    // 5. Copiar texto al portapapeles de forma garantizada
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(mensajeFinal);
+      } catch (eClip) {}
+    }
+
+    // 6. EN DISPOSITIVOS MÓVILES (Android / iOS): Invocar Web Share API con el archivo PDF real adjunto
     let pdfFile = null;
     if (blob && blob.size > 5000) {
       pdfFile = new File([blob], fileName, { type: 'application/pdf' });
     }
-
-    // 1. Copiar mensaje al portapapeles automáticamente
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      try {
-        await navigator.clipboard.writeText(mensajeTexto);
-      } catch (eClip) {}
-    }
-
-    // 2. DISPOSITIVOS MÓVILES (Android / iOS): Web Share API nativa
     if (pdfFile && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+      if (waTab && !waTab.closed) waTab.close();
       try {
         await navigator.share({
           files: [pdfFile],
           title: fileName,
-          text: mensajeTexto
+          text: mensajeFinal
         });
         return;
-      } catch (shareErr) {
-        if (shareErr.name === 'AbortError') return;
-        console.warn('[Catalogo] WebShare cancelado o no soportado, continuando con apertura directa:', shareErr);
+      } catch (eShare) {
+        if (eShare.name === 'AbortError') return;
       }
     }
 
-    // 3. ESCRITORIO (Windows / Mac):
-    // Descarga automática inmediata del PDF compilado
+    // 7. EN ESCRITORIO (Windows / Mac):
+    // Descarga automática inmediata del PDF en el computador
     if (blob && blob.size > 5000) {
       const blobUrl = URL.createObjectURL(blob);
-      const dlLink = document.createElement('a');
-      dlLink.href = blobUrl;
-      dlLink.download = fileName;
-      document.body.appendChild(dlLink);
-      dlLink.click();
-      document.body.removeChild(dlLink);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+      const dl = document.createElement('a');
+      dl.href = blobUrl;
+      dl.download = fileName;
+      document.body.appendChild(dl);
+      dl.click();
+      document.body.removeChild(dl);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 45000);
     }
 
-    // 4. Abrir WhatsApp con el número del cliente y el mensaje precargado en 1 clic
-    const waUrl = telNorm
-      ? `https://api.whatsapp.com/send?phone=${telNorm}&text=${encodeURIComponent(mensajeTexto)}`
-      : `https://api.whatsapp.com/send?text=${encodeURIComponent(mensajeTexto)}`;
-    window.open(waUrl, '_blank');
+    // 8. Abrir WhatsApp con número y mensaje precargado directamente
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    let waUrl = '';
+    if (isMobile) {
+      waUrl = telNorm
+        ? `https://wa.me/${telNorm}?text=${encodeURIComponent(mensajeFinal)}`
+        : `https://wa.me/?text=${encodeURIComponent(mensajeFinal)}`;
+    } else {
+      // En escritorio, usamos https://web.whatsapp.com/send/?phone=...&text=... (con trailing slash / después de send)
+      // para evitar que el servidor de WhatsApp haga redirect y descarte los parámetros de texto
+      waUrl = telNorm
+        ? `https://web.whatsapp.com/send/?phone=${telNorm}&text=${encodeURIComponent(mensajeFinal)}`
+        : `https://web.whatsapp.com/send/?text=${encodeURIComponent(mensajeFinal)}`;
+    }
 
-    // 5. Mostrar la notificación modal institucional de éxito
-    mostrarModalPdfListoWhatsApp(fileName, telNorm);
+    if (waTab && !waTab.closed) {
+      waTab.location.href = waUrl;
+    } else {
+      window.open(waUrl, '_blank');
+    }
+
+    // 9. Mostrar modal corporativo de confirmación y guía
+    mostrarModalPdfListoWhatsApp(fileName, telNorm, publicPdfUrl);
 
   } catch (err) {
     console.error('Error al compartir catálogo por WhatsApp:', err);
-    imprimirCatalogoProductos();
-    const waUrl = telNorm
-      ? `https://api.whatsapp.com/send?phone=${telNorm}&text=${encodeURIComponent(mensajeTexto)}`
-      : `https://api.whatsapp.com/send?text=${encodeURIComponent(mensajeTexto)}`;
-    window.open(waUrl, '_blank');
+    alert('Error generando catálogo: ' + (err.message || err));
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -16909,7 +17022,7 @@ async function compartirCatalogoPdfWhatsApp() {
   }
 }
 
-function mostrarModalPdfListoWhatsApp(fileName, phone) {
+function mostrarModalPdfListoWhatsApp(fileName, phone, publicPdfUrl = '') {
   let modalAlert = document.getElementById('modalPdfGeneradoAlerta');
   if (modalAlert) modalAlert.remove();
 
@@ -16919,23 +17032,36 @@ function mostrarModalPdfListoWhatsApp(fileName, phone) {
   overlay.id = 'modalPdfGeneradoAlerta';
   overlay.className = 'fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4';
   overlay.innerHTML = `
-    <div class="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-100 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
-      <div class="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center text-3xl shadow-sm">
-        <i class="fa-solid fa-file-pdf"></i>
+    <div class="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 space-y-4 border border-slate-100 text-center animate-fade-in">
+      <div class="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto text-2xl shadow-inner border border-emerald-100">
+        <i class="fa-brands fa-whatsapp"></i>
       </div>
       <div>
-        <h3 class="font-extrabold text-base text-slate-900">¡Archivo PDF Generado con Éxito!</h3>
-        <p class="text-xs text-slate-600 mt-1 leading-relaxed">
-          El archivo <strong>${fileName}</strong> se ha generado en su equipo y se abrió el chat de WhatsApp con <strong>${formattedPhone}</strong>.
+        <h3 class="text-base font-extrabold text-slate-900">¡Catálogo Oficial Listo para Enviar!</h3>
+        <p class="text-xs text-slate-500 mt-1">
+          Se abrió la conversación de WhatsApp con el mensaje oficial precargado para <strong>${escapeHtml(formattedPhone)}</strong>.
         </p>
       </div>
-      <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 text-left text-[11px] text-emerald-950 flex items-start space-x-2.5">
-        <i class="fa-solid fa-paperclip text-emerald-600 mt-0.5 text-base"></i>
-        <span><strong>Paso final:</strong> El mensaje oficial ha sido <strong>copiado al portapapeles</strong> y el archivo PDF está en sus descargas. Simplemente adjunte el PDF o péguelo en el chat abierto.</span>
+
+      <div class="bg-slate-50 rounded-2xl p-4 border border-slate-200 text-left space-y-2 text-xs text-slate-600">
+        <div class="flex items-center space-x-2 text-emerald-700 font-bold">
+          <i class="fa-solid fa-circle-check text-sm"></i>
+          <span>Archivo PDF Carta Descargado:</span>
+        </div>
+        <div class="font-mono text-[11px] text-slate-700 bg-white p-2 rounded-lg border border-slate-200 truncate font-bold">
+          📁 ${escapeHtml(fileName)}
+        </div>
+        <p class="text-[11px] text-slate-500 leading-relaxed">
+          <strong>Tip Corporativo:</strong> El mensaje enviado por WhatsApp ya incluye el <strong>enlace directo de descarga del PDF</strong> y el <strong>acceso al Catálogo Web interactivo</strong>. Además, puedes arrastrar el archivo PDF descargado directamente a la conversación abierta.
+        </p>
       </div>
-      <button onclick="this.closest('#modalPdfGeneradoAlerta').remove()" class="w-full bg-[#071B49] hover:bg-[#0755C9] text-white py-2.5 rounded-xl font-bold text-xs transition shadow-sm cursor-pointer">
-        Entendido
-      </button>
+
+      <div class="flex items-center justify-center gap-3 pt-2">
+        <button type="button" onclick="document.getElementById('modalPdfGeneradoAlerta').remove()" 
+                class="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition shadow-md">
+          Entendido
+        </button>
+      </div>
     </div>
   `;
   document.body.appendChild(overlay);
@@ -16988,3 +17114,741 @@ window.abrirVistaPreviaCatalogo = abrirVistaPreviaCatalogo;
 window.cerrarVistaPreviaCatalogo = cerrarVistaPreviaCatalogo;
 window.generarPdfCatalogoBlob = generarPdfCatalogoBlob;
 window.verPdfEnPantalla = verPdfEnPantalla;
+
+
+// ==============================================================================
+// GESTIÓN DE SEGURIDAD, AUTENTICACIÓN Y PERMISOS RBAC (OWASP COMPLIANT)
+// ==============================================================================
+async function initAuth() {
+  let token = localStorage.getItem('tavo_auth_token');
+  if (!token) {
+    try {
+      const resp = await originalFetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password: 'admin123' })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        token = data.token;
+        localStorage.setItem('tavo_auth_token', token);
+        AppState.usuarioActual = data.usuario;
+      }
+    } catch (e) {
+      console.warn('Auto-login fallback:', e);
+    }
+  }
+
+  if (token) {
+    try {
+      const resp = await originalFetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        AppState.usuarioActual = data.usuario;
+      } else {
+        localStorage.removeItem('tavo_auth_token');
+      }
+    } catch (e) {
+      console.error('Error verificando sesión activa:', e);
+    }
+  }
+
+  actualizarUIUsuarioYPermisos();
+}
+window.initAuth = initAuth;
+
+function actualizarUIUsuarioYPermisos() {
+  const u = AppState.usuarioActual;
+  const badgeText = document.getElementById('headerRoleText');
+  const badgeContainer = document.getElementById('headerRoleBadge');
+  const userNombre = document.getElementById('headerUserNombre');
+  const userRol = document.getElementById('headerUserRol');
+
+  if (u) {
+    if (badgeText) badgeText.textContent = u.rol_nombre || 'Usuario';
+    if (userNombre) userNombre.textContent = u.nombre_completo || u.username;
+    if (userRol) userRol.textContent = u.rol_nombre || 'Rol';
+
+    const p = u.permisos || {};
+
+    // Guardas visuales: Ocultar columnas de costos y utilidad si ver_costos_utilidad == 0
+    if (p.ver_costos_utilidad === 0) {
+      document.body.classList.add('hide-costos');
+    } else {
+      document.body.classList.remove('hide-costos');
+    }
+
+    // Ocultar botones de anulación si anular_transacciones == 0
+    if (p.anular_transacciones === 0) {
+      document.body.classList.add('hide-anular');
+    } else {
+      document.body.classList.remove('hide-anular');
+    }
+
+    // Control de módulos visibles en barra lateral
+    const navUsuarios = document.getElementById('nav-usuarios');
+    if (navUsuarios) {
+      navUsuarios.style.display = (p.perm_configuracion || u.rol_nombre === 'SuperAdmin') ? 'flex' : 'none';
+    }
+  }
+}
+window.actualizarUIUsuarioYPermisos = actualizarUIUsuarioYPermisos;
+
+function openLoginModal() {
+  const m = document.getElementById('modalLogin');
+  if (m) m.classList.remove('hidden');
+  const err = document.getElementById('loginErrorMsg');
+  if (err) err.classList.add('hidden');
+}
+window.openLoginModal = openLoginModal;
+
+function closeLoginModal() {
+  const m = document.getElementById('modalLogin');
+  if (m) m.classList.add('hidden');
+}
+window.closeLoginModal = closeLoginModal;
+
+async function ejecutarLogin(event) {
+  event.preventDefault();
+  const username = document.getElementById('loginUsername')?.value.trim();
+  const password = document.getElementById('loginPassword')?.value;
+  const errBox = document.getElementById('loginErrorMsg');
+  const errTxt = document.getElementById('loginErrorText');
+
+  try {
+    const res = await originalFetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      localStorage.setItem('tavo_auth_token', data.token);
+      AppState.usuarioActual = data.usuario;
+      actualizarUIUsuarioYPermisos();
+      closeLoginModal();
+      showToast(`Bienvenido/a, ${data.usuario.nombre_completo} (${data.usuario.rol_nombre})`, 'success');
+      navigate('dashboard');
+    } else {
+      if (errBox) errBox.classList.remove('hidden');
+      if (errTxt) errTxt.textContent = data.error || 'Credenciales inválidas';
+    }
+  } catch (err) {
+    if (errBox) errBox.classList.remove('hidden');
+    if (errTxt) errTxt.textContent = 'Error de conexión con el servidor';
+  }
+}
+window.ejecutarLogin = ejecutarLogin;
+
+async function cerrarSesionActual() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (e) {}
+  localStorage.removeItem('tavo_auth_token');
+  AppState.usuarioActual = null;
+  showToast('Sesión cerrada correctamente', 'info');
+  closeLoginModal();
+  setTimeout(() => location.reload(), 500);
+}
+window.cerrarSesionActual = cerrarSesionActual;
+
+// ==============================================================================
+// MÓDULO 14: FUERZA DE VENTAS & GESTIÓN DE VENDEDORES (ERP)
+// ==============================================================================
+async function loadFuerzaVentas() {
+  await Promise.all([cargarDirectorioVendedores(), cargarReporteComisiones()]);
+}
+window.loadFuerzaVentas = loadFuerzaVentas;
+
+async function cargarDirectorioVendedores() {
+  try {
+    const res = await fetch('/api/vendedores');
+    if (!res.ok) return;
+    const vendedores = await res.json();
+    AppState.vendedores = vendedores;
+
+    // Actualizar KPIs de Fuerza de Ventas
+    let totalVentas = 0;
+    let totalComisiones = 0;
+    vendedores.forEach(v => {
+      totalVentas += parseFloat(v.ventas_mes_usd || 0);
+      totalComisiones += parseFloat(v.comisiones_mes_usd || 0);
+    });
+
+    const kpiVentas = document.getElementById('kpiFvVentasMes');
+    const kpiCom = document.getElementById('kpiFvComisionesDevengadas');
+    const kpiTotal = document.getElementById('kpiFvTotalVendedores');
+
+    if (kpiVentas) kpiVentas.textContent = `$${totalVentas.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+    if (kpiCom) kpiCom.textContent = `$${totalComisiones.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+    if (kpiTotal) kpiTotal.textContent = `${vendedores.length} Asesores`;
+
+    renderVendedoresTable(vendedores);
+  } catch (err) {
+    console.error('Error cargando vendedores:', err);
+  }
+}
+window.cargarDirectorioVendedores = cargarDirectorioVendedores;
+
+function renderVendedoresTable(vendedores) {
+  const tbody = document.getElementById('tablaVendedoresBody');
+  if (!tbody) return;
+
+  if (!vendedores || vendedores.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400 font-bold">No hay vendedores registrados aún. Haga clic en "Registrar Vendedor".</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = vendedores.map(v => {
+    const ventas = parseFloat(v.ventas_mes_usd || 0);
+    const meta = parseFloat(v.meta_mensual_usd || 5000);
+    const pct = meta > 0 ? Math.min(100, Math.round((ventas / meta) * 100)) : 0;
+    const pctBadgeClass = pct >= 100 ? 'bg-emerald-100 text-emerald-800' : pct >= 50 ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-700';
+
+    return `
+      <tr class="hover:bg-slate-50 transition border-b border-slate-100">
+        <td class="py-3 px-4 font-mono font-bold text-slate-800">${v.codigo}</td>
+        <td class="py-3 px-4 font-bold text-slate-900">${v.nombre}</td>
+        <td class="py-3 px-4 text-slate-600">${v.telefono || '-'}</td>
+        <td class="py-3 px-4 text-center font-bold text-emerald-700 bg-emerald-50/50">${parseFloat(v.porcentaje_comision_base || 0).toFixed(1)}%</td>
+        <td class="py-3 px-4 text-right font-mono font-bold text-slate-800">$${meta.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td class="py-3 px-4 text-right font-mono font-bold text-blue-700">$${ventas.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td class="py-3 px-4 text-center">
+          <div class="flex items-center justify-center space-x-1.5">
+            <div class="w-16 bg-slate-200 rounded-full h-2 overflow-hidden">
+              <div class="bg-[#0755C9] h-2 rounded-full" style="width: ${pct}%"></div>
+            </div>
+            <span class="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full ${pctBadgeClass}">${pct}%</span>
+          </div>
+        </td>
+        <td class="py-3 px-4 text-center">
+          <div class="flex items-center justify-center space-x-1.5">
+            <button onclick="editarVendedorModal(${v.id})" class="p-1.5 text-blue-700 hover:bg-blue-50 rounded-lg transition" title="Editar Vendedor">
+              <i class="fa-solid fa-pen-to-square"></i>
+            </button>
+            <button onclick="abrirModalLiquidar(${v.id}, '${v.nombre.replace(/'/g, "\'")}', ${v.comisiones_mes_usd || 0})" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[10px] font-bold transition flex items-center" title="Liquidar Comisiones">
+              <i class="fa-solid fa-hand-holding-dollar mr-1"></i>Liquidar
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+window.renderVendedoresTable = renderVendedoresTable;
+
+async function cargarReporteComisiones() {
+  const inputMes = document.getElementById('filtroMesComisiones');
+  let mesVal = inputMes ? inputMes.value : '';
+  if (!mesVal) {
+    const d = new Date();
+    mesVal = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (inputMes) inputMes.value = mesVal;
+  }
+
+  try {
+    const res = await fetch(`/api/comisiones/reporte?mes=${mesVal}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    renderComisionesTable(data.facturas || []);
+
+    // Actualizar comisiones pendientes en KPI
+    let pend = 0;
+    (data.resumen || []).forEach(r => pend += parseFloat(r.comisiones_pendientes_usd || 0));
+    const kpiPend = document.getElementById('kpiFvComisionesPendientes');
+    if (kpiPend) kpiPend.textContent = `$${pend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+  } catch (err) {
+    console.error('Error cargando reporte de comisiones:', err);
+  }
+}
+window.cargarReporteComisiones = cargarReporteComisiones;
+
+function renderComisionesTable(facturas) {
+  const tbody = document.getElementById('tablaComisionesBody');
+  if (!tbody) return;
+
+  if (!facturas || facturas.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400 font-bold">No hay registros de comisiones para el período seleccionado.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = facturas.map(f => {
+    const estadoClass = f.comision_estado === 'PAGADA' ? 'bg-purple-100 text-purple-800' : f.comision_estado === 'DEVENGADA' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800';
+    return `
+      <tr class="hover:bg-slate-50 transition border-b border-slate-100">
+        <td class="py-2.5 px-4 font-mono font-bold text-slate-800">${f.numero_factura}</td>
+        <td class="py-2.5 px-4 text-slate-500 text-[11px]">${(f.fecha || '').substring(0, 16)}</td>
+        <td class="py-2.5 px-4 font-bold text-slate-800">${f.cliente_nombre || '-'}</td>
+        <td class="py-2.5 px-4 font-bold text-blue-700">${f.vendedor_nombre || 'Asesor'}</td>
+        <td class="py-2.5 px-4 text-right font-mono font-bold text-slate-800">$${parseFloat(f.total_usd || 0).toFixed(2)}</td>
+        <td class="py-2.5 px-4 text-center font-bold text-slate-600">${parseFloat(f.comision_porcentaje || 0).toFixed(1)}%</td>
+        <td class="py-2.5 px-4 text-right font-mono font-extrabold text-emerald-700">$${parseFloat(f.comision_monto_usd || 0).toFixed(2)}</td>
+        <td class="py-2.5 px-4 text-center">
+          <span class="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${estadoClass}">${f.comision_estado}</span>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+window.renderComisionesTable = renderComisionesTable;
+
+function cambiarSubtabFuerzaVentas(subtab) {
+  const pVend = document.getElementById('panelFvVendedores');
+  const pCom = document.getElementById('panelFvComisiones');
+  const bVend = document.getElementById('subtabFvVendedores');
+  const bCom = document.getElementById('subtabFvComisiones');
+
+  if (subtab === 'vendedores') {
+    if (pVend) pVend.classList.remove('hidden');
+    if (pCom) pCom.classList.add('hidden');
+    if (bVend) bVend.className = 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition';
+    if (bCom) bCom.className = 'px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition';
+    cargarDirectorioVendedores();
+  } else {
+    if (pVend) pVend.classList.add('hidden');
+    if (pCom) pCom.classList.remove('hidden');
+    if (bVend) bVend.className = 'px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition';
+    if (bCom) bCom.className = 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition';
+    cargarReporteComisiones();
+  }
+}
+window.cambiarSubtabFuerzaVentas = cambiarSubtabFuerzaVentas;
+
+function abrirModalNuevoVendedor() {
+  document.getElementById('modalVendedorTitulo').textContent = 'Registrar Nuevo Vendedor Comercial';
+  document.getElementById('vendedorFormId').value = '';
+  document.getElementById('vendedorFormCodigo').value = `VEN-${String((AppState.vendedores || []).length + 1).padStart(3, '0')}`;
+  document.getElementById('vendedorFormCodigo').readOnly = false;
+  document.getElementById('vendedorFormNombre').value = '';
+  document.getElementById('vendedorFormDoc').value = '';
+  document.getElementById('vendedorFormTel').value = '';
+  document.getElementById('vendedorFormEmail').value = '';
+  document.getElementById('vendedorFormPct').value = '3.0';
+  document.getElementById('vendedorFormMeta').value = '5000';
+  document.getElementById('modalVendedorForm').classList.remove('hidden');
+}
+window.abrirModalNuevoVendedor = abrirModalNuevoVendedor;
+
+function editarVendedorModal(vId) {
+  const v = (AppState.vendedores || []).find(x => x.id === vId);
+  if (!v) return;
+  document.getElementById('modalVendedorTitulo').textContent = 'Editar Vendedor Comercial';
+  document.getElementById('vendedorFormId').value = v.id;
+  document.getElementById('vendedorFormCodigo').value = v.codigo;
+  document.getElementById('vendedorFormCodigo').readOnly = true;
+  document.getElementById('vendedorFormNombre').value = v.nombre;
+  document.getElementById('vendedorFormDoc').value = v.documento_identidad || '';
+  document.getElementById('vendedorFormTel').value = v.telefono || '';
+  document.getElementById('vendedorFormEmail').value = v.email || '';
+  document.getElementById('vendedorFormPct').value = v.porcentaje_comision_base || 3.0;
+  document.getElementById('vendedorFormMeta').value = v.meta_mensual_usd || 5000;
+  document.getElementById('modalVendedorForm').classList.remove('hidden');
+}
+window.editarVendedorModal = editarVendedorModal;
+
+function closeVendedorModal() {
+  document.getElementById('modalVendedorForm').classList.add('hidden');
+}
+window.closeVendedorModal = closeVendedorModal;
+
+async function guardarVendedorData(event) {
+  event.preventDefault();
+  const vId = document.getElementById('vendedorFormId').value;
+  const payload = {
+    codigo: document.getElementById('vendedorFormCodigo').value.trim().toUpperCase(),
+    nombre: document.getElementById('vendedorFormNombre').value.trim(),
+    documento_identidad: document.getElementById('vendedorFormDoc').value.trim(),
+    telefono: document.getElementById('vendedorFormTel').value.trim(),
+    email: document.getElementById('vendedorFormEmail').value.trim(),
+    porcentaje_comision_base: parseFloat(document.getElementById('vendedorFormPct').value || 3.0),
+    meta_mensual_usd: parseFloat(document.getElementById('vendedorFormMeta').value || 5000.0)
+  };
+
+  try {
+    const url = vId ? `/api/vendedores/${vId}` : '/api/vendedores';
+    const method = vId ? 'PUT' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(vId ? 'Vendedor actualizado con éxito' : 'Vendedor registrado exitosamente', 'success');
+      closeVendedorModal();
+      await cargarDirectorioVendedores();
+      await cargarVendedoresEnPos();
+    } else {
+      alert('Error: ' + (data.error || 'No se pudo guardar'));
+    }
+  } catch (err) {
+    alert('Error de conexión: ' + err.message);
+  }
+}
+window.guardarVendedorData = guardarVendedorData;
+
+function abrirModalLiquidar(vId, vNombre, montoDevengado) {
+  document.getElementById('liqVendedorId').value = vId;
+  document.getElementById('liqVendedorNombre').textContent = vNombre;
+  document.getElementById('liqMontoUsd').value = montoDevengado;
+  document.getElementById('liqMontoPagar').textContent = `$${parseFloat(montoDevengado).toFixed(2)} USD`;
+  document.getElementById('liqNotasInput').value = `Liquidación comisiones devengadas - ${new Date().toLocaleDateString()}`;
+  document.getElementById('modalLiquidarComisiones').classList.remove('hidden');
+}
+window.abrirModalLiquidar = abrirModalLiquidar;
+
+function closeLiquidarModal() {
+  document.getElementById('modalLiquidarComisiones').classList.add('hidden');
+}
+window.closeLiquidarModal = closeLiquidarModal;
+
+async function confirmarLiquidacionComisiones() {
+  const vId = document.getElementById('liqVendedorId').value;
+  const monto = parseFloat(document.getElementById('liqMontoUsd').value || 0);
+  const notas = document.getElementById('liqNotasInput').value.trim();
+
+  if (monto <= 0) {
+    alert('No hay comisiones devengadas pendientes por liquidar para este asesor.');
+    return;
+  }
+
+  try {
+    const d = new Date();
+    const res = await fetch('/api/comisiones/liquidar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        vendedor_id: parseInt(vId),
+        periodo_mes: d.getMonth() + 1,
+        periodo_ano: d.getFullYear(),
+        monto_pagado_usd: monto,
+        notas
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast('Liquidación de comisiones procesada y auditada correctamente', 'success');
+      closeLiquidarModal();
+      await cargarDirectorioVendedores();
+      await cargarReporteComisiones();
+    } else {
+      alert('Error: ' + (data.error || 'No se pudo liquidar'));
+    }
+  } catch (err) {
+    alert('Error al liquidar comisiones: ' + err.message);
+  }
+}
+window.confirmarLiquidacionComisiones = confirmarLiquidacionComisiones;
+
+async function cargarVendedoresEnPos() {
+  const sel = document.getElementById('posVendedorSelect');
+  if (!sel) return;
+
+  try {
+    const res = await fetch('/api/vendedores');
+    if (!res.ok) return;
+    const vendedores = await res.json();
+    AppState.vendedores = vendedores;
+
+    const actualVal = sel.value;
+    sel.innerHTML = '<option value="">-- Ventas Mostrador / General (Sin comisión) --</option>' +
+      vendedores.map(v => `<option value="${v.id}" data-pct="${v.porcentaje_comision_base}">${v.codigo} - ${v.nombre} (${parseFloat(v.porcentaje_comision_base).toFixed(1)}%)</option>`).join('');
+
+    if (actualVal) sel.value = actualVal;
+    actualizarComisionPosBadge();
+  } catch (err) {
+    console.error('Error cargando vendedores en POS:', err);
+  }
+}
+window.cargarVendedoresEnPos = cargarVendedoresEnPos;
+
+function actualizarComisionPosBadge() {
+  const sel = document.getElementById('posVendedorSelect');
+  const badge = document.getElementById('posVendedorComisionBadge');
+  if (!sel || !badge) return;
+
+  const opt = sel.options[sel.selectedIndex];
+  if (opt && opt.dataset.pct) {
+    badge.textContent = `${parseFloat(opt.dataset.pct).toFixed(1)}% Comisión`;
+    badge.className = 'text-[10px] text-emerald-700 font-bold bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300';
+  } else {
+    badge.textContent = 'Sin Comisión';
+    badge.className = 'text-[10px] text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200';
+  }
+}
+window.actualizarComisionPosBadge = actualizarComisionPosBadge;
+
+// ==============================================================================
+// MÓDULO 15: GESTIÓN DE USUARIOS Y ROLES (RBAC 100% CONFIGURABLE)
+// ==============================================================================
+async function loadUsuariosYRoles() {
+  await Promise.all([cargarUsuariosDirectorio(), cargarRolesMatriz(), cargarAuditoriaSeguridad()]);
+}
+window.loadUsuariosYRoles = loadUsuariosYRoles;
+
+async function cargarUsuariosDirectorio() {
+  try {
+    const [resU, resR] = await Promise.all([fetch('/api/usuarios'), fetch('/api/roles')]);
+    if (resU.ok) {
+      AppState.usuarios = await resU.json();
+      renderUsuariosTable(AppState.usuarios);
+    }
+    if (resR.ok) {
+      AppState.roles = await resR.json();
+      poblarSelectRoles(AppState.roles);
+    }
+  } catch (err) {
+    console.error('Error cargando usuarios:', err);
+  }
+}
+window.cargarUsuariosDirectorio = cargarUsuariosDirectorio;
+
+function renderUsuariosTable(usuarios) {
+  const tbody = document.getElementById('tablaUsuariosBody');
+  if (!tbody) return;
+
+  if (!usuarios || usuarios.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400 font-bold">No hay usuarios registrados.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = usuarios.map(u => {
+    const estadoClass = u.activo === 1 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800';
+    const estadoTxt = u.activo === 1 ? 'Activo' : 'Suspendido';
+    return `
+      <tr class="hover:bg-slate-50 transition border-b border-slate-100">
+        <td class="py-3 px-4 font-mono font-bold text-slate-500">#${u.id}</td>
+        <td class="py-3 px-4 font-bold text-slate-900">${u.username}</td>
+        <td class="py-3 px-4 text-slate-800">${u.nombre_completo}</td>
+        <td class="py-3 px-4 font-bold text-blue-700">${u.rol_nombre || 'Rol'}</td>
+        <td class="py-3 px-4 text-slate-500 text-[11px]">${u.email || u.telefono || '-'}</td>
+        <td class="py-3 px-4 text-center">
+          <span class="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${estadoClass}">${estadoTxt}</span>
+        </td>
+        <td class="py-3 px-4 text-slate-500 text-[11px] font-mono">${u.ultimo_acceso || 'Sin accesos'}</td>
+        <td class="py-3 px-4 text-center">
+          <button onclick="editarUsuarioModal(${u.id})" class="p-1.5 text-blue-700 hover:bg-blue-50 rounded-lg transition" title="Editar Usuario y Rol">
+            <i class="fa-solid fa-pen-to-square"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+window.renderUsuariosTable = renderUsuariosTable;
+
+function poblarSelectRoles(roles) {
+  const sel = document.getElementById('usrFormRolSelect');
+  if (!sel) return;
+  sel.innerHTML = (roles || []).map(r => `<option value="${r.id}">${r.nombre} - ${r.descripcion || ''}</option>`).join('');
+}
+
+async function cargarRolesMatriz() {
+  try {
+    const res = await fetch('/api/roles');
+    if (!res.ok) return;
+    const roles = await res.json();
+    AppState.roles = roles;
+    renderRolesTable(roles);
+  } catch (err) {
+    console.error('Error cargando matriz de roles:', err);
+  }
+}
+window.cargarRolesMatriz = cargarRolesMatriz;
+
+function renderRolesTable(roles) {
+  const tbody = document.getElementById('tablaRolesBody');
+  if (!tbody) return;
+
+  tbody.innerHTML = roles.map(r => {
+    const esSuper = r.nombre === 'SuperAdmin';
+    const dis = esSuper ? 'disabled' : '';
+
+    return `
+      <tr class="hover:bg-slate-50 transition border-b border-slate-100">
+        <td class="py-3 px-4">
+          <div class="font-extrabold text-slate-900">${r.nombre}</div>
+          <div class="text-[10px] text-slate-400">${r.descripcion || ''}</div>
+        </td>
+        <td class="py-3 px-4 text-center">
+          <input type="checkbox" ${r.facturar_negativo ? 'checked' : ''} ${dis} onchange="guardarPermisoRolSwitch(${r.id}, 'facturar_negativo', this.checked)" class="rounded text-blue-600 focus:ring-blue-500 cursor-pointer">
+        </td>
+        <td class="py-3 px-4 text-center">
+          <input type="checkbox" ${r.autorizar_devoluciones ? 'checked' : ''} ${dis} onchange="guardarPermisoRolSwitch(${r.id}, 'autorizar_devoluciones', this.checked)" class="rounded text-blue-600 focus:ring-blue-500 cursor-pointer">
+        </td>
+        <td class="py-3 px-4 text-center">
+          <input type="checkbox" ${r.modificar_precios ? 'checked' : ''} ${dis} onchange="guardarPermisoRolSwitch(${r.id}, 'modificar_precios', this.checked)" class="rounded text-blue-600 focus:ring-blue-500 cursor-pointer">
+        </td>
+        <td class="py-3 px-4 text-center">
+          <input type="checkbox" ${r.ver_costos_utilidad ? 'checked' : ''} ${dis} onchange="guardarPermisoRolSwitch(${r.id}, 'ver_costos_utilidad', this.checked)" class="rounded text-blue-600 focus:ring-blue-500 cursor-pointer">
+        </td>
+        <td class="py-3 px-4 text-center">
+          <input type="checkbox" ${r.anular_transacciones ? 'checked' : ''} ${dis} onchange="guardarPermisoRolSwitch(${r.id}, 'anular_transacciones', this.checked)" class="rounded text-blue-600 focus:ring-blue-500 cursor-pointer">
+        </td>
+        <td class="py-3 px-4 text-center">
+          ${esSuper ? '<span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Protegido</span>' : '<span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">Auto-Guardado</span>'}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+window.renderRolesTable = renderRolesTable;
+
+async function guardarPermisoRolSwitch(rolId, campo, valor) {
+  try {
+    const payload = {};
+    payload[campo] = valor ? 1 : 0;
+    const res = await fetch(`/api/roles/${rolId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      showToast(`Permiso '${campo}' actualizado para el rol`, 'info');
+    } else {
+      const err = await res.json();
+      alert('Error actualizando permiso: ' + (err.error || 'Acceso denegado'));
+      cargarRolesMatriz();
+    }
+  } catch (e) {
+    alert('Error al guardar permiso: ' + e.message);
+  }
+}
+window.guardarPermisoRolSwitch = guardarPermisoRolSwitch;
+
+async function cargarAuditoriaSeguridad() {
+  try {
+    const res = await fetch('/api/seguridad/auditoria');
+    if (!res.ok) return;
+    const logs = await res.json();
+    renderAuditoriaTable(logs);
+  } catch (err) {
+    console.error('Error cargando auditoría:', err);
+  }
+}
+window.cargarAuditoriaSeguridad = cargarAuditoriaSeguridad;
+
+function renderAuditoriaTable(logs) {
+  const tbody = document.getElementById('tablaAuditoriaBody');
+  if (!tbody) return;
+
+  if (!logs || logs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-6 text-slate-400">Sin eventos de auditoría registrados aún.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = logs.map(l => {
+    const accClass = l.accion.includes('FALLIDO') || l.accion.includes('BLOQUEADO') ? 'text-red-600 font-bold' : l.accion.includes('EXITOSO') ? 'text-emerald-600 font-bold' : 'text-blue-600 font-bold';
+    return `
+      <tr class="hover:bg-slate-50 transition border-b border-slate-100">
+        <td class="py-2 px-3 text-slate-500 whitespace-nowrap">${(l.fecha || '').substring(0, 19)}</td>
+        <td class="py-2 px-3 font-bold text-slate-900">${l.username || 'Sistema'}</td>
+        <td class="py-2 px-3 ${accClass}">${l.accion}</td>
+        <td class="py-2 px-3 text-slate-700">${l.modulo}</td>
+        <td class="py-2 px-3 text-slate-600 truncate max-w-xs" title="${l.detalles || ''}">${l.detalles || '-'}</td>
+        <td class="py-2 px-3 text-slate-400">${l.ip || 'Local'}</td>
+      </tr>
+    `;
+  }).join('');
+}
+window.renderAuditoriaTable = renderAuditoriaTable;
+
+function cambiarSubtabUsuarios(subtab) {
+  const pUsr = document.getElementById('panelUsrUsuarios');
+  const pRol = document.getElementById('panelUsrRoles');
+  const pAud = document.getElementById('panelUsrAuditoria');
+  const bUsr = document.getElementById('subtabUsrUsuarios');
+  const bRol = document.getElementById('subtabUsrRoles');
+  const bAud = document.getElementById('subtabUsrAuditoria');
+
+  [pUsr, pRol, pAud].forEach(p => p && p.classList.add('hidden'));
+  [bUsr, bRol, bAud].forEach(b => b && (b.className = 'px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition'));
+
+  if (subtab === 'usuarios') {
+    if (pUsr) pUsr.classList.remove('hidden');
+    if (bUsr) bUsr.className = 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition';
+    cargarUsuariosDirectorio();
+  } else if (subtab === 'roles') {
+    if (pRol) pRol.classList.remove('hidden');
+    if (bRol) bRol.className = 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition';
+    cargarRolesMatriz();
+  } else {
+    if (pAud) pAud.classList.remove('hidden');
+    if (bAud) bAud.className = 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition';
+    cargarAuditoriaSeguridad();
+  }
+}
+window.cambiarSubtabUsuarios = cambiarSubtabUsuarios;
+
+function abrirModalNuevoUsuario() {
+  document.getElementById('modalUsuarioTitulo').textContent = 'Registrar Nuevo Usuario';
+  document.getElementById('usuarioFormId').value = '';
+  document.getElementById('usrFormUsername').value = '';
+  document.getElementById('usrFormUsername').readOnly = false;
+  document.getElementById('usrFormPassword').value = '';
+  document.getElementById('usrFormNombreCompleto').value = '';
+  document.getElementById('usrFormEmail').value = '';
+  document.getElementById('usrFormTelefono').value = '';
+  document.getElementById('usrFormActivoSelect').value = '1';
+  document.getElementById('modalUsuarioForm').classList.remove('hidden');
+}
+window.abrirModalNuevoUsuario = abrirModalNuevoUsuario;
+
+function editarUsuarioModal(uId) {
+  const u = (AppState.usuarios || []).find(x => x.id === uId);
+  if (!u) return;
+  document.getElementById('modalUsuarioTitulo').textContent = 'Editar Usuario & Permisos';
+  document.getElementById('usuarioFormId').value = u.id;
+  document.getElementById('usrFormUsername').value = u.username;
+  document.getElementById('usrFormUsername').readOnly = true;
+  document.getElementById('usrFormPassword').value = '';
+  document.getElementById('usrFormNombreCompleto').value = u.nombre_completo;
+  document.getElementById('usrFormEmail').value = u.email || '';
+  document.getElementById('usrFormTelefono').value = u.telefono || '';
+  document.getElementById('usrFormRolSelect').value = u.rol_id;
+  document.getElementById('usrFormActivoSelect').value = String(u.activo);
+  document.getElementById('modalUsuarioForm').classList.remove('hidden');
+}
+window.editarUsuarioModal = editarUsuarioModal;
+
+function closeUsuarioModal() {
+  document.getElementById('modalUsuarioForm').classList.add('hidden');
+}
+window.closeUsuarioModal = closeUsuarioModal;
+
+async function guardarUsuarioData(event) {
+  event.preventDefault();
+  const uId = document.getElementById('usuarioFormId').value;
+  const payload = {
+    username: document.getElementById('usrFormUsername').value.trim().toLowerCase(),
+    password: document.getElementById('usrFormPassword').value,
+    nombre_completo: document.getElementById('usrFormNombreCompleto').value.trim(),
+    email: document.getElementById('usrFormEmail').value.trim(),
+    telefono: document.getElementById('usrFormTelefono').value.trim(),
+    rol_id: parseInt(document.getElementById('usrFormRolSelect').value || 3),
+    activo: parseInt(document.getElementById('usrFormActivoSelect').value || 1)
+  };
+
+  try {
+    const url = uId ? `/api/usuarios/${uId}` : '/api/usuarios';
+    const method = uId ? 'PUT' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(uId ? 'Usuario actualizado correctamente' : 'Usuario creado con éxito', 'success');
+      closeUsuarioModal();
+      await cargarUsuariosDirectorio();
+    } else {
+      alert('Error: ' + (data.error || 'No se pudo guardar el usuario'));
+    }
+  } catch (err) {
+    alert('Error al guardar usuario: ' + err.message);
+  }
+}
+window.guardarUsuarioData = guardarUsuarioData;
