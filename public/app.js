@@ -865,6 +865,7 @@ function navigate(viewName) {
 
   // Acciones específicas al entrar a una vista
   if (viewName === 'dashboard') loadDashboard();
+  if ((viewName === 'facturacion' || viewName === 'tesoreria') && typeof actualizarEstadoCajaPOS === 'function') actualizarEstadoCajaPOS();
   if (viewName === 'categorias') loadCategorias();
   if (viewName === 'productos') {
     if (typeof cambiarSubtabProductos === 'function') {
@@ -918,6 +919,9 @@ async function loadConfig() {
       const data = await res.json();
       AppState.config = data;
       updateConfigUI();
+    }
+    if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.cargarConfigImpresion === 'function') {
+      AppState.configImpresion = await MasterReportLayout.cargarConfigImpresion();
     }
   } catch (err) {
     console.error("Error cargando configuración:", err);
@@ -2968,6 +2972,12 @@ function limpiarPOS() {
 }
 
 async function procesarFactura(tipoVentaForzado = null) {
+  // Validación de Caja Abierta (Control de Caja ERP)
+  if (!AppState.turnoActivo) {
+    showToast('Debe abrir la caja antes de facturar', 'error', 4500);
+    openModalAperturaCaja();
+    return;
+  }
   const tipoVenta = tipoVentaForzado || AppState.posTipoVenta || 'contado';
   const clienteId = document.getElementById('posClienteSelect')?.value;
   if (!clienteId) {
@@ -11486,6 +11496,9 @@ const DocumentTemplates = {
   // Factura en Formato Ticket Térmico 80mm
   facturaTicket: function(f, config) {
     if (!f) return '<p>Error: Datos de factura no disponibles.</p>';
+    if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.renderFacturaTicket === 'function') {
+      return MasterReportLayout.renderFacturaTicket(f, config || AppState.config, AppState.configImpresion);
+    }
     const cfg = config || {};
     const esc = DocumentPrinter.escape;
     const isAnulada = String(f.estado).toLowerCase() === 'anulada';
@@ -11692,6 +11705,9 @@ const DocumentTemplates = {
   // Factura Comercial en Hoja Completa (Carta / A4 Vertical)
   facturaHoja: function(f, config, paperFormat) {
     if (!f) return '<p>Error: Datos de factura no disponibles.</p>';
+    if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.renderFacturaA4 === 'function') {
+      return MasterReportLayout.renderFacturaA4(f, config || AppState.config, AppState.configImpresion);
+    }
     const cfg = config || {};
     const esc = DocumentPrinter.escape;
     const isAnulada = String(f.estado).toLowerCase() === 'anulada';
@@ -12719,262 +12735,199 @@ const DocumentTemplates = {
   },
 
   // ========================================================
-  // CATÁLOGO CORPORATIVO DE PRODUCTOS (EDITORIAL & ÉLITE)
-  // Con condicional estricto de existencias y diseño TAVO CLOUD
-    // ========================================================
-  // CATÁLOGO CORPORATIVO DE PRODUCTOS (EDITORIAL & ÉLITE)
-  // Agrupado y ordenado por categorías, sin bolívares (Solo USD)
-  // ========================================================
+  // ==============================================================================
+  // CATÁLOGO CORPORATIVO DE PRODUCTOS (PLANTILLA MAESTRA MULTI-TENANT)
+  // Agrupado estrictamente por categoría (Data Grouping) en Cuadrícula Corporativa
+  // ==============================================================================
   catalogoProductos: function(productos, config, opciones) {
     const esc = DocumentPrinter.escape;
     const cfg = config || AppState.config || {};
     const opts = opciones || {};
     const mostrarStock = Boolean(opts.mostrarStock);
-    const layout = opts.layout || 'grid';
     const prods = Array.isArray(productos) ? productos : [];
     const nombreEmpresa = (cfg.nombre_negocio || 'Empresa Comercial').trim();
 
-    // 1. Logotipo Corporativo de la Empresa (Estrictamente de la empresa, NUNCA del sistema)
+    // 1. Logotipo Corporativo del Tenant (100% Tenant Branding, Cero SaaS en header)
     let logoHtml = '';
     if (cfg.logo_url) {
-      logoHtml = `<img src="${esc(cfg.logo_url)}" alt="${esc(nombreEmpresa)}" style="max-height: 56px; max-width: 160px; object-fit: contain;">`;
+      logoHtml = `<img src="${esc(cfg.logo_url)}" alt="${esc(nombreEmpresa)}" style="max-height: 52px; max-width: 170px; object-fit: contain;">`;
     } else {
-      const inicial = nombreEmpresa.charAt(0).toUpperCase() || 'E';
+      const iniciales = (function(str) {
+        if (!str) return 'TC';
+        const w = str.replace(/[^a-zA-Z0-9\s]/g, '').trim().split(/\s+/);
+        return w.length >= 2 ? (w[0][0] + w[1][0]).toUpperCase() : str.substring(0, 2).toUpperCase();
+      })(nombreEmpresa);
       logoHtml = `
-        <div style="width: 46px; height: 46px; border-radius: 8px; background: #0755C9; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 22px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          ${inicial}
+        <div style="width: 48px; height: 48px; border-radius: 8px; background: #0F172A; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          ${iniciales}
         </div>
       `;
     }
 
-    // 2. Encabezado de la Empresa (Estrictamente datos de la empresa, sin datos del sistema)
-    const hoyStr = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    // 2. Encabezado Corporativo Maestro del Tenant
+    const hoyStr = new Date().toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const tituloDoc = mostrarStock ? 'CATÁLOGO DE INVENTARIO' : 'CATÁLOGO DE PRODUCTOS';
     const subtituloDoc = mostrarStock ? 'Lista Oficial con Existencias en Stock' : 'Lista Oficial de Precios al Cliente';
 
     let headerHtml = `
-      <div style="border-bottom: 2px solid #0755C9; padding-bottom: 12px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
+      <div class="master-header" style="border-bottom: 2px solid #0F172A; padding-bottom: 12px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">
         <div style="display: flex; align-items: center; gap: 14px;">
           ${logoHtml}
           <div>
-            <h1 style="margin: 0; font-size: 18px; font-weight: 900; color: #0F172A; text-transform: uppercase; letter-spacing: -0.3px; line-height: 1.15;">
+            <h1 style="margin: 0; font-size: 19px; font-weight: 900; color: #0F172A; text-transform: uppercase; letter-spacing: -0.3px; line-height: 1.15;">
               ${esc(nombreEmpresa)}
             </h1>
-            ${cfg.documento_fiscal ? `<div style="margin: 3px 0 0 0; font-size: 11px; font-weight: 700; color: #334155;">RIF: ${esc(cfg.documento_fiscal)}</div>` : ''}
-            <div style="margin: 3px 0 0 0; font-size: 10px; color: #64748B; line-height: 1.35;">
+            ${cfg.documento_fiscal ? `<div style="margin: 2px 0 0 0; font-size: 11px; font-weight: 700; color: #334155; font-family: monospace;">RIF / NIT: ${esc(cfg.documento_fiscal)}</div>` : ''}
+            <div style="margin: 2px 0 0 0; font-size: 10.5px; color: #64748B; line-height: 1.3;">
               ${cfg.telefono ? `<span><strong>Tel:</strong> ${esc(cfg.telefono)}</span>` : ''}
               ${cfg.telefono && cfg.direccion ? ' &bull; ' : ''}
-              ${cfg.direccion ? `<span><strong>Dir:</strong> ${esc(cfg.direccion)}</span>` : ''}
+              ${cfg.direccion ? `<span>${esc(cfg.direccion)}</span>` : ''}
             </div>
           </div>
         </div>
 
         <div style="text-align: right; shrink-0;">
-          <div style="display: inline-block; background: #0755C9; color: #FFFFFF; font-size: 11px; font-weight: 800; padding: 5px 14px; border-radius: 6px; letter-spacing: 0.8px; text-transform: uppercase;">
+          <div style="display: inline-block; background: #0F172A; color: #FFFFFF; font-size: 11px; font-weight: 900; padding: 5px 12px; border-radius: 6px; letter-spacing: 0.6px; text-transform: uppercase;">
             ${tituloDoc}
           </div>
-          <div style="font-size: 10px; font-weight: 700; color: ${mostrarStock ? '#047857' : '#0755C9'}; margin-top: 4px;">
+          <div style="font-size: 10.5px; font-weight: 700; color: #334155; margin-top: 4px;">
             ${subtituloDoc}
           </div>
-          <div style="font-size: 9.5px; color: #64748B; margin-top: 3px;">
+          <div style="font-size: 9.5px; color: #64748B; margin-top: 2px;">
             Emisión: <strong>${hoyStr}</strong> &bull; Moneda: <strong>Dólares ($ USD)</strong>
           </div>
         </div>
       </div>
     `;
 
-    // 3. Agrupación y Ordenamiento Estricto por Categoría
+    // 3. Lógica de Agrupación por Categoría (Data Grouping vía reduce)
     let bodyHtml = '';
 
     if (prods.length === 0) {
       bodyHtml = `
         <div style="text-align: center; padding: 40px 20px; color: #94A3B8; font-size: 13px; font-style: italic;">
-          No hay productos disponibles para mostrar con los filtros seleccionados.
+          No hay productos disponibles para mostrar en el catálogo.
         </div>
       `;
     } else {
-      const categoriasMap = {};
-      prods.forEach(p => {
+      const gruposMap = prods.reduce((acc, p) => {
         const cat = (p.categoria_nombre || 'General').trim();
-        if (!categoriasMap[cat]) categoriasMap[cat] = [];
-        categoriasMap[cat].push(p);
-      });
+        if (!acc[cat]) {
+          acc[cat] = {
+            nombre: cat,
+            productos: []
+          };
+        }
+        acc[cat].productos.push(p);
+        return acc;
+      }, {});
 
-      const sortedCategories = Object.keys(categoriasMap).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+      const sortedCats = Object.keys(gruposMap).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
 
-      sortedCategories.forEach(cat => {
-        categoriasMap[cat].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }));
-      });
+      sortedCats.forEach(catNom => {
+        const grupo = gruposMap[catNom];
+        grupo.productos.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }));
 
-      if (layout === 'list') {
-        let tablesContent = '';
-        sortedCategories.forEach(cat => {
-          const catProds = categoriasMap[cat];
-          let rowsHtml = '';
-          catProds.forEach((p, idx) => {
-            const num = idx + 1;
-            const codigo = esc(p.codigo || '—');
-            const nombre = esc(p.nombre || 'Producto');
-            const precioTotal = parseFloat(p.precio_total || 0).toFixed(2);
-            const stock = parseFloat(p.stock || 0);
-
-            const imgMini = p.imagen 
-              ? `<img src="${p.imagen}" alt="${nombre}" style="width: 32px; height: 32px; object-fit: contain; border-radius: 4px; border: 1px solid #E2E8F0; background: #FFFFFF;">`
-              : `<div style="width: 32px; height: 32px; border-radius: 4px; background: #F8FAFC; border: 1px solid #E2E8F0; display: flex; align-items: center; justify-content: center; color: #94A3B8; font-size: 11px;"><i class="fa-solid fa-box"></i></div>`;
-
-            let stockTd = '';
-            if (mostrarStock) {
-              stockTd = stock > 0
-                ? `<td style="text-align: right; font-weight: 700; color: #047857; padding: 6px 8px;">${stock} unid.</td>`
-                : `<td style="text-align: right; font-weight: 700; color: #B91C1C; padding: 6px 8px;">Agotado</td>`;
-            }
-
-            rowsHtml += `
-              <tr style="break-inside: avoid; page-break-inside: avoid; border-bottom: 1px solid #F1F5F9;">
-                <td style="text-align: center; color: #94A3B8; font-size: 9px; padding: 6px 4px;">${num}</td>
-                <td style="padding: 4px 6px; text-align: center;">${imgMini}</td>
-                <td style="font-family: monospace; font-size: 10px; font-weight: 700; color: #334155; padding: 6px 8px;">${codigo}</td>
-                <td style="padding: 6px 8px;">
-                  <strong style="color: #0F172A; font-size: 11px;">${nombre}</strong>
-                  ${p.descripcion ? `<div style="font-size: 9px; color: #64748B;">${esc(p.descripcion)}</div>` : ''}
-                </td>
-                <td style="text-align: right; font-family: monospace; font-size: 12px; font-weight: 900; color: #0755C9; padding: 6px 8px;">
-                  $${precioTotal} USD
-                </td>
-                ${stockTd}
-              </tr>
-            `;
-          });
-
-          tablesContent += `
-            <tr style="background: #F1F5F9; border-top: 2px solid #0755C9; border-bottom: 1px solid #CBD5E1; break-inside: avoid; page-break-inside: avoid; page-break-after: avoid;">
-              <td colspan="${mostrarStock ? 6 : 5}" style="padding: 6px 10px; font-weight: 800; font-size: 11px; color: #0755C9; text-transform: uppercase;">
-                <i class="fa-solid fa-layer-group" style="color: #0755C9; margin-right: 6px;"></i>${esc(cat)} 
-                <span style="font-size: 9px; font-weight: 600; color: #64748B; margin-left: 6px;">(${catProds.length} ${catProds.length === 1 ? 'producto' : 'productos'})</span>
-              </td>
-            </tr>
-            ${rowsHtml}
-          `;
-        });
-
-        bodyHtml = `
-          <table style="width: 100%; border-collapse: collapse; font-size: 10.5px;">
-            <thead>
-              <tr style="background: #0755C9; color: #FFFFFF; font-size: 10px; text-transform: uppercase;">
-                <th style="padding: 7px 4px; text-align: center; width: 4%;">#</th>
-                <th style="padding: 7px 6px; text-align: center; width: 6%;">Foto</th>
-                <th style="padding: 7px 8px; text-align: left; width: 16%;">Código</th>
-                <th style="padding: 7px 8px; text-align: left; width: ${mostrarStock ? '46%' : '56%'};">Producto</th>
-                <th style="padding: 7px 8px; text-align: right; width: 18%;">Precio ($ USD)</th>
-                ${mostrarStock ? '<th style="padding: 7px 8px; text-align: right; width: 12%;">Existencia</th>' : ''}
-              </tr>
-            </thead>
-            <tbody>
-              ${tablesContent}
-            </tbody>
-          </table>
+        // Separador Visual de Categoría (Renderizado UNA SOLA VEZ)
+        let separatorHtml = `
+          <div class="categoria-separator" style="margin-top: 14px; margin-bottom: 8px; break-inside: avoid; page-break-inside: avoid; page-break-after: avoid;">
+            <div style="background: #F1F5F9; border-left: 4px solid #1E293B; color: #1E293B; padding: 6px 12px; border-radius: 0 6px 6px 0; display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">
+                ${esc(catNom)}
+              </span>
+              <span style="font-size: 9.5px; font-weight: 700; color: #475569; background: #FFFFFF; border: 1px solid #CBD5E1; padding: 2px 8px; border-radius: 12px;">
+                ${grupo.productos.length} ${grupo.productos.length === 1 ? 'producto' : 'productos'}
+              </span>
+            </div>
+          </div>
         `;
 
-      } else {
-        // Vista Cuadrícula Editorial Diseñada para Hoja Carta (3 columnas exactas)
-        let sectionsHtml = '';
+        // Tarjetas en Cuadrícula (3 columnas para hoja Carta/A4)
+        let cardsHtml = '';
+        grupo.productos.forEach(p => {
+          const codigo = esc(p.codigo || 'S/C');
+          const nombre = esc(p.nombre || 'Producto');
+          const precioTotal = parseFloat(p.precio_total || p.precio_base || 0).toFixed(2);
+          const stock = parseFloat(p.stock_disponible !== undefined ? p.stock_disponible : p.stock || 0);
 
-        sortedCategories.forEach(cat => {
-          const catProds = categoriasMap[cat];
-          let cardsHtml = '';
-
-          catProds.forEach(p => {
-            const codigo = esc(p.codigo || '—');
-            const nombre = esc(p.nombre || 'Producto');
-            const precioTotal = parseFloat(p.precio_total || 0).toFixed(2);
-            const stock = parseFloat(p.stock || 0);
-
-            // Imagen con contenedor de alta fidelidad
-            const imgBlock = p.imagen
-              ? `<img src="${p.imagen}" alt="${nombre}" style="width: 100%; height: 100%; object-fit: contain; padding: 4px; box-sizing: border-box;">`
-              : `
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #94A3B8; background: #F8FAFC;">
-                  <i class="fa-solid fa-image" style="font-size: 24px; color: #CBD5E1; margin-bottom: 4px;"></i>
-                  <span style="font-size: 8px; color: #94A3B8; font-weight: 600; text-transform: uppercase;">Sin Foto</span>
+          // Contenedor de Imagen Proporcional con Fallback de Iniciales
+          let imgBlock = '';
+          if (p.imagen) {
+            imgBlock = `<img src="${p.imagen}" alt="${nombre}" style="width: 100%; height: 100%; object-fit: contain; padding: 4px; box-sizing: border-box;">`;
+          } else {
+            const inicialesProd = (function(str) {
+              if (!str) return 'PR';
+              const w = str.replace(/[^a-zA-Z0-9\s]/g, '').trim().split(/\s+/);
+              return w.length >= 2 ? (w[0][0] + w[1][0]).toUpperCase() : str.substring(0, 2).toUpperCase();
+            })(p.nombre);
+            imgBlock = `
+              <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #94A3B8; background: #F8FAFC;">
+                <div style="width: 38px; height: 38px; border-radius: 50%; background: #E2E8F0; color: #475569; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; margin-bottom: 2px;">
+                  ${inicialesProd}
                 </div>
-              `;
-
-            // Badge de Existencia (Condicional estricto)
-            let stockBadgeHtml = '';
-            if (mostrarStock) {
-              if (stock > 0) {
-                stockBadgeHtml = `
-                  <div style="margin-top: 5px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-align: center;">
-                    Stock Disponible: <strong>${stock}</strong> unid.
-                  </div>
-                `;
-              } else {
-                stockBadgeHtml = `
-                  <div style="margin-top: 5px; background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-align: center;">
-                    ✕ Agotado (0 unid.)
-                  </div>
-                `;
-              }
-            }
-
-            cardsHtml += `
-              <div class="doc-catalogo-card" style="width: calc(33.333% - 10px); margin: 5px; box-sizing: border-box; border: 1px solid #CBD5E1; border-radius: 8px; background: #FFFFFF; overflow: hidden; display: flex; flex-direction: column; page-break-inside: avoid; break-inside: avoid; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
-                <div style="width: 100%; height: 115px; background: #FFFFFF; border-bottom: 1px solid #F1F5F9; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-                  ${imgBlock}
-                </div>
-                <div style="padding: 8px 10px; display: flex; flex-direction: column; flex: 1; justify-content: space-between; background: #FAFAFA;">
-                  <div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-                      <span style="font-family: monospace; font-size: 9px; font-weight: 700; color: #0755C9; background: #EFF6FF; padding: 1px 5px; border-radius: 3px; border: 1px solid #DBEAFE;">${codigo}</span>
-                      <span style="font-size: 8px; text-transform: uppercase; color: #64748B; font-weight: 700; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(cat)}</span>
-                    </div>
-                    <h3 style="font-size: 11px; font-weight: 800; color: #0F172A; margin: 4px 0 2px 0; line-height: 1.25; min-height: 28px; max-height: 28px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
-                      ${nombre}
-                    </h3>
-                    ${p.descripcion ? `<p style="font-size: 8.5px; color: #64748B; margin: 0 0 3px 0; max-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(p.descripcion)}</p>` : ''}
-                  </div>
-                  <div>
-                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; border-top: 1px dashed #CBD5E1; padding-top: 4px;">
-                      <div style="font-size: 15px; font-weight: 900; color: #0755C9;">$${precioTotal} <span style="font-size: 9.5px; font-weight: 700; color: #64748B;">USD</span></div>
-                    </div>
-                    ${stockBadgeHtml}
-                  </div>
-                </div>
+                <span style="font-size: 8px; color: #94A3B8; font-weight: 600; text-transform: uppercase;">Sin Foto</span>
               </div>
             `;
-          });
+          }
 
-          sectionsHtml += `
-            <div style="margin-top: 14px; margin-bottom: 8px; break-inside: avoid; page-break-inside: avoid; page-break-after: avoid;">
-              <div style="background: #0F172A; color: #FFFFFF; padding: 6px 14px; border-radius: 6px; display: flex; align-items: center; justify-content: space-between; border-left: 4px solid #0755C9;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <i class="fa-solid fa-layer-group" style="color: #00C6E8; font-size: 10px;"></i>
-                  <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">${esc(cat)}</span>
-                </div>
-                <span style="font-size: 9px; font-weight: 700; background: rgba(255,255,255,0.2); padding: 1.5px 8px; border-radius: 10px;">
-                  ${catProds.length} ${catProds.length === 1 ? 'producto' : 'productos'}
-                </span>
+          let stockBadgeHtml = '';
+          if (mostrarStock) {
+            stockBadgeHtml = stock > 0
+              ? `<div style="margin-top: 4px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-align: center;">Disp: ${stock} unid.</div>`
+              : `<div style="margin-top: 4px; background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-align: center;">✕ Agotado</div>`;
+          }
+
+          // NO imprimir categoría en cada producto individual
+          cardsHtml += `
+            <div class="doc-catalogo-card" style="width: calc(33.333% - 10px); margin: 5px; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 6px; background: #FFFFFF; overflow: hidden; display: flex; flex-direction: column; page-break-inside: avoid; break-inside: avoid; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
+              <div style="width: 100%; height: 110px; background: #FFFFFF; border-bottom: 1px solid #F1F5F9; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                ${imgBlock}
               </div>
-            </div>
-            <div style="display: flex; flex-wrap: wrap; margin-left: -5px; margin-right: -5px; margin-bottom: 10px;">
-              ${cardsHtml}
+              <div style="padding: 8px 9px; display: flex; flex-direction: column; flex: 1; justify-content: space-between; background: #FFFFFF;">
+                <div>
+                  <div style="font-family: monospace; font-size: 9.5px; font-weight: 600; color: #64748B;">
+                    ${codigo}
+                  </div>
+                  <h3 style="font-size: 11px; font-weight: 600; color: #0F172A; margin: 3px 0 2px 0; line-height: 1.25; min-height: 28px; max-height: 28px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;" title="${nombre}">
+                    ${nombre}
+                  </h3>
+                  ${p.descripcion ? `<p style="font-size: 8.5px; color: #64748B; margin: 0 0 2px 0; max-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(p.descripcion)}</p>` : ''}
+                </div>
+                <div>
+                  <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; border-top: 1px solid #F1F5F9; padding-top: 4px;">
+                    <div style="font-size: 15px; font-weight: 800; color: #0F172A;">$${precioTotal} <span style="font-size: 9px; font-weight: 600; color: #64748B;">USD</span></div>
+                  </div>
+                  ${stockBadgeHtml}
+                </div>
+              </div>
             </div>
           `;
         });
 
-        bodyHtml = sectionsHtml;
-      }
+        bodyHtml += `
+          ${separatorHtml}
+          <div style="display: flex; flex-wrap: wrap; margin-left: -5px; margin-right: -5px; margin-bottom: 8px;">
+            ${cardsHtml}
+          </div>
+        `;
+      });
     }
 
-    // 4. Pie de Página de la Empresa (Sin datos del sistema)
+    // 4. Pie de Página Maestro (Con atribución SaaS discreta)
     let footerHtml = `
-      <div style="border-top: 1px solid #CBD5E1; padding-top: 8px; margin-top: 18px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5px; color: #64748B; break-inside: avoid; page-break-inside: avoid;">
-        <div>
-          <strong>${esc(nombreEmpresa)}</strong> &bull; Catálogo Oficial &bull; Precios en Dólares ($ USD) sujetos a cambio sin previo aviso.
+      <div class="master-footer" style="border-top: 1px solid #E2E8F0; padding-top: 8px; margin-top: 16px; font-size: 8.5px; color: #64748B; break-inside: avoid; page-break-inside: avoid;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <strong>${esc(nombreEmpresa)}</strong> &bull; Catálogo Oficial &bull; Precios en Dólares ($ USD) sujetos a cambio sin previo aviso.
+          </div>
+          <div style="text-align: right;">
+            ${cfg.telefono ? `<span>Contacto: <strong>${esc(cfg.telefono)}</strong></span>` : ''}
+            ${cfg.telefono && cfg.direccion ? ' &bull; ' : ''}
+            ${cfg.direccion ? `<span>${esc(cfg.direccion)}</span>` : ''}
+          </div>
         </div>
-        <div style="text-align: right;">
-          ${cfg.telefono ? `<span>Contacto: <strong>${esc(cfg.telefono)}</strong></span> &bull; ` : ''}
-          ${cfg.direccion ? `<span>${esc(cfg.direccion)}</span>` : ''}
+        <div style="margin-top: 6px; padding-top: 4px; border-top: 1px solid #F1F5F9; text-align: center; font-size: 8px; color: #94A3B8;">
+          Generado por <strong style="color: #64748B;">TAVO CLOUD</strong> | <a href="https://www.tavocloud.com" target="_blank" style="color: #64748B; text-decoration: none;">www.tavocloud.com</a>
         </div>
       </div>
     `;
@@ -12985,8 +12938,7 @@ const DocumentTemplates = {
         ${bodyHtml}
         ${footerHtml}
       </div>
-    `;
-  }
+    `;  }
 };
 
 // ========================================================
@@ -14456,22 +14408,122 @@ function closeModalAperturaCaja() {
   document.getElementById('modalAperturaCaja')?.classList.add('hidden');
 }
 
+/**
+ * ==============================================================================
+ * MÓDULO DE CONTROL DE CAJA ERP (Apertura, Movimientos, Arqueo Z y Cierre Ciego)
+ * ==============================================================================
+ */
+
+AppState.turnoActivo = null;
+AppState.ultimoReporteZ = null;
+
+async function actualizarEstadoCajaPOS() {
+  const banner = document.getElementById('posCajaStatusBanner');
+  try {
+    const res = await fetch('/api/caja/turno-activo');
+    if (!res.ok) throw new Error('Error al consultar estado de caja');
+    const data = await res.json();
+    AppState.turnoActivo = data.turno || null;
+
+    if (!banner) return;
+
+    if (!AppState.turnoActivo) {
+      // CAJA CERRADA
+      banner.innerHTML = `
+        <div class="bg-gradient-to-r from-rose-500/10 via-amber-500/10 to-rose-500/10 border-2 border-rose-300 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs animate-in fade-in duration-200">
+          <div class="flex items-center gap-3 text-left">
+            <div class="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center text-lg shadow-sm">
+              <i class="fa-solid fa-lock"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h4 class="font-bold text-rose-950 text-sm">CAJA CERRADA &bull; FACTURACIÓN BLOQUEADA</h4>
+                <span class="bg-rose-100 text-rose-800 text-[10px] font-extrabold px-2 py-0.5 rounded-full border border-rose-200">REQUERIDO</span>
+              </div>
+              <p class="text-xs text-rose-700 mt-0.5">
+                Para poder registrar y cobrar ventas en el POS, debe realizar la <strong>Apertura de Turno de Caja</strong> con su fondo inicial.
+              </p>
+            </div>
+          </div>
+          <button type="button" onclick="openModalAperturaCaja()" class="w-full sm:w-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2">
+            <i class="fa-solid fa-lock-open text-xs"></i>Abrir Turno de Caja
+          </button>
+        </div>
+      `;
+    } else {
+      // CAJA ABIERTA
+      const t = AppState.turnoActivo;
+      const fondoUsd = parseFloat(t.fondo_inicial_usd || 0).toFixed(2);
+      const fondoVes = parseFloat(t.fondo_inicial_ves || 0).toFixed(2);
+      const cajero = t.usuario_nombre || t.username || 'Operador';
+      const movsCount = t.total_movimientos || 0;
+
+      banner.innerHTML = `
+        <div class="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-300 rounded-2xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-2xs">
+          <div class="flex items-center gap-3 text-left">
+            <div class="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-base shadow-xs">
+              <i class="fa-solid fa-cash-register"></i>
+            </div>
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-extrabold text-emerald-950 text-xs">TURNO ACTIVO #${t.id}</span>
+                <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-md border border-emerald-200">${t.caja_nombre || 'Caja Principal'}</span>
+                <span class="text-xs text-slate-500 font-mono">Apertura: ${t.fecha_apertura ? t.fecha_apertura.substring(11, 16) : '-'}</span>
+              </div>
+              <div class="text-[11px] text-slate-600 mt-0.5 flex items-center gap-3 flex-wrap">
+                <span>Cajero: <strong class="text-slate-900">${cajero}</strong></span>
+                <span>Fondo Inicial: <strong class="text-emerald-700 font-mono">$${fondoUsd} USD / Bs.${fondoVes}</strong></span>
+                <span>Movs: <strong class="text-slate-800 font-mono">${movsCount}</strong></span>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 w-full sm:w-auto">
+            <button type="button" onclick="openModalMovimientoCaja()" class="flex-1 sm:flex-none px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-bold text-xs rounded-xl shadow-2xs transition flex items-center justify-center gap-1.5" title="Registrar gastos menores o ingresos">
+              <i class="fa-solid fa-money-bill-transfer text-emerald-600 text-xs"></i>Movimiento
+            </button>
+            <button type="button" onclick="openModalCierreCaja()" class="flex-1 sm:flex-none px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-2xs transition flex items-center justify-center gap-1.5" title="Arqueo Ciego y Cierre de Turno">
+              <i class="fa-solid fa-calculator text-xs"></i>Cierre Z
+            </button>
+          </div>
+        </div>
+      `;
+    }
+  } catch (err) {
+    console.warn('[Control de Caja] Error al verificar estado:', err);
+  }
+}
+
+/**
+ * 1. APERTURA DE CAJA
+ */
+function openModalAperturaCaja() {
+  const modal = document.getElementById('modalAperturaCaja');
+  if (!modal) return;
+  document.getElementById('aperturaMontoUsd').value = '0.00';
+  document.getElementById('aperturaMontoVes').value = '0.00';
+  document.getElementById('aperturaNotas').value = '';
+  modal.classList.remove('hidden');
+}
+
+function closeModalAperturaCaja() {
+  document.getElementById('modalAperturaCaja')?.classList.add('hidden');
+}
+
 async function submitAperturaCaja() {
   try {
-    const cuentaId = parseInt(document.getElementById('aperturaCuentaId').value);
-    const montoUsd = parseFloat(document.getElementById('aperturaMontoUsd').value || 0);
-    const montoMoneda = parseFloat(document.getElementById('aperturaMontoMoneda').value || 0);
-    const notas = document.getElementById('aperturaNotas').value.trim();
+    const cajaId = parseInt(document.getElementById('aperturaCajaId')?.value || 1);
+    const montoUsd = parseFloat(document.getElementById('aperturaMontoUsd')?.value || 0);
+    const montoVes = parseFloat(document.getElementById('aperturaMontoVes')?.value || 0);
+    const notas = document.getElementById('aperturaNotas')?.value.trim();
 
-    const res = await fetch('/api/tesoreria/cajas/apertura', {
+    const res = await fetch('/api/caja/abrir', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        cuenta_tesoreria_id: cuentaId,
-        monto_inicial_usd: montoUsd,
-        monto_inicial_moneda: montoMoneda,
-        notas_apertura: notas,
-        usuario_id: 1
+        caja_id: cajaId,
+        fondo_inicial_usd: montoUsd,
+        fondo_inicial_ves: montoVes,
+        notas: notas
       })
     });
 
@@ -14479,35 +14531,97 @@ async function submitAperturaCaja() {
     if (!res.ok) throw new Error(json.error || 'Error al abrir turno de caja');
 
     closeModalAperturaCaja();
-    showToast(`Turno de caja #${json.data.id} abierto exitosamente`, 'success');
-    loadTesoreria();
+    showToast(`Turno de caja #${json.turno.id} abierto exitosamente`, 'success');
+    await actualizarEstadoCajaPOS();
+    if (typeof loadTesoreria === 'function') loadTesoreria();
   } catch (err) {
-    console.error('[Tesorería] Error apertura:', err);
+    console.error('[Control de Caja] Error apertura:', err);
     showToast(err.message || 'Error al abrir caja', 'error');
   }
 }
 
 /**
- * Modal Cierre de Caja y Arqueo
+ * 2. MOVIMIENTOS MANUALES DE CAJA (EGRESOS / INGRESOS)
  */
-function openModalCierreCaja() {
-  const modal = document.getElementById('modalCierreCaja');
-  const select = document.getElementById('cierreAperturaId');
-  if (!modal || !select) return;
-
-  const abiertas = AppState.tesoreria.cajasAbiertas || [];
-  if (abiertas.length === 0) {
-    showToast('No existen turnos de caja abiertos para cerrar.', 'warning');
+function openModalMovimientoCaja() {
+  if (!AppState.turnoActivo) {
+    showToast('Debe abrir la caja antes de registrar movimientos', 'warning');
+    openModalAperturaCaja();
     return;
   }
+  const modal = document.getElementById('modalMovimientoCaja');
+  if (!modal) return;
+  document.getElementById('movCajaConcepto').value = '';
+  document.getElementById('movCajaMonto').value = '';
+  document.getElementById('movCajaReferencia').value = '';
+  modal.classList.remove('hidden');
+}
 
-  select.innerHTML = abiertas.map(a => `
-    <option value="${a.id}">${a.cuenta_nombre} (Abierta: ${a.fecha_apertura})</option>
-  `).join('');
+function closeModalMovimientoCaja() {
+  document.getElementById('modalMovimientoCaja')?.classList.add('hidden');
+}
 
-  actualizarInfoTurnoCierre();
+async function submitMovimientoCaja() {
+  try {
+    if (!AppState.turnoActivo) throw new Error('No hay turno de caja abierto');
+
+    const tipoRadio = document.querySelector('input[name="movCajaTipo"]:checked');
+    const tipo = tipoRadio ? tipoRadio.value : 'EGRESO';
+    const concepto = document.getElementById('movCajaConcepto').value.trim();
+    const moneda = document.getElementById('movCajaMoneda').value;
+    const metodo = document.getElementById('movCajaMetodo').value;
+    const monto = parseFloat(document.getElementById('movCajaMonto').value || 0);
+    const referencia = document.getElementById('movCajaReferencia').value.trim();
+
+    if (!concepto) throw new Error('El concepto del movimiento es obligatorio');
+    if (monto <= 0) throw new Error('El monto debe ser mayor a 0.00');
+
+    const res = await fetch('/api/caja/movimiento', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        turno_id: AppState.turnoActivo.id,
+        tipo: tipo,
+        concepto: concepto,
+        moneda: moneda,
+        metodo_pago: metodo,
+        monto: monto,
+        referencia: referencia
+      })
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Error al registrar movimiento');
+
+    closeModalMovimientoCaja();
+    showToast(`Movimiento ${tipo} guardado: $${monto.toFixed(2)} ${moneda}`, 'success');
+    await actualizarEstadoCajaPOS();
+    if (typeof loadTesoreria === 'function') loadTesoreria();
+  } catch (err) {
+    console.error('[Control de Caja] Error movimiento:', err);
+    showToast(err.message || 'Error al registrar movimiento', 'error');
+  }
+}
+
+/**
+ * 3. CIERRE CIEGO DE CAJA (ARQUEO Z)
+ */
+function openModalCierreCaja() {
+  if (!AppState.turnoActivo) {
+    showToast('No hay ningún turno de caja abierto para cerrar.', 'warning');
+    return;
+  }
+  const modal = document.getElementById('modalCierreCaja');
+  if (!modal) return;
+
+  document.getElementById('cierreTurnoId').value = AppState.turnoActivo.id;
   document.getElementById('cierreFisicoUsd').value = '0.00';
-  document.getElementById('cierreFisicoMoneda').value = '0.00';
+  document.getElementById('cierreFisicoVes').value = '0.00';
+  document.getElementById('cierreFisicoCop').value = '0';
+  document.getElementById('cierreFisicoPuntoVes').value = '0.00';
+  document.getElementById('cierreFisicoPagoMovilVes').value = '0.00';
+  document.getElementById('cierreFisicoZelleUsd').value = '0.00';
+  document.getElementById('cierreFisicoTransferenciaVes').value = '0.00';
   document.getElementById('cierreNotas').value = '';
 
   modal.classList.remove('hidden');
@@ -14517,60 +14631,114 @@ function closeModalCierreCaja() {
   document.getElementById('modalCierreCaja')?.classList.add('hidden');
 }
 
-function actualizarInfoTurnoCierre() {
-  const select = document.getElementById('cierreAperturaId');
-  const id = parseInt(select?.value || 0);
-  const turno = (AppState.tesoreria.cajasAbiertas || []).find(a => a.id === id);
-  if (!turno) return;
-
-  const fechaTxt = document.getElementById('cierreFechaAperturaTxt');
-  const fondoTxt = document.getElementById('cierreFondoInicialTxt');
-  if (fechaTxt) fechaTxt.textContent = turno.fecha_apertura;
-  if (fondoTxt) fondoTxt.textContent = `$${parseFloat(turno.monto_inicial_usd || 0).toFixed(2)} USD`;
-}
-
-function calcularDiferenciaArqueoVisual() {
-  // Función reactiva opcional para UX
-}
-
 async function submitCierreCaja() {
   try {
-    const aperturaId = parseInt(document.getElementById('cierreAperturaId').value);
-    const fisicoUsd = parseFloat(document.getElementById('cierreFisicoUsd').value || 0);
-    const fisicoMoneda = parseFloat(document.getElementById('cierreFisicoMoneda').value || 0);
-    const notas = document.getElementById('cierreNotas').value.trim();
+    const turnoId = parseInt(document.getElementById('cierreTurnoId')?.value || (AppState.turnoActivo ? AppState.turnoActivo.id : 0));
+    if (!turnoId) throw new Error('No se detectó el identificador del turno');
 
-    const res = await fetch('/api/tesoreria/cajas/cierre', {
+    const declarado = {
+      efectivo_usd: parseFloat(document.getElementById('cierreFisicoUsd')?.value || 0),
+      efectivo_ves: parseFloat(document.getElementById('cierreFisicoVes')?.value || 0),
+      efectivo_cop: parseFloat(document.getElementById('cierreFisicoCop')?.value || 0),
+      punto_venta_ves: parseFloat(document.getElementById('cierreFisicoPuntoVes')?.value || 0),
+      pago_movil_ves: parseFloat(document.getElementById('cierreFisicoPagoMovilVes')?.value || 0),
+      zelle_usd: parseFloat(document.getElementById('cierreFisicoZelleUsd')?.value || 0),
+      transferencia_ves: parseFloat(document.getElementById('cierreFisicoTransferenciaVes')?.value || 0),
+      transferencia_usd: 0.0
+    };
+
+    const notas = document.getElementById('cierreNotas')?.value.trim();
+
+    const res = await fetch('/api/caja/cerrar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        caja_apertura_id: aperturaId,
-        saldo_real_fisico_usd: fisicoUsd,
-        saldo_real_fisico_moneda: fisicoMoneda,
-        notas_cierre: notas,
-        usuario_id: 1
+        turno_id: turnoId,
+        declarado: declarado,
+        notas: notas
       })
     });
 
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || 'Error al cerrar turno de caja');
+    const rep = await res.json();
+    if (!res.ok) throw new Error(rep.error || 'Error al ejecutar cierre de caja');
 
     closeModalCierreCaja();
-    const dif = parseFloat(json.data.diferencia_usd || 0);
-    const estadoArqueo = json.data.estado_arqueo;
-    const msg = `Arqueo: ${estadoArqueo.toUpperCase()} (Diferencia: ${dif >= 0 ? '+' : ''}$${dif.toFixed(2)} USD)`;
-    showToast(msg, dif === 0 ? 'success' : 'warning', 4500);
+    showToast('Cierre Z ejecutado exitosamente', 'success');
 
-    loadTesoreria();
+    // Desplegar reporte Z inmediatamente para revisión de Auditoría
+    AppState.ultimoReporteZ = rep;
+    await actualizarEstadoCajaPOS();
+    if (typeof loadTesoreria === 'function') loadTesoreria();
+    mostrarModalReporteCierreZ(rep);
   } catch (err) {
-    console.error('[Tesorería] Error cierre:', err);
+    console.error('[Control de Caja] Error en cierre ciego:', err);
     showToast(err.message || 'Error al cerrar caja', 'error');
   }
 }
 
 /**
- * Modal Transferencia entre Cuentas
+ * 4. VISUALIZACIÓN E IMPRESIÓN DEL REPORTE Z
  */
+async function verReporteCierreZ(turnoId) {
+  try {
+    const res = await fetch(`/api/caja/reporte-z?turno_id=${turnoId || ''}`);
+    if (!res.ok) throw new Error('Error al cargar reporte Z');
+    const rep = await res.json();
+    AppState.ultimoReporteZ = rep;
+    mostrarModalReporteCierreZ(rep);
+  } catch (err) {
+    showToast(err.message || 'Error cargando reporte Z', 'error');
+  }
+}
+
+function mostrarModalReporteCierreZ(rep) {
+  const modal = document.getElementById('modalReporteCierreZ');
+  const container = document.getElementById('reporteCierreZPreviewContainer');
+  if (!modal || !container) return;
+
+  if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.renderReporteCierreZA4 === 'function') {
+    container.innerHTML = MasterReportLayout.renderReporteCierreZA4(rep, AppState.config, AppState.configImpresion);
+  } else {
+    container.innerHTML = `<pre class="text-xs p-4 bg-white rounded-xl font-mono">${JSON.stringify(rep, null, 2)}</pre>`;
+  }
+
+  modal.classList.remove('hidden');
+}
+
+function closeModalReporteCierreZ() {
+  document.getElementById('modalReporteCierreZ')?.classList.add('hidden');
+}
+
+function imprimirReporteCierreZActual(formato = 'letterPortrait') {
+  const rep = AppState.ultimoReporteZ;
+  if (!rep) {
+    alert('No hay información de Reporte Z cargada para imprimir');
+    return;
+  }
+
+  const cfg = AppState.config || {};
+  const pCfg = AppState.configImpresion || {};
+
+  let htmlDoc = '';
+  let printType = 'letterPortrait';
+
+  if (formato === 'ticket80') {
+    htmlDoc = MasterReportLayout.renderReporteCierreZTicket(rep, cfg, pCfg);
+    printType = 'ticket80';
+  } else {
+    htmlDoc = MasterReportLayout.renderReporteCierreZA4(rep, cfg, pCfg);
+    printType = 'letterPortrait';
+  }
+
+  const numTurno = rep.turno ? String(rep.turno.id).padStart(6, '0') : 'Z';
+  return DocumentPrinter.print({
+    type: printType,
+    title: `Reporte Z Turno #${numTurno}`,
+    html: htmlDoc
+  });
+}
+
+
 function openModalTransferenciaTesoreria() {
   const modal = document.getElementById('modalTransferenciaTesoreria');
   const origenSel = document.getElementById('transOrigenId');
@@ -17187,6 +17355,30 @@ function actualizarUIUsuarioYPermisos() {
       document.body.classList.remove('hide-anular');
     }
 
+    // Control de Facturación Directa vs Pedidos Preventa (Fuerza de Ventas)
+    const btnContado = document.getElementById('btnProcesarContado');
+    const btnCredito = document.getElementById('btnProcesarCredito');
+    const btnPedido = document.getElementById('btnGuardarPedidoPreventa');
+    const btnPedidoTxt = document.getElementById('btnGuardarPedidoText');
+
+    if (p.facturar_directo === 0) {
+      if (btnContado) btnContado.classList.add('hidden');
+      if (btnCredito) btnCredito.classList.add('hidden');
+      if (btnPedido) {
+        btnPedido.classList.remove('hidden');
+        btnPedido.className = 'w-full py-3.5 px-4 bg-gradient-to-r from-[#0755C9] to-[#00C6E8] text-white font-extrabold rounded-xl shadow-lg hover:shadow-xl transition flex items-center justify-center space-x-2 text-sm active:scale-98';
+      }
+      if (btnPedidoTxt) btnPedidoTxt.textContent = 'Generar Pedido / Preventa';
+    } else {
+      if (btnContado && AppState.posTipoVenta !== 'credito') btnContado.classList.remove('hidden');
+      if (btnCredito && AppState.posTipoVenta === 'credito') btnCredito.classList.remove('hidden');
+      if (btnPedido) {
+        btnPedido.classList.remove('hidden');
+        btnPedido.className = 'w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl border border-slate-300 transition flex items-center justify-center space-x-2 text-xs';
+      }
+      if (btnPedidoTxt) btnPedidoTxt.textContent = 'Guardar como Pedido / Preventa';
+    }
+
     // Control de módulos visibles en barra lateral
     const navUsuarios = document.getElementById('nav-usuarios');
     if (navUsuarios) {
@@ -17397,21 +17589,26 @@ window.renderComisionesTable = renderComisionesTable;
 function cambiarSubtabFuerzaVentas(subtab) {
   const pVend = document.getElementById('panelFvVendedores');
   const pCom = document.getElementById('panelFvComisiones');
+  const pPed = document.getElementById('panelFvPedidos');
   const bVend = document.getElementById('subtabFvVendedores');
   const bCom = document.getElementById('subtabFvComisiones');
+  const bPed = document.getElementById('subtabFvPedidos');
+
+  [pVend, pCom, pPed].forEach(p => p && p.classList.add('hidden'));
+  [bVend, bCom, bPed].forEach(b => b && (b.className = 'px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition'));
 
   if (subtab === 'vendedores') {
     if (pVend) pVend.classList.remove('hidden');
-    if (pCom) pCom.classList.add('hidden');
     if (bVend) bVend.className = 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition';
-    if (bCom) bCom.className = 'px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition';
     cargarDirectorioVendedores();
-  } else {
-    if (pVend) pVend.classList.add('hidden');
+  } else if (subtab === 'comisiones') {
     if (pCom) pCom.classList.remove('hidden');
-    if (bVend) bVend.className = 'px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition';
     if (bCom) bCom.className = 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition';
     cargarReporteComisiones();
+  } else if (subtab === 'pedidos') {
+    if (pPed) pPed.classList.remove('hidden');
+    if (bPed) bPed.className = 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition';
+    cargarPedidosAdmin();
   }
 }
 window.cambiarSubtabFuerzaVentas = cambiarSubtabFuerzaVentas;
@@ -17688,6 +17885,9 @@ function renderRolesTable(roles) {
           <input type="checkbox" ${r.anular_transacciones ? 'checked' : ''} ${dis} onchange="guardarPermisoRolSwitch(${r.id}, 'anular_transacciones', this.checked)" class="rounded text-blue-600 focus:ring-blue-500 cursor-pointer">
         </td>
         <td class="py-3 px-4 text-center">
+          <input type="checkbox" ${r.facturar_directo ? 'checked' : ''} ${dis} onchange="guardarPermisoRolSwitch(${r.id}, 'facturar_directo', this.checked)" class="rounded text-blue-600 focus:ring-blue-500 cursor-pointer" title="Permite ejecutar ventas directas sin requerir pedido">
+        </td>
+        <td class="py-3 px-4 text-center">
           ${esSuper ? '<span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Protegido</span>' : '<span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">Auto-Guardado</span>'}
         </td>
       </tr>
@@ -17852,3 +18052,525 @@ async function guardarUsuarioData(event) {
   }
 }
 window.guardarUsuarioData = guardarUsuarioData;
+
+
+
+// ==============================================================================
+// GESTIÓN DE PEDIDOS Y PREVENTA (FUERZA DE VENTAS & AUTORIZACIÓN)
+// ==============================================================================
+
+async function procesarPedidoPreventa() {
+  if (!AppState.posClienteSeleccionado) {
+    alert('Debe seleccionar un cliente antes de registrar el pedido.');
+    return;
+  }
+  if (!AppState.posCart || AppState.posCart.length === 0) {
+    alert('El carrito está vacío. Agregue productos antes de registrar el pedido.');
+    return;
+  }
+
+  const items = AppState.posCart.map(it => ({
+    producto_id: it.id,
+    cantidad: it.cantidad,
+    precio_unitario: it.precio
+  }));
+
+  const vendedorId = document.getElementById('posVendedorSelect')?.value || null;
+  const condicionPago = AppState.posTipoVenta || 'contado';
+  const diasCredito = condicionPago === 'credito' ? parseInt(document.getElementById('posDiasCredito')?.value || 15) : 0;
+  const notas = document.getElementById('posNotasVenta')?.value || '';
+
+  const payload = {
+    cliente_id: AppState.posClienteSeleccionado.id,
+    vendedor_id: vendedorId ? parseInt(vendedorId) : null,
+    items,
+    condicion_pago: condicionPago,
+    dias_credito: diasCredito,
+    notas
+  };
+
+  try {
+    const res = await fetch('/api/pedidos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (res.ok) {
+      alert(`¡Pedido ${data.numero_pedido} registrado exitosamente!\n\nMonto Total: $${parseFloat(data.total_usd).toFixed(2)} USD\n\nEl pedido ha sido enviado a la Administración para su aprobación y facturación.`);
+      AppState.posCart = [];
+      renderPosCart();
+      if (document.getElementById('posNotasVenta')) document.getElementById('posNotasVenta').value = '';
+      if (AppState.currentView === 'fuerza-ventas') cargarPedidosAdmin();
+    } else {
+      alert('Error registrando pedido: ' + (data.error || 'No se pudo crear el pedido'));
+    }
+  } catch (err) {
+    alert('Error de conexión al registrar pedido: ' + err.message);
+  }
+}
+window.procesarPedidoPreventa = procesarPedidoPreventa;
+
+async function cargarPedidosAdmin() {
+  const tbody = document.getElementById('tablaPedidosBody');
+  const badgePend = document.getElementById('badgeFvPedidosPendientes');
+  const filtroEstado = document.getElementById('filtroEstadoPedidos')?.value || 'TODOS';
+
+  if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400">Consultando pedidos...</td></tr>';
+
+  try {
+    let url = '/api/pedidos';
+    if (filtroEstado && filtroEstado !== 'TODOS') url += `?estado=${filtroEstado}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Error al consultar pedidos');
+    const pedidos = await res.json();
+    AppState.pedidosLista = pedidos;
+
+    // Actualizar badge de pendientes
+    const pendientesCount = pedidos.filter(p => p.estado === 'PENDIENTE').length;
+    if (badgePend) {
+      if (pendientesCount > 0) {
+        badgePend.textContent = pendientesCount;
+        badgePend.classList.remove('hidden');
+      } else {
+        badgePend.classList.add('hidden');
+      }
+    }
+
+    if (!tbody) return;
+    if (!pedidos || pedidos.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400 font-bold">No hay pedidos registrados con el filtro seleccionado.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = pedidos.map(p => {
+      let estadoBadge = '';
+      if (p.estado === 'PENDIENTE') {
+        estadoBadge = '<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300">PENDIENTE</span>';
+      } else if (p.estado === 'FACTURADO') {
+        estadoBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">FACTURADO (${p.factura_numero || ''})</span>`;
+      } else {
+        estadoBadge = '<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300">RECHAZADO</span>';
+      }
+
+      const condBadge = p.condicion_pago === 'credito'
+        ? '<span class="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">Crédito</span>'
+        : '<span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">Contado</span>';
+
+      return `
+        <tr class="hover:bg-slate-50 transition border-b border-slate-100">
+          <td class="py-3 px-4 font-mono font-bold text-[#0755C9]">${p.numero_pedido}</td>
+          <td class="py-3 px-4 text-slate-500">${p.fecha ? p.fecha.substring(0, 16) : '-'}</td>
+          <td class="py-3 px-4">
+            <div class="font-bold text-slate-900">${p.cliente_nombre}</div>
+            <div class="text-[10px] text-slate-400">${p.cliente_cedula || ''}</div>
+          </td>
+          <td class="py-3 px-4 font-medium text-slate-700">${p.vendedor_nombre || '<span class="text-slate-400 italic">Sin asesor</span>'}</td>
+          <td class="py-3 px-4 text-center">${condBadge}</td>
+          <td class="py-3 px-4 text-right font-bold text-slate-900">$${parseFloat(p.total_usd).toFixed(2)}</td>
+          <td class="py-3 px-4 text-center">${estadoBadge}</td>
+          <td class="py-3 px-4 text-center space-x-1">
+            <button onclick="abrirModalDetallePedido(${p.id})" class="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold" title="Ver Detalle">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+            ${p.estado === 'PENDIENTE' ? `
+              <button onclick="autorizarYFacturarPedido(${p.id})" class="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold" title="Autorizar y Facturar">
+                <i class="fa-solid fa-check-double"></i> Facturar
+              </button>
+              <button onclick="rechazarPedidoPrompt(${p.id})" class="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold" title="Rechazar Pedido">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            ` : ''}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('Error cargando pedidos:', err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-rose-500 font-bold">Error: ${err.message}</td></tr>`;
+  }
+}
+window.cargarPedidosAdmin = cargarPedidosAdmin;
+
+async function autorizarYFacturarPedido(pedidoId) {
+  const inputs = document.querySelectorAll('.input-cant-aprobada');
+  const items_aprobados = [];
+  let hayAprobacionParcial = false;
+
+  inputs.forEach(inp => {
+    const pid = parseInt(inp.dataset.productoId);
+    const cantAprob = parseFloat(inp.value) || 0.0;
+    const cantOrig = parseFloat(inp.dataset.cantOrig) || 0.0;
+    if (cantAprob < cantOrig) hayAprobacionParcial = true;
+    items_aprobados.push({ producto_id: pid, cantidad: cantAprob });
+  });
+
+  let msgConfirm = '¿Confirma que desea AUTORIZAR Y FACTURAR este pedido?\n\nSe validará el stock en almacén, se emitirá la factura oficial, se descontará el inventario en Kardex y se devengará la comisión del asesor comercial.';
+  if (hayAprobacionParcial) {
+    msgConfirm = 'AVISO DE APROBACIÓN PARCIAL (BACKORDER):\n\nHa ajustado las cantidades solicitadas. Se facturará únicamente la cantidad aprobada y las unidades restantes serán LIBERADAS INMEDIATAMENTE de la reserva de stock comprometido.\n\n¿Desea proceder?';
+  }
+
+  if (!confirm(msgConfirm)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/pedidos/${pedidoId}/facturar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        metodo_pago: 'Efectivo USD',
+        items_aprobados: items_aprobados.length > 0 ? items_aprobados : undefined
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      const partialMsg = data.hubo_aprobacion_parcial ? '\n[Aprobación Parcial: Reserva remanente liberada al inventario disponible]' : '';
+      alert(`¡Facturación Exitosa!${partialMsg}\n\nFactura N°: ${data.numero_factura}\nMonto Total: $${parseFloat(data.total_usd).toFixed(2)} USD\nTipo: ${data.tipo_venta.toUpperCase()}\nComisión Vendedor: $${parseFloat(data.comision_monto_usd || 0).toFixed(2)} USD (${data.comision_estado})`);
+      closeModalDetallePedido();
+      await cargarPedidosAdmin();
+      await loadDashboard();
+      await loadProductos();
+    } else {
+      alert('No se pudo facturar el pedido: ' + (data.error || 'Error desconocido'));
+    }
+  } catch (err) {
+    alert('Error de conexión: ' + err.message);
+  }
+}
+window.autorizarYFacturarPedido = autorizarYFacturarPedido;
+
+function recalcularTotalesModalPedido(ivaPct = 16.0) {
+  const inputs = document.querySelectorAll('.input-cant-aprobada');
+  let subtotal = 0.0;
+  let ivaTotal = 0.0;
+  let hayBackorder = false;
+
+  inputs.forEach(inp => {
+    let cantAprob = parseFloat(inp.value) || 0.0;
+    const cantOrig = parseFloat(inp.dataset.cantOrig) || 0.0;
+    const pu = parseFloat(inp.dataset.precio) || 0.0;
+    const impuesto = inp.dataset.impuesto || 'exento';
+
+    if (cantAprob < 0) { cantAprob = 0; inp.value = 0; }
+    if (cantAprob > cantOrig) { cantAprob = cantOrig; inp.value = cantOrig; }
+    if (cantAprob < cantOrig) hayBackorder = true;
+
+    const itSub = cantAprob * pu;
+    const itIva = (impuesto === 'gravado') ? (itSub * (ivaPct / 100.0)) : 0.0;
+    subtotal += itSub;
+    ivaTotal += itIva;
+
+    const row = inp.closest('tr');
+    if (row) {
+      const subCell = row.querySelector('.row-subtotal-item');
+      if (subCell) subCell.textContent = `$${(itSub + itIva).toFixed(2)}`;
+    }
+  });
+
+  const total = subtotal + ivaTotal;
+  const totalElem = document.getElementById('modalPedTotalUsd');
+  if (totalElem) {
+    totalElem.innerHTML = `$${total.toFixed(2)} USD ${hayBackorder ? '<span class="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200 px-2 py-0.5 rounded-full ml-1.5 font-bold">Aprobación Parcial</span>' : ''}`;
+  }
+}
+window.recalcularTotalesModalPedido = recalcularTotalesModalPedido;
+
+async function rechazarPedidoPrompt(pedidoId) {
+  const motivo = prompt('Ingrese el motivo del rechazo del pedido (ej. Cliente canceló, falta de solvencia, etc.):');
+  if (motivo === null) return;
+
+  try {
+    const res = await fetch(`/api/pedidos/${pedidoId}/rechazar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: motivo.trim() || 'Rechazado por Administración' })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast('Pedido rechazado y reserva de stock liberada', 'info');
+      closeModalDetallePedido();
+      cargarPedidosAdmin();
+    } else {
+      alert('Error: ' + (data.error || 'No se pudo rechazar'));
+    }
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+window.rechazarPedidoPrompt = rechazarPedidoPrompt;
+
+async function abrirModalDetallePedido(pedidoId) {
+  try {
+    const res = await fetch(`/api/pedidos/${pedidoId}`);
+    if (!res.ok) throw new Error('No se pudo obtener el pedido');
+    const ped = await res.json();
+
+    document.getElementById('modalPedTitulo').textContent = `Pedido N° ${ped.numero_pedido}`;
+    const fechaVencTxt = ped.fecha_vencimiento ? ` | Vigencia hasta: ${ped.fecha_vencimiento.substring(0, 16)}` : '';
+    document.getElementById('modalPedSubtitulo').textContent = `Fecha: ${ped.fecha ? ped.fecha.substring(0, 16) : ''}${fechaVencTxt}`;
+    
+    const badge = document.getElementById('modalPedEstadoBadge');
+    if (badge) {
+      badge.textContent = ped.estado;
+      badge.className = `px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+        ped.estado === 'PENDIENTE' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' :
+        ped.estado === 'FACTURADO' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' :
+        ped.estado === 'VENCIDO' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300' :
+        'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300'
+      }`;
+    }
+
+    const zonaTxt = ped.zona_nombre ? ` [Zona: ${ped.zona_nombre}]` : '';
+    document.getElementById('modalPedClienteNombre').textContent = `${ped.cliente_nombre} (${ped.cliente_cedula || '-'})${zonaTxt}`;
+    document.getElementById('modalPedVendedorNombre').textContent = ped.vendedor_nombre || 'Sin asesor asignado';
+    document.getElementById('modalPedCondicion').textContent = ped.condicion_pago === 'credito' ? `Crédito (${ped.dias_credito || 15} días)` : 'Contado';
+    document.getElementById('modalPedTotalUsd').textContent = `$${parseFloat(ped.total_usd).toFixed(2)} USD`;
+
+    const itemsBody = document.getElementById('modalPedItemsBody');
+    if (itemsBody) {
+      const isPendiente = ped.estado === 'PENDIENTE';
+      itemsBody.innerHTML = (ped.items || []).map(it => {
+        const cantOrig = parseFloat(it.cantidad);
+        const cantAprob = it.cantidad_aprobada !== undefined && it.cantidad_aprobada !== null ? parseFloat(it.cantidad_aprobada) : cantOrig;
+        const stkFis = it.stock_fisico !== undefined ? it.stock_fisico : (it.stock_actual || 0);
+        const stkComp = it.stock_comprometido !== undefined ? it.stock_comprometido : 0;
+        const stkDisp = it.stock_disponible !== undefined ? it.stock_disponible : Math.max(0, stkFis - stkComp);
+        
+        return `
+        <tr class="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+          <td class="py-2.5 px-3 font-mono text-[11px] text-slate-500 dark:text-slate-400">${it.producto_codigo}</td>
+          <td class="py-2.5 px-3">
+            <div class="font-bold text-slate-800 dark:text-slate-100">${it.producto_nombre}</div>
+            <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 flex items-center space-x-2">
+              <span>Físico: <strong>${stkFis}</strong></span>
+              <span class="text-amber-600 dark:text-amber-400">Reservado: <strong>${stkComp}</strong></span>
+              <span class="text-emerald-600 dark:text-emerald-400 font-semibold">Disponible: <strong>${stkDisp}</strong></span>
+            </div>
+          </td>
+          <td class="py-2.5 px-3 text-center">
+            <div class="text-[11px] text-slate-500 dark:text-slate-400 mb-1">Pedido: <strong class="text-slate-700 dark:text-slate-300">${cantOrig}</strong></div>
+            ${isPendiente ? `
+              <div class="flex items-center justify-center space-x-1">
+                <span class="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400">Aprobar:</span>
+                <input type="number" step="any" min="0" max="${cantOrig}" value="${cantAprob}"
+                       data-producto-id="${it.producto_id}" data-cant-orig="${cantOrig}" data-precio="${it.precio_unitario}"
+                       data-impuesto="${it.impuesto_tipo || 'exento'}"
+                       class="input-cant-aprobada w-16 px-1.5 py-1 text-center font-bold text-xs rounded-lg border border-indigo-300 dark:border-indigo-600 focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-slate-800 text-indigo-900 dark:text-indigo-200 shadow-sm"
+                       oninput="recalcularTotalesModalPedido(${ped.iva_porcentaje || 16.0})">
+              </div>
+            ` : `
+              <span class="font-bold text-sm text-slate-900 dark:text-white">${cantAprob}</span>
+            `}
+          </td>
+          <td class="py-2.5 px-3 text-right text-slate-600 dark:text-slate-300 font-medium">$${parseFloat(it.precio_unitario).toFixed(2)}</td>
+          <td class="py-2.5 px-3 text-right font-bold text-slate-900 dark:text-white row-subtotal-item">$${parseFloat(it.subtotal).toFixed(2)}</td>
+        </tr>
+      `}).join('');
+    }
+
+    const acciones = document.getElementById('modalPedAccionesAdmin');
+    if (acciones) {
+      if (ped.estado === 'PENDIENTE') {
+        acciones.innerHTML = `
+          <button onclick="autorizarYFacturarPedido(${ped.id})" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center">
+            <i class="fa-solid fa-check-double mr-1.5"></i>Autorizar y Facturar Pedido
+          </button>
+          <button onclick="rechazarPedidoPrompt(${ped.id})" class="px-3 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 rounded-xl text-xs font-bold transition">
+            <i class="fa-solid fa-xmark mr-1"></i>Rechazar
+          </button>
+          <button onclick="closeModalDetallePedido()" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-bold transition">Cerrar</button>
+        `;
+      } else {
+        acciones.innerHTML = `
+          <button onclick="closeModalDetallePedido()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-bold transition">Cerrar</button>
+        `;
+      }
+    }
+
+    document.getElementById('modalPedidoDetalle')?.classList.remove('hidden');
+  } catch (err) {
+    alert('Error cargando pedido: ' + err.message);
+  }
+}
+window.abrirModalDetallePedido = abrirModalDetallePedido;
+
+function closeModalDetallePedido() {
+  document.getElementById('modalPedidoDetalle')?.classList.add('hidden');
+}
+window.closeModalDetallePedido = closeModalDetallePedido;
+
+// ==============================================================================
+// CONTROLADOR DE FORMATOS DE IMPRESIÓN PARAMETRIZADOS (FASE 3C)
+// ==============================================================================
+async function openFormatosImpresionModal() {
+  if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.cargarConfigImpresion === 'function') {
+    await MasterReportLayout.cargarConfigImpresion();
+  }
+  const cfg = (typeof MasterReportLayout !== 'undefined' && MasterReportLayout.activePrintConfig) 
+    ? MasterReportLayout.activePrintConfig 
+    : (AppState.configImpresion || {
+        color_primario: '#0f172a',
+        mostrar_sku: true,
+        mostrar_vendedor: true,
+        mostrar_descuento_linea: true,
+        logo_alineacion: 'centro',
+        texto_footer_factura: 'Gracias por su compra. Conserve esta factura como comprobante de garantía.',
+        texto_header_ticket: '*** COMPROBANTE DE COMPRA ***',
+        texto_footer_ticket: '*** GRACIAS POR SU PREFERENCIA ***'
+      });
+  
+  const colInput = document.getElementById('cfgImpColorPrimario');
+  const colText = document.getElementById('cfgImpColorPrimarioText');
+  const aligSelect = document.getElementById('cfgImpLogoAlineacion');
+  const swSku = document.getElementById('cfgImpMostrarSku');
+  const swVendedor = document.getElementById('cfgImpMostrarVendedor');
+  const swDesc = document.getElementById('cfgImpMostrarDescuento');
+  const txtFooterFactura = document.getElementById('cfgImpTextoFooterFactura');
+  const txtHeaderTicket = document.getElementById('cfgImpTextoHeaderTicket');
+  const txtFooterTicket = document.getElementById('cfgImpTextoFooterTicket');
+
+  if (colInput) colInput.value = cfg.color_primario || '#0f172a';
+  if (colText) colText.value = (cfg.color_primario || '#0f172a').toUpperCase();
+  if (aligSelect) aligSelect.value = cfg.logo_alineacion || 'centro';
+  if (swSku) swSku.checked = Boolean(cfg.mostrar_sku);
+  if (swVendedor) swVendedor.checked = Boolean(cfg.mostrar_vendedor);
+  if (swDesc) swDesc.checked = Boolean(cfg.mostrar_descuento_linea);
+  if (txtFooterFactura) txtFooterFactura.value = cfg.texto_footer_factura || '';
+  if (txtHeaderTicket) txtHeaderTicket.value = cfg.texto_header_ticket || '';
+  if (txtFooterTicket) txtFooterTicket.value = cfg.texto_footer_ticket || '';
+
+  const modal = document.getElementById('modalFormatosImpresion');
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closeFormatosImpresionModal() {
+  const modal = document.getElementById('modalFormatosImpresion');
+  if (modal) modal.classList.add('hidden');
+}
+
+function setPresetColor(hex) {
+  const colInput = document.getElementById('cfgImpColorPrimario');
+  const colText = document.getElementById('cfgImpColorPrimarioText');
+  if (colInput) colInput.value = hex;
+  if (colText) colText.value = hex.toUpperCase();
+}
+
+function actualizarPreviewColor(hex) {
+  const colText = document.getElementById('cfgImpColorPrimarioText');
+  if (colText) colText.value = hex.toUpperCase();
+}
+
+function actualizarColorDesdeTexto(hex) {
+  const colInput = document.getElementById('cfgImpColorPrimario');
+  if (colInput && /^#[0-9A-Fa-f]{6}$/.test(hex)) {
+    colInput.value = hex;
+  }
+}
+
+async function guardarConfigImpresion(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  
+  const payload = {
+    color_primario: document.getElementById('cfgImpColorPrimario')?.value || '#0f172a',
+    logo_alineacion: document.getElementById('cfgImpLogoAlineacion')?.value || 'centro',
+    mostrar_sku: document.getElementById('cfgImpMostrarSku')?.checked ?? true,
+    mostrar_vendedor: document.getElementById('cfgImpMostrarVendedor')?.checked ?? true,
+    mostrar_descuento_linea: document.getElementById('cfgImpMostrarDescuento')?.checked ?? true,
+    texto_footer_factura: document.getElementById('cfgImpTextoFooterFactura')?.value || '',
+    texto_header_ticket: document.getElementById('cfgImpTextoHeaderTicket')?.value || '',
+    texto_footer_ticket: document.getElementById('cfgImpTextoFooterTicket')?.value || ''
+  };
+
+  try {
+    const res = await fetch('/api/configuracion/impresion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (typeof MasterReportLayout !== 'undefined') {
+        MasterReportLayout.activePrintConfig = Object.assign({}, payload);
+      }
+      AppState.configImpresion = Object.assign({}, payload);
+      alert('Configuración de formatos de impresión guardada exitosamente.');
+      closeFormatosImpresionModal();
+    } else {
+      alert('Error al guardar configuración de impresión: ' + (data.error || data.message || 'Error desconocido'));
+    }
+  } catch (err) {
+    console.error('Error al guardar formatos de impresión:', err);
+    alert('Error de conexión al guardar formatos de impresión.');
+  }
+}
+
+function previewFormatoImpresionDirecto() {
+  const mockFactura = {
+    numero_factura: 'FAC-DEMO-001',
+    fecha: new Date().toLocaleDateString('es-VE'),
+    tipo_venta: 'contado',
+    cliente_nombre: 'Cliente Corporativo Demo',
+    cliente_cedula: 'J-30112233-4',
+    cliente_telefono: '+58 412 1234567',
+    cliente_direccion: 'Avenida Libertador, Edif. Torre Centro',
+    vendedor_nombre: 'Vendedor Demo',
+    subtotal: 125.00,
+    iva_total: 20.00,
+    total_usd: 145.00,
+    detalles: [
+      { codigo: 'PRD-001', nombre: 'Harina de Trigo Especial 1kg', cantidad: 50, precio_unitario: 1.50, descuento: 5, impuesto_tipo: 'gravado', total: 71.25 },
+      { codigo: 'PRD-002', nombre: 'Aceite Vegetal Comestible 1L', cantidad: 20, precio_unitario: 2.50, descuento: 0, impuesto_tipo: 'gravado', total: 50.00 }
+    ]
+  };
+
+  const previewConfig = {
+    color_primario: document.getElementById('cfgImpColorPrimario')?.value || '#0f172a',
+    logo_alineacion: document.getElementById('cfgImpLogoAlineacion')?.value || 'centro',
+    mostrar_sku: document.getElementById('cfgImpMostrarSku')?.checked ?? true,
+    mostrar_vendedor: document.getElementById('cfgImpMostrarVendedor')?.checked ?? true,
+    mostrar_descuento_linea: document.getElementById('cfgImpMostrarDescuento')?.checked ?? true,
+    texto_footer_factura: document.getElementById('cfgImpTextoFooterFactura')?.value || '',
+    texto_header_ticket: document.getElementById('cfgImpTextoHeaderTicket')?.value || '',
+    texto_footer_ticket: document.getElementById('cfgImpTextoFooterTicket')?.value || ''
+  };
+
+  if (typeof MasterReportLayout !== 'undefined') {
+    const htmlDoc = MasterReportLayout.renderFacturaA4(mockFactura, AppState.config, previewConfig);
+    DocumentPrinter.print({
+      type: 'letterPortrait',
+      title: 'Vista_Previa_Factura_Parametrizada',
+      html: htmlDoc
+    });
+  }
+}
+
+window.openFormatosImpresionModal = openFormatosImpresionModal;
+window.closeFormatosImpresionModal = closeFormatosImpresionModal;
+window.setPresetColor = setPresetColor;
+window.actualizarPreviewColor = actualizarPreviewColor;
+window.actualizarColorDesdeTexto = actualizarColorDesdeTexto;
+window.guardarConfigImpresion = guardarConfigImpresion;
+window.previewFormatoImpresionDirecto = previewFormatoImpresionDirecto;
+
+
+window.actualizarEstadoCajaPOS = actualizarEstadoCajaPOS;
+window.openModalAperturaCaja = openModalAperturaCaja;
+window.closeModalAperturaCaja = closeModalAperturaCaja;
+window.submitAperturaCaja = submitAperturaCaja;
+window.openModalMovimientoCaja = openModalMovimientoCaja;
+window.closeModalMovimientoCaja = closeModalMovimientoCaja;
+window.submitMovimientoCaja = submitMovimientoCaja;
+window.openModalCierreCaja = openModalCierreCaja;
+window.closeModalCierreCaja = closeModalCierreCaja;
+window.submitCierreCaja = submitCierreCaja;
+window.verReporteCierreZ = verReporteCierreZ;
+window.mostrarModalReporteCierreZ = mostrarModalReporteCierreZ;
+window.closeModalReporteCierreZ = closeModalReporteCierreZ;
+window.imprimirReporteCierreZActual = imprimirReporteCierreZActual;
+
+window.addEventListener('DOMContentLoaded', () => {
+  if (typeof actualizarEstadoCajaPOS === 'function') {
+    actualizarEstadoCajaPOS();
+  }
+});

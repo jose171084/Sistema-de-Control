@@ -3,377 +3,490 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Catálogo Oficial de Productos - TAVO CLOUD</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23071B49'/%3E%3Cpath d='M16 8a5 5 0 0 1 4.9 4A4.5 4.5 0 0 1 24.5 16a4.5 4.5 0 0 1-4.5 4.5H11A4 4 0 0 1 7 16.5 4 4 0 0 1 10.2 12.6 5 5 0 0 1 16 8z' fill='url(%23g)'/%3E%3Cdefs%3E%3ClinearGradient id='g' x1='7' y1='8' x2='25' y2='21' gradientUnits='userSpaceOnUse'%3E%3Cstop stop-color='%230755C9'/%3E%3Cstop offset='1' stop-color='%2300C6E8'/%3E%3C/linearGradient%3E%3C/defs%3E%3C/svg%3E">
+  <title>Catálogo Oficial de Productos</title>
+  
+  <!-- Favicon Genérico Elegante -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230F172A'/%3E%3Cpath d='M8 10h16v3H8zm0 5h16v3H8zm0 5h10v3H8z' fill='%23FFFFFF'/%3E%3C/svg%3E">
 
+  <!-- Tipografía Corporativa Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
       theme: {
         extend: {
-          colors: {
-            brand: {
-              navy: '#071B49',
-              primary: '#0755C9',
-              cyan: '#00C6E8',
-              surface: '#F5F8FC'
-            }
-          },
           fontFamily: {
-            sans: ['Inter', 'sans-serif']
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace']
           }
         }
       }
     }
   </script>
+
+  <!-- Font Awesome & html2pdf -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+  <!-- Motor Maestro de Layout -->
+  <script src="/master-report-layout.js"></script>
+
+  <!-- Estilos de Impresión y Reglas de Maquetación Editorial -->
   <style>
-    body { font-family: 'Inter', sans-serif; }
-    .catalogo-card { transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
-    .catalogo-card:hover { transform: translateY(-3px); box-shadow: 0 14px 28px -6px rgba(7, 27, 73, 0.12); }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    
+    .catalogo-card {
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .catalogo-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px -4px rgba(15, 23, 42, 0.08);
+    }
+
+    /* REGLAS ESTRICTAS DE IMPRESIÓN Y RENDERIZADO PDF (TAILWIND PRINT) */
     @media print {
-      .no-print { display: none !important; }
-      body { background: white !important; }
-      .page-break { page-break-after: always; }
-      .catalogo-card { break-inside: avoid; page-break-inside: avoid; box-shadow: none !important; border: 1px solid #E2E8F0 !important; }
+      @page {
+        margin: 12mm 10mm 15mm 10mm;
+        size: letter portrait;
+      }
+      body {
+        background: #FFFFFF !important;
+        color: #0F172A !important;
+        font-size: 10pt !important;
+      }
+      .no-print {
+        display: none !important;
+      }
+      .print-only {
+        display: block !important;
+      }
+      #catalogoPrintArea {
+        padding: 0 !important;
+        margin: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+      /* Sistema de cuadrícula para impresión (3 columnas exactas para hoja carta) */
+      .catalogo-grid {
+        display: grid !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 12px !important;
+      }
+      /* Prevención estricta de cortes de tarjeta a mitad de página */
+      .catalogo-card {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        box-shadow: none !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 6px !important;
+        background: #FFFFFF !important;
+      }
+      /* Prevención de separadores huérfanos */
+      .categoria-separator {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        page-break-after: avoid !important;
+        break-after: avoid !important;
+        margin-top: 16px !important;
+        margin-bottom: 8px !important;
+        background: #F1F5F9 !important;
+        border-left: 4px solid #1E293B !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .master-header, .master-footer {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
     }
   </style>
 </head>
-<body class="min-h-full flex flex-col bg-[#F5F8FC] text-slate-800 antialiased">
+<body class="min-h-full flex flex-col bg-slate-50 text-slate-800 antialiased">
 
-  <!-- BARRA DE ENCABEZADO SUPERIOR CORPORATIVO -->
-  <header class="no-print sticky top-0 z-40 bg-[#071B49]/95 backdrop-blur-md border-b border-white/10 text-white shadow-lg">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3">
-      <div class="flex items-center space-x-3.5">
-        <div id="headerLogoContainer" class="flex items-center">
-          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-[#0755C9] to-[#00C6E8] text-[#071B49] font-black flex items-center justify-center text-base shadow-sm border border-cyan-300">
+  <!-- BARRA DE NAVEGACIÓN Y ACCIÓN SUPERIOR (SCREEN ONLY) -->
+  <nav class="no-print sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-xs">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <!-- Info Rápida de la Empresa -->
+      <div class="flex items-center space-x-3 w-full sm:w-auto">
+        <div id="navLogoPlaceholder" class="flex items-center">
+          <div class="w-9 h-9 rounded-lg bg-slate-900 text-white font-bold flex items-center justify-center text-sm shadow-xs">
             TC
           </div>
         </div>
         <div>
-          <h1 id="headerNombreNegocio" class="text-base sm:text-lg font-black tracking-tight text-white uppercase leading-tight">
-            TAVO CLOUD
-          </h1>
-          <p id="headerRifDireccion" class="text-[11px] text-cyan-300 font-medium">
+          <span id="navNombreNegocio" class="text-sm font-bold text-slate-900 uppercase tracking-tight block">
+            Cargando empresa...
+          </span>
+          <span class="text-[11px] text-slate-500 font-medium block">
             Catálogo Oficial de Productos &bull; Precios en USD
-          </p>
+          </span>
         </div>
       </div>
 
+      <!-- Botones de Acción -->
       <div class="flex items-center space-x-2 w-full sm:w-auto justify-end">
-        <button id="btnDescargarPdf" onclick="descargarCatalogoPublicoPdf()" class="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center shadow-xs border border-white/10 cursor-pointer">
+        <!-- Selector de Columnas Grid -->
+        <div class="hidden md:flex items-center border border-slate-200 rounded-lg p-0.5 bg-slate-100 text-xs text-slate-600 mr-2">
+          <button id="btnGrid2" onclick="setGridColumns(2)" class="px-2.5 py-1 rounded-md font-semibold transition" title="2 Columnas">
+            <i class="fa-solid fa-table-cells-large mr-1"></i>2 Cols
+          </button>
+          <button id="btnGrid3" onclick="setGridColumns(3)" class="px-2.5 py-1 rounded-md font-semibold transition bg-white text-slate-900 shadow-xs" title="3 Columnas">
+            <i class="fa-solid fa-table-cells mr-1"></i>3 Cols
+          </button>
+        </div>
+
+        <button id="btnDescargarPdf" onclick="descargarCatalogoPdf()" class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition flex items-center shadow-xs cursor-pointer">
           <i class="fa-solid fa-file-pdf mr-1.5 text-rose-400"></i>
           <span>Descargar PDF</span>
         </button>
-        <button id="btnPedidoWhatsApp" onclick="abrirChatWhatsAppNegocio()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center shadow-md cursor-pointer">
+
+        <button id="btnPedidoWhatsApp" onclick="abrirWhatsAppTenant()" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition flex items-center shadow-xs cursor-pointer">
           <i class="fa-brands fa-whatsapp mr-1.5 text-sm"></i>
-          <span>Hacer Pedido</span>
+          <span>Contactar</span>
         </button>
       </div>
     </div>
-  </header>
+  </nav>
 
   <!-- CONTENEDOR PRINCIPAL -->
   <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 
-    <!-- HERO CORPORATIVO / BANNER DE PRESENTACIÓN -->
-    <section class="bg-gradient-to-br from-[#071B49] via-[#092B6E] to-[#0755C9] rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-white/10">
-      <div class="absolute -right-10 -bottom-10 w-64 h-64 bg-cyan-400/10 rounded-full blur-3xl pointer-events-none"></div>
-      <div class="relative z-10 max-w-3xl space-y-2">
-        <div class="inline-flex items-center space-x-2 bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider">
-          <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-          <span>Catálogo Oficial de Productos</span>
-        </div>
-        <h2 id="heroTitulo" class="text-2xl sm:text-3xl font-black tracking-tight text-white leading-tight">
-          Lista Oficial de Productos & Materias Primas
-        </h2>
-        <p class="text-xs sm:text-sm text-slate-200/90 leading-relaxed">
-          Explore nuestra amplia selección de productos certificados con precios actualizados en Dólares ($ USD). Contáctenos directamente para cotizaciones y despachos inmediatos.
-        </p>
-      </div>
-    </section>
-
-    <!-- BARRA DE FILTROS Y BÚSQUEDA RÁPIDA -->
-    <section class="no-print bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
-      <!-- Buscador -->
+    <!-- BARRA DE FILTROS Y BÚSQUEDA RÁPIDA (SCREEN ONLY) -->
+    <section class="no-print bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
+      <!-- Buscador por nombre / código -->
       <div class="relative w-full md:w-96">
         <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-xs"></i>
-        <input type="text" id="filtroBuscador" oninput="filtrarProductos()" placeholder="Buscar producto por nombre o código..." 
-               class="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#0755C9]">
+        <input type="text" id="filtroBuscador" oninput="filtrarCatalogo()" placeholder="Buscar producto por nombre o código SKU..." 
+               class="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 transition">
       </div>
 
-      <!-- Selector de Categoría -->
+      <!-- Selector de Categorías en Pills -->
       <div class="flex items-center space-x-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0" id="categoriasPills">
-        <button onclick="seleccionarCategoria('')" class="pill-cat px-3 py-1.5 rounded-xl text-xs font-bold transition bg-[#071B49] text-white shrink-0" data-cat-id="">
+        <button onclick="filtrarPorCategoria('')" class="pill-cat px-3 py-1.5 rounded-lg text-xs font-bold transition bg-slate-900 text-white shrink-0" data-cat="">
           Todas
         </button>
       </div>
     </section>
 
-    <!-- ÁREA DONDE SE RENDERIZAN LAS CATEGORÍAS Y PRODUCTOS -->
-    <div id="catalogoGridContenedor" class="space-y-8">
-      <div class="text-center py-16 text-slate-400">
-        <i class="fa-solid fa-spinner fa-spin text-3xl text-[#0755C9] mb-3"></i>
-        <p class="text-xs font-semibold">Cargando catálogo oficial...</p>
+    <!-- ÁREA DOCUMENTAL MAESTRA (SE IMPRIME / EXPORTA A PDF) -->
+    <div id="catalogoPrintArea" class="bg-white rounded-xl border border-slate-200 p-6 sm:p-8 shadow-xs">
+      
+      <!-- ENCABEZADO CORPORATIVO MAESTRO DEL TENANT (Inyectado Dinámicamente) -->
+      <div id="masterHeaderContainer">
+        <!-- Renderizado por MasterReportLayout.renderHeader -->
       </div>
+
+      <!-- CONTENEDOR DE SECCIONES AGRUPADAS POR CATEGORÍA -->
+      <div id="catalogoContenidoAgrupado" class="space-y-6">
+        <div class="text-center py-16 text-slate-400">
+          <i class="fa-solid fa-spinner fa-spin text-2xl text-slate-600 mb-2"></i>
+          <p class="text-xs font-semibold">Cargando catálogo corporativo...</p>
+        </div>
+      </div>
+
+      <!-- PIE DE PÁGINA MAESTRO (Inyectado Dinámicamente) -->
+      <div id="masterFooterContainer">
+        <!-- Renderizado por MasterReportLayout.renderFooter -->
+      </div>
+
     </div>
 
   </main>
 
-  <!-- PIE DE PÁGINA CORPORATIVO -->
-  <footer class="no-print bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-500 space-y-2 mt-auto">
-    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-      <p id="footerCopy" class="font-medium">
-        TAVO CLOUD &bull; Business Management System &bull; Todos los derechos reservados.
-      </p>
-      <div id="footerContacto" class="text-slate-400 text-[11px] space-x-3">
-        <!-- Teléfono y dirección dinámicos -->
-      </div>
-    </div>
-  </footer>
-
-  <!-- SCRIPT DE CARGA Y LOGICA DEL CATÁLOGO PÚBLICO -->
+  <!-- SCRIPT DE CONTROLADOR Y RENDERIZADO DEL CATÁLOGO -->
   <script>
-    let appConfig = {};
-    let todosProductos = [];
-    let todasCategorias = [];
-    let categoriaActiva = '';
+    let tenantData = {};
+    let productosPlano = [];
+    let gruposCategorias = [];
+    let categoriaSeleccionada = '';
+    let gridCols = 3;
 
-    async function init() {
+    /**
+     * Inicialización del Catálogo: Carga data agrupada desde el endpoint backend.
+     */
+    async function initCatalogo() {
       try {
-        const [resCfg, resProd, resCat] = await Promise.all([
-          fetch('/api/config').then(r => r.json()).catch(() => ({})),
-          fetch('/api/productos').then(r => r.json()).catch(() => []),
-          fetch('/api/categorias').then(r => r.json()).catch(() => [])
-        ]);
+        // Intenta obtener data directamente agrupada desde el backend optimizado
+        const res = await fetch('/api/catalogo/agrupado').then(r => r.json()).catch(() => null);
 
-        appConfig = resCfg || {};
-        todosProductos = Array.isArray(resProd) ? resProd : [];
-        todasCategorias = Array.isArray(resCat) ? resCat : [];
+        if (res && res.success && res.tenant) {
+          tenantData = res.tenant;
+          gruposCategorias = res.categorias || [];
+          
+          // Aplanar productos para filtros dinámicos rápidos
+          productosPlano = [];
+          gruposCategorias.forEach(g => {
+            (g.productos || []).forEach(p => {
+              productosPlano.push(Object.assign({}, p, { categoria_nombre: g.categoria_nombre }));
+            });
+          });
+        } else {
+          // Fallback resiliente: Cargar config y productos estándar
+          const [cfg, prods] = await Promise.all([
+            fetch('/api/config').then(r => r.json()).catch(() => ({})),
+            fetch('/api/productos').then(r => r.json()).catch(() => [])
+          ]);
 
-        renderizarEmpresa();
+          tenantData = {
+            nombre_negocio: cfg.nombre_negocio || 'Empresa Comercial',
+            documento_fiscal: cfg.documento_fiscal || '',
+            telefono: cfg.telefono || '',
+            direccion: cfg.direccion || '',
+            logo_url: cfg.logo_url || '',
+            moneda_principal: cfg.moneda_principal || 'USD'
+          };
+          productosPlano = Array.isArray(prods) ? prods : [];
+          // Agrupación vía reduce en el frontend
+          gruposCategorias = MasterReportLayout.groupByCategory(productosPlano);
+        }
+
+        renderizarIdentidad();
         renderizarPillsCategorias();
-        filtrarProductos();
+        renderizarCatalogo();
       } catch (err) {
         console.error('Error al inicializar catálogo:', err);
+        mostrarErrorCarga();
       }
     }
 
-    function renderizarEmpresa() {
-      const nombre = appConfig.nombre_negocio || 'TAVO CLOUD';
-      const rif = appConfig.documento_fiscal ? `RIF: ${appConfig.documento_fiscal}` : '';
-      const telf = appConfig.telefono || '';
-      const dir = appConfig.direccion || '';
-
+    /**
+     * Renderiza la Identidad del Tenant en el NavBar y en el Layout Maestro.
+     */
+    function renderizarIdentidad() {
+      const nombre = (tenantData.nombre_negocio || 'Catálogo de Productos').trim();
       document.title = `Catálogo Oficial - ${nombre}`;
-      const headerNombre = document.getElementById('headerNombreNegocio');
-      if (headerNombre) headerNombre.textContent = nombre;
 
-      const headerRif = document.getElementById('headerRifDireccion');
-      if (headerRif) {
-        headerRif.textContent = [rif, 'Precios Oficiales en USD'].filter(Boolean).join(' • ');
-      }
+      // NavBar Top (Screen Only)
+      const navNombre = document.getElementById('navNombreNegocio');
+      if (navNombre) navNombre.textContent = nombre;
 
-      if (appConfig.logo_url) {
-        const logoCont = document.getElementById('headerLogoContainer');
-        if (logoCont) {
-          logoCont.innerHTML = `<img src="${appConfig.logo_url}" alt="Logo" class="max-h-10 max-w-[130px] object-contain">`;
+      const navLogoPlaceholder = document.getElementById('navLogoPlaceholder');
+      if (navLogoPlaceholder) {
+        if (tenantData.logo_url) {
+          navLogoPlaceholder.innerHTML = `<img src="${tenantData.logo_url}" alt="${nombre}" class="h-9 max-h-9 max-w-[120px] object-contain">`;
+        } else {
+          navLogoPlaceholder.innerHTML = `
+            <div class="w-9 h-9 rounded-lg bg-slate-900 text-white font-bold flex items-center justify-center text-sm shadow-xs">
+              ${MasterReportLayout.getIniciales(nombre)}
+            </div>
+          `;
         }
       }
 
-      const footerCopy = document.getElementById('footerCopy');
-      if (footerCopy) {
-        footerCopy.innerHTML = `<strong>${nombre}</strong> &bull; Lista Oficial de Precios en Dólares ($ USD)`;
+      // Encabezado Maestro (100% Tenant Branding, Cero SaaS)
+      const headerCont = document.getElementById('masterHeaderContainer');
+      if (headerCont) {
+        headerCont.innerHTML = MasterReportLayout.renderHeader(tenantData, {
+          tipo: 'CATÁLOGO OFICIAL',
+          subtitulo: 'Lista Oficial de Productos & Precios en USD',
+          fecha: new Date().toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+          moneda: 'Dólares ($ USD)'
+        });
       }
 
-      const footerCont = document.getElementById('footerContacto');
+      // Pie de Página Maestro (Con atribución discreta)
+      const footerCont = document.getElementById('masterFooterContainer');
       if (footerCont) {
-        footerCont.innerHTML = [
-          telf ? `<span><i class="fa-solid fa-phone mr-1"></i>${telf}</span>` : '',
-          dir ? `<span><i class="fa-solid fa-location-dot mr-1"></i>${dir}</span>` : ''
-        ].filter(Boolean).join(' &bull; ');
+        footerCont.innerHTML = MasterReportLayout.renderFooter(tenantData);
       }
     }
 
+    /**
+     * Renderiza los botones (pills) para seleccionar categorías en la barra de filtros.
+     */
     function renderizarPillsCategorias() {
       const cont = document.getElementById('categoriasPills');
       if (!cont) return;
 
-      let html = `<button onclick="seleccionarCategoria('')" class="pill-cat px-3 py-1.5 rounded-xl text-xs font-bold transition bg-[#071B49] text-white shrink-0" data-cat-id="">Todas</button>`;
+      // Extraer categorías únicas
+      const catNombres = Array.from(new Set(productosPlano.map(p => (p.categoria_nombre || 'General').trim()))).sort((a, b) => a.localeCompare(b, 'es'));
 
-      todasCategorias.forEach(c => {
-        html += `<button onclick="seleccionarCategoria('${c.id}')" class="pill-cat px-3 py-1.5 rounded-xl text-xs font-semibold transition bg-slate-100 text-slate-700 hover:bg-slate-200 shrink-0" data-cat-id="${c.id}">${c.nombre}</button>`;
+      let html = `<button onclick="filtrarPorCategoria('')" class="pill-cat px-3 py-1.5 rounded-lg text-xs font-bold transition bg-slate-900 text-white shrink-0" data-cat="">Todas</button>`;
+
+      catNombres.forEach(cat => {
+        html += `
+          <button onclick="filtrarPorCategoria('${encodeURIComponent(cat)}')" 
+                  class="pill-cat px-3 py-1.5 rounded-lg text-xs font-semibold transition bg-slate-100 text-slate-700 hover:bg-slate-200 shrink-0" 
+                  data-cat="${encodeURIComponent(cat)}">
+            ${cat}
+          </button>
+        `;
       });
 
       cont.innerHTML = html;
     }
 
-    function seleccionarCategoria(catId) {
-      categoriaActiva = catId ? String(catId) : '';
+    /**
+     * Aplica el filtro por categoría seleccionada.
+     */
+    function filtrarPorCategoria(catEnc) {
+      categoriaSeleccionada = catEnc ? decodeURIComponent(catEnc) : '';
+
       const buttons = document.querySelectorAll('.pill-cat');
       buttons.forEach(btn => {
-        const id = btn.getAttribute('data-cat-id') || '';
-        if (id === categoriaActiva) {
-          btn.className = 'pill-cat px-3 py-1.5 rounded-xl text-xs font-bold transition bg-[#071B49] text-white shrink-0 shadow-2xs';
+        const btnCat = btn.getAttribute('data-cat') || '';
+        const match = (!categoriaSeleccionada && !btnCat) || (categoriaSeleccionada && btnCat === encodeURIComponent(categoriaSeleccionada));
+        if (match) {
+          btn.className = 'pill-cat px-3 py-1.5 rounded-lg text-xs font-bold transition bg-slate-900 text-white shrink-0 shadow-xs';
         } else {
-          btn.className = 'pill-cat px-3 py-1.5 rounded-xl text-xs font-semibold transition bg-slate-100 text-slate-700 hover:bg-slate-200 shrink-0';
+          btn.className = 'pill-cat px-3 py-1.5 rounded-lg text-xs font-semibold transition bg-slate-100 text-slate-700 hover:bg-slate-200 shrink-0';
         }
       });
-      filtrarProductos();
+
+      filtrarCatalogo();
     }
 
-    function filtrarProductos() {
-      const q = (document.getElementById('filtroBuscador')?.value || '').toLowerCase().trim();
-      const container = document.getElementById('catalogoGridContenedor');
-      if (!container) return;
+    /**
+     * Cambia la densidad de la cuadrícula entre 2 y 3 columnas.
+     */
+    function setGridColumns(cols) {
+      gridCols = Number(cols) === 2 ? 2 : 3;
 
-      const prods = todosProductos.filter(p => {
-        if (categoriaActiva && String(p.categoria_id) !== String(categoriaActiva)) return false;
+      const btn2 = document.getElementById('btnGrid2');
+      const btn3 = document.getElementById('btnGrid3');
+
+      if (gridCols === 2) {
+        if (btn2) btn2.className = 'px-2.5 py-1 rounded-md font-semibold transition bg-white text-slate-900 shadow-xs';
+        if (btn3) btn3.className = 'px-2.5 py-1 rounded-md font-semibold transition text-slate-600 hover:text-slate-900';
+      } else {
+        if (btn3) btn3.className = 'px-2.5 py-1 rounded-md font-semibold transition bg-white text-slate-900 shadow-xs';
+        if (btn2) btn2.className = 'px-2.5 py-1 rounded-md font-semibold transition text-slate-600 hover:text-slate-900';
+      }
+
+      renderizarCatalogo();
+    }
+
+    /**
+     * Filtra los productos por término de búsqueda y categoría, y renderiza.
+     */
+    function filtrarCatalogo() {
+      const q = (document.getElementById('filtroBuscador')?.value || '').toLowerCase().trim();
+
+      const filtrados = productosPlano.filter(p => {
+        if (categoriaSeleccionada && (p.categoria_nombre || 'General').trim() !== categoriaSeleccionada) {
+          return false;
+        }
         if (q) {
-          const matchNom = (p.nombre || '').toLowerCase().includes(q);
-          const matchCod = (p.codigo || '').toLowerCase().includes(q);
-          const matchDes = (p.descripcion || '').toLowerCase().includes(q);
-          if (!matchNom && !matchCod && !matchDes) return false;
+          const nom = (p.nombre || '').toLowerCase();
+          const cod = (p.codigo || '').toLowerCase();
+          const des = (p.descripcion || '').toLowerCase();
+          if (!nom.includes(q) && !cod.includes(q) && !des.includes(q)) {
+            return false;
+          }
         }
         return true;
       });
 
-      if (prods.length === 0) {
-        container.innerHTML = `
-          <div class="bg-white rounded-3xl p-12 text-center border border-slate-200 text-slate-400 space-y-2">
+      // Re-agrupar la selección filtrada usando reduce
+      gruposCategorias = MasterReportLayout.groupByCategory(filtrados);
+      renderizarCatalogo();
+    }
+
+    /**
+     * Renderiza el contenido agrupado por categoría en formato Grid tipo Shopify/ERP.
+     */
+    function renderizarCatalogo() {
+      const contenedor = document.getElementById('catalogoContenidoAgrupado');
+      if (!contenedor) return;
+
+      if (!gruposCategorias || gruposCategorias.length === 0) {
+        contenedor.innerHTML = `
+          <div class="bg-slate-50 rounded-xl p-12 text-center border border-slate-200 text-slate-400 space-y-2">
             <i class="fa-solid fa-box-open text-4xl text-slate-300"></i>
             <h3 class="font-bold text-slate-700 text-sm">No se encontraron productos</h3>
-            <p class="text-xs">Pruebe ajustando el término de búsqueda o la categoría seleccionada.</p>
+            <p class="text-xs">Intente ajustando el término de búsqueda o la categoría seleccionada.</p>
           </div>
         `;
         return;
       }
 
-      // Agrupar por categoría
-      const catMap = {};
-      prods.forEach(p => {
-        const catNom = (p.categoria_nombre || 'General').trim();
-        if (!catMap[catNom]) catMap[catNom] = [];
-        catMap[catNom].push(p);
-      });
-
-      const sortedCats = Object.keys(catMap).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+      const gridClass = gridCols === 2 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3';
 
       let html = '';
-      sortedCats.forEach(cat => {
-        const items = catMap[cat];
-        items.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }));
 
-        html += `
-          <div class="space-y-4">
-            <!-- Header de Categoría -->
-            <div class="flex items-center space-x-3 border-b-2 border-[#071B49] pb-2">
-              <span class="w-3 h-3 rounded-full bg-[#00C6E8]"></span>
-              <h2 class="text-base sm:text-lg font-black text-[#071B49] uppercase tracking-wide">${cat}</h2>
-              <span class="text-xs font-bold text-slate-500 bg-slate-200 px-2.5 py-0.5 rounded-full">${items.length} ${items.length === 1 ? 'ítem' : 'ítems'}</span>
-            </div>
+      gruposCategorias.forEach(grupo => {
+        // Separador Visual de Categoría (Directiva 2: Renderizar categoría UNA SOLA VEZ)
+        html += MasterReportLayout.renderCategorySeparator(grupo.categoria_nombre, grupo.productos.length);
 
-            <!-- Grid de Tarjetas -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        `;
+        // Cuadrícula de Tarjetas (Directiva 3: Grid de Tarjetas Limpias)
+        html += `<div class="catalogo-grid grid ${gridClass} gap-4 mb-6">`;
 
-        items.forEach(p => {
-          const precio = Number(p.precio_total || p.precio_base || 0).toFixed(2);
-          const fotoHtml = p.imagen 
-            ? `<img src="${p.imagen}" alt="${p.nombre}" class="w-full h-full object-cover">`
-            : `<div class="w-full h-full flex flex-col items-center justify-center text-slate-300 bg-slate-100">
-                <i class="fa-solid fa-box text-3xl mb-1"></i>
-                <span class="text-[9px] uppercase tracking-wider font-semibold text-slate-400">Sin Imagen</span>
-               </div>`;
-
-          html += `
-            <div class="catalogo-card bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col justify-between shadow-2xs">
-              <div class="w-full h-44 bg-slate-50 overflow-hidden relative">
-                ${fotoHtml}
-                <div class="absolute top-2.5 left-2.5 bg-[#071B49]/80 backdrop-blur-xs text-white font-mono text-[9px] font-bold px-2 py-0.5 rounded-md">
-                  ${p.codigo || 'S/C'}
-                </div>
-              </div>
-              <div class="p-4 flex flex-col flex-1 justify-between space-y-3">
-                <div>
-                  <h3 class="font-extrabold text-xs text-slate-900 line-clamp-2 leading-snug">
-                    ${p.nombre}
-                  </h3>
-                  ${p.descripcion ? `<p class="text-[10px] text-slate-500 line-clamp-2 mt-1 leading-relaxed">${p.descripcion}</p>` : ''}
-                </div>
-                <div class="pt-2 border-t border-slate-100 flex items-center justify-between">
-                  <div>
-                    <span class="text-[9px] font-bold uppercase text-slate-400 block leading-tight">Precio USD</span>
-                    <span class="font-black text-base text-[#0755C9] leading-tight">$${precio}</span>
-                  </div>
-                  <button onclick="ordenarProductoPorWhatsApp('${p.codigo}', '${encodeURIComponent(p.nombre)}', '${precio}')" class="no-print p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl transition text-xs font-bold" title="Pedir este producto por WhatsApp">
-                    <i class="fa-brands fa-whatsapp text-sm"></i>
-                  </button>
-                </div>
-              </div>
-            </div>
-          `;
+        grupo.productos.forEach(p => {
+          // Tarjeta de Producto (Directiva 3 & 4)
+          html += MasterReportLayout.renderProductCard(p, {
+            mostrarStock: false,
+            botonWhatsapp: true
+          });
         });
 
-        html += `
-            </div>
-          </div>
-        `;
+        html += `</div>`;
       });
 
-      container.innerHTML = html;
+      contenedor.innerHTML = html;
     }
 
-    function abrirChatWhatsAppNegocio() {
-      const telf = (appConfig.telefono || '').replace(/[^0-9]/g, '');
-      const nombreEmpresa = appConfig.nombre_negocio || 'TAVO CLOUD';
-      const msg = `¡Hola! Me comunico desde su Catálogo Oficial de Productos de *${nombreEmpresa}*. Quisiera realizar una consulta sobre sus productos y cotizaciones.`;
-      const url = telf 
-        ? `https://wa.me/${telf}?text=${encodeURIComponent(msg)}`
-        : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    /**
+     * WhatsApp General del Tenant.
+     */
+    function abrirWhatsAppTenant() {
+      const tel = (tenantData.telefono || '').replace(/[^0-9]/g, '');
+      const nombre = tenantData.nombre_negocio || 'Empresa';
+      const msg = `¡Hola! Me comunico desde su Catálogo Oficial de Productos de *${nombre}*. Quisiera realizar una cotización.`;
+      const url = tel ? `https://wa.me/${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
       window.open(url, '_blank');
     }
 
-    function ordenarProductoPorWhatsApp(codigo, nombreEnc, precio) {
+    /**
+     * WhatsApp por Producto Específico.
+     */
+    function pedirProductoPorWhatsApp(codigo, nombreEnc, precio) {
       const nombre = decodeURIComponent(nombreEnc);
-      const telf = (appConfig.telefono || '').replace(/[^0-9]/g, '');
-      const msg = `¡Hola! Me interesa solicitar información / pedido del siguiente producto de su catálogo:
+      const tel = (tenantData.telefono || '').replace(/[^0-9]/g, '');
+      const msg = `¡Hola! Quisiera solicitar información y disponibilidad del siguiente producto de su catálogo:
 • *Producto:* ${nombre}
-• *Código:* ${codigo}
-• *Precio:* $${precio} USD
+• *Código SKU:* ${codigo}
+• *Precio:* $${precio} USD`;
 
-¿Tienen disponibilidad para despacho?`;
-      const url = telf 
-        ? `https://wa.me/${telf}?text=${encodeURIComponent(msg)}`
-        : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+      const url = tel ? `https://wa.me/${tel}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
       window.open(url, '_blank');
     }
 
-    async function descargarCatalogoPublicoPdf() {
+    /**
+     * Descarga del Catálogo en formato PDF con configuración editorial A4/Letter.
+     */
+    async function descargarCatalogoPdf() {
       const btn = document.getElementById('btnDescargarPdf');
       const orig = btn ? btn.innerHTML : '';
       if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Generando...';
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Generando PDF...';
       }
 
       try {
-        const area = document.getElementById('catalogoGridContenedor');
-        const nombreEmpresa = (appConfig.nombre_negocio || 'TAVO_CLOUD').replace(/[^a-zA-Z0-9]/g, '_');
+        const area = document.getElementById('catalogoPrintArea');
+        const nombreEmpresa = (tenantData.nombre_negocio || 'Catalogo_Productos').replace(/[^a-zA-Z0-9]/g, '_');
+        
         const opt = {
-          margin: [8, 8, 8, 8],
-          filename: `Catalogo_Productos_${nombreEmpresa}.pdf`,
+          margin: [10, 10, 12, 10], // top, left, bottom, right en mm
+          filename: `Catalogo_Oficial_${nombreEmpresa}.pdf`,
           image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, scrollY: 0, scrollX: 0 },
+          html2canvas: { scale: 2, useCORS: true, scrollY: 0, scrollX: 0, logging: false },
           jsPDF: { unit: 'mm', format: 'letter', orientation: 'portrait' }
         };
-        await html2pdf().set(opt).from(area).save();
+
+        if (typeof html2pdf !== 'undefined') {
+          await html2pdf().set(opt).from(area).save();
+        } else {
+          window.print();
+        }
       } catch (err) {
-        console.error('Error al generar PDF:', err);
+        console.error('Error al generar PDF con html2pdf:', err);
         window.print();
       } finally {
         if (btn) {
@@ -383,7 +496,20 @@
       }
     }
 
-    window.addEventListener('DOMContentLoaded', init);
+    function mostrarErrorCarga() {
+      const c = document.getElementById('catalogoContenidoAgrupado');
+      if (c) {
+        c.innerHTML = `
+          <div class="bg-rose-50 rounded-xl p-8 text-center border border-rose-200 text-rose-700">
+            <i class="fa-solid fa-triangle-exclamation text-3xl mb-2"></i>
+            <h3 class="font-bold text-sm">Error al cargar la información del catálogo</h3>
+            <p class="text-xs text-rose-600 mt-1">Por favor intente recargar la página o verifique la conexión con el servidor.</p>
+          </div>
+        `;
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', initCatalogo);
   </script>
 </body>
 </html>

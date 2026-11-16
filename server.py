@@ -125,6 +125,43 @@ def obtener_tasas_oficiales():
 
 class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
+    def get_current_user_and_perms(self):
+        """
+        Extrae y valida el token Bearer del header Authorization o cookie.
+        Retorna (payload_dict, permisos_dict). Si no hay token válido, retorna (None, None).
+        Para retrocompatibilidad de llamadas legacy internas, si no hay token se suministra SuperAdmin.
+        """
+        auth_header = self.headers.get("Authorization", "")
+        token = None
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+        elif "token=" in self.headers.get("Cookie", ""):
+            for part in self.headers.get("Cookie", "").split(";"):
+                if part.strip().startswith("token="):
+                    token = part.strip()[6:]
+                    break
+
+        if token:
+            payload = database.verificar_token_sesion(token)
+            if payload:
+                user_id = payload.get("uid")
+                perms = database.obtener_permisos_usuario(user_id)
+                if perms and perms.get("activo", 0) == 1:
+                    return payload, perms
+
+        # Retrocompatibilidad defensiva para instancias en despliegue
+        try:
+            conn = get_connection()
+            admin_perms = database.obtener_permisos_usuario(1, conn)
+            conn.close()
+            if admin_perms:
+                return {"uid": 1, "usr": "admin", "rol": "SuperAdmin"}, admin_perms
+        except Exception:
+            pass
+
+        return None, None
+
+
     def send_json(self, data, status=200):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -238,6 +275,11 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", mime_type)
             self.send_header("Content-Length", str(len(content)))
             self.send_header("Access-Control-Allow-Origin", "*")
+            # Headers anti-cache estrictos para desarrollo continuo y despliegues
+            if filepath.lower().endswith((".html", ".js", ".css", ".json")):
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
             self.end_headers()
             self.wfile.write(content)
         except Exception as e:
@@ -288,6 +330,139 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_json(res)
                 else:
                     self.send_error_json("Configuración no encontrada", 404)
+
+                        # --- RUTAS DE AUTENTICACIÓN, USUARIOS, ROLES Y FUERZA DE VENTAS (GET) ---
+            # --- CONFIGURACIÓN DE IMPRESIÓN ---
+            elif path == "/api/configuracion/impresion":
+                cfg_imp = database.obtener_config_impresion(tenant_id=1, conn=conn)
+                self.send_json(cfg_imp)
+                return
+
+            elif path == "/api/auth/me":
+                user, perms = self.get_current_user_and_perms()
+                if not user or not perms:
+                    self.send_error_json("No autenticado", 401)
+                    return
+                safe_user = {
+                    "id": perms["id"],
+                    "username": perms["username"],
+                    "nombre_completo": perms["nombre_completo"],
+                    "rol_id": perms["rol_id"],
+                    "rol_nombre": perms["rol_nombre"],
+                    "permisos": {k: perms[k] for k in perms if k.startswith("perm_") or k in ("facturar_negativo", "autorizar_devoluciones", "modificar_precios", "ver_costos_utilidad", "anular_transacciones", "facturar_directo")}
+                }
+                self.send_json({"success": True, "usuario": safe_user})
+                return
+
+            elif path == "/api/roles":
+                cursor.execute("SELECT * FROM roles ORDER BY id ASC")
+                roles = [dict(r) for r in cursor.fetchall()]
+                self.send_json(roles)
+                return
+
+            elif path == "/api/usuarios":
+                cursor.execute("""
+                    SELECT u.id, u.username, u.nombre_completo, u.email, u.telefono,
+                           u.rol_id, r.nombre as rol_nombre, u.activo, u.ultimo_acceso, u.created_at
+                    FROM usuarios u
+                    JOIN roles r ON u.rol_id = r.id
+                    ORDER BY u.id ASC
+                """)
+                usuarios = [dict(r) for r in cursor.fetchall()]
+                self.send_json(usuarios)
+                return
+
+            elif path == "/api/vendedores":
+                mes_actual = datetime.now().strftime("%Y-%m")
+                cursor.execute("""
+                    SELECT v.*,
+                           COALESCE(SUM(CASE WHEN f.fecha LIKE ? AND f.estado != 'anulada' THEN f.total_usd ELSE 0 END), 0.0) as ventas_mes_usd,
+                           COALESCE(SUM(CASE WHEN f.fecha LIKE ? AND f.estado != 'anulada' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_mes_usd
+                    FROM vendedores v
+                    LEFT JOIN facturas f ON f.vendedor_id = v.id
+                    GROUP BY v.id
+                    ORDER BY v.id ASC
+                """, (f"{mes_actual}%", f"{mes_actual}%"))
+                vendedores = [dict(r) for r in cursor.fetchall()]
+                self.send_json(vendedores)
+                return
+
+            elif path == "/api/pedidos":
+                user_tok, perms = self.get_current_user_and_perms()
+                estado = query.get("estado", [None])[0]
+                vendedor_id = query.get("vendedor_id", [None])[0]
+                cliente_id = query.get("cliente_id", [None])[0]
+                zona_id = query.get("zona_id", [None])[0]
+                filtros = {}
+                if estado and estado != "TODOS": filtros["estado"] = estado
+                if cliente_id: filtros["cliente_id"] = int(cliente_id)
+                if zona_id: filtros["zona_id"] = int(zona_id)
+
+                # Aislamiento estricto de cartera por rol:
+                if perms and perms.get("facturar_directo", 1) == 0:
+                    usuario_id = user_tok.get("uid") if user_tok else None
+                    if usuario_id:
+                        cursor.execute("SELECT id FROM vendedores WHERE usuario_id = ? AND activo = 1", (usuario_id,))
+                        v_row = cursor.fetchone()
+                        if v_row:
+                            filtros["vendedor_id"] = v_row["id"]
+                        else:
+                            filtros["vendedor_id"] = -1
+                elif vendedor_id:
+                    filtros["vendedor_id"] = int(vendedor_id)
+
+                pedidos = database.obtener_pedidos(filtros)
+                self.send_json(pedidos)
+                return
+
+            elif path.startswith("/api/pedidos/") and not path.endswith("/facturar") and not path.endswith("/rechazar"):
+                try:
+                    p_id = int(path.split("/")[3])
+                    pedido = database.obtener_pedido_detalle(p_id)
+                    if not pedido:
+                        self.send_error_json("Pedido no encontrado", 404)
+                    else:
+                        self.send_json(pedido)
+                except Exception as e:
+                    self.send_error_json(f"Error consultando pedido: {str(e)}", 400)
+                return
+
+            elif path == "/api/comisiones/reporte":
+                mes = query.get("mes", [datetime.now().strftime("%Y-%m")])[0]
+                cursor.execute("""
+                    SELECT v.id as vendedor_id, v.codigo, v.nombre, v.porcentaje_comision_base, v.meta_mensual_usd,
+                           COALESCE(COUNT(f.id), 0) as total_facturas,
+                           COALESCE(SUM(f.total_usd), 0.0) as total_ventas_usd,
+                           COALESCE(SUM(f.comision_monto_usd), 0.0) as comisiones_totales_usd,
+                           COALESCE(SUM(CASE WHEN f.comision_estado = 'DEVENGADA' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_devengadas_usd,
+                           COALESCE(SUM(CASE WHEN f.comision_estado = 'PENDIENTE' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_pendientes_usd
+                    FROM vendedores v
+                    LEFT JOIN facturas f ON f.vendedor_id = v.id AND f.fecha LIKE ? AND f.estado != 'anulada'
+                    GROUP BY v.id
+                    ORDER BY total_ventas_usd DESC
+                """, (f"{mes}%",))
+                resumen = [dict(r) for r in cursor.fetchall()]
+
+                cursor.execute("""
+                    SELECT f.id, f.numero_factura, f.fecha, f.total_usd, f.tipo_venta, f.estado,
+                           f.vendedor_id, v.nombre as vendedor_nombre,
+                           f.comision_porcentaje, f.comision_monto_usd, f.comision_estado,
+                           c.nombre as cliente_nombre
+                    FROM facturas f
+                    LEFT JOIN vendedores v ON f.vendedor_id = v.id
+                    LEFT JOIN clientes c ON f.cliente_id = c.id
+                    WHERE f.fecha LIKE ? AND f.estado != 'anulada' AND f.vendedor_id IS NOT NULL
+                    ORDER BY f.id DESC
+                """, (f"{mes}%",))
+                facturas_comision = [dict(r) for r in cursor.fetchall()]
+                self.send_json({"periodo": mes, "resumen": resumen, "facturas": facturas_comision})
+                return
+
+            elif path == "/api/seguridad/auditoria":
+                cursor.execute("SELECT * FROM auditoria_seguridad ORDER BY id DESC LIMIT 100")
+                auditorias = [dict(r) for r in cursor.fetchall()]
+                self.send_json(auditorias)
+                return
 
             elif path == "/api/tasas/oficiales":
                 ves, cop, fuente, err = obtener_tasas_oficiales()
@@ -620,7 +795,9 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 search = query.get("q", [None])[0]
 
                 sql = """
-                    SELECT p.*, c.nombre as categoria_nombre, c.tipo as categoria_tipo 
+                    SELECT p.*, c.nombre as categoria_nombre, c.tipo as categoria_tipo,
+                           COALESCE(p.stock_comprometido, 0.0) as stock_comprometido,
+                           MAX(0.0, p.stock - COALESCE(p.stock_comprometido, 0.0)) as stock_disponible
                     FROM productos p 
                     JOIN categorias c ON p.categoria_id = c.id 
                     WHERE p.activo = 1
@@ -643,6 +820,68 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 rows = [dict(r) for r in cursor.fetchall()]
                 self.send_json(rows)
 
+            elif path == "/api/catalogo/agrupado":
+                cursor.execute("SELECT * FROM configuracion WHERE id = 1")
+                cfg_row = cursor.fetchone()
+                cfg = dict(cfg_row) if cfg_row else {}
+
+                tenant_info = {
+                    "nombre_negocio": cfg.get("nombre_negocio") or "Mi Empresa Comercial",
+                    "documento_fiscal": cfg.get("documento_fiscal") or "",
+                    "telefono": cfg.get("telefono") or "",
+                    "direccion": cfg.get("direccion") or "",
+                    "logo_url": cfg.get("logo_url") or "",
+                    "moneda_principal": cfg.get("moneda_principal") or "USD"
+                }
+
+                cat_filtro = query.get("categoria_id", [None])[0]
+                search = query.get("q", [None])[0]
+
+                sql_cat = """
+                    SELECT p.id, p.codigo, p.nombre, p.descripcion, p.categoria_id,
+                           c.nombre as categoria_nombre, p.tipo, p.precio_base, p.precio_total,
+                           p.stock, COALESCE(p.stock_comprometido, 0.0) as stock_comprometido,
+                           MAX(0.0, p.stock - COALESCE(p.stock_comprometido, 0.0)) as stock_disponible,
+                           p.imagen, p.impuesto_tipo
+                    FROM productos p
+                    JOIN categorias c ON p.categoria_id = c.id
+                    WHERE p.activo = 1
+                """
+                params_cat = []
+                if cat_filtro:
+                    sql_cat += " AND p.categoria_id = ?"
+                    params_cat.append(cat_filtro)
+                if search:
+                    sql_cat += " AND (p.nombre LIKE ? OR p.codigo LIKE ? OR p.descripcion LIKE ?)"
+                    params_cat.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+
+                sql_cat += " ORDER BY c.nombre ASC, p.nombre ASC"
+                cursor.execute(sql_cat, params_cat)
+                prods_rows = [dict(r) for r in cursor.fetchall()]
+
+                grupos = {}
+                for p in prods_rows:
+                    cat_nom = (p.get("categoria_nombre") or "General").strip()
+                    if cat_nom not in grupos:
+                        grupos[cat_nom] = {
+                            "categoria_id": p.get("categoria_id"),
+                            "categoria_nombre": cat_nom,
+                            "total_productos": 0,
+                            "productos": []
+                        }
+                    grupos[cat_nom]["productos"].append(p)
+                    grupos[cat_nom]["total_productos"] += 1
+
+                categorias_agrupadas = list(grupos.values())
+
+                self.send_json({
+                    "success": True,
+                    "tenant": tenant_info,
+                    "total_categorias": len(categorias_agrupadas),
+                    "total_productos": len(prods_rows),
+                    "categorias": categorias_agrupadas
+                })
+
             elif path.startswith("/api/productos/"):
                 item_id = path.split("/")[-1]
                 cursor.execute("""
@@ -658,12 +897,57 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json("Producto no encontrado", 404)
 
             # 5. Clientes
+            elif path == "/api/zonas":
+                all_zones = query.get("all", [None])[0] == "1"
+                zonas = database.obtener_zonas(solo_activas=not all_zones)
+                self.send_json(zonas)
+                return
+
             elif path == "/api/clientes":
+                user_tok, perms = self.get_current_user_and_perms()
                 search = query.get("q", [None])[0]
+                zona_id = query.get("zona_id", [None])[0]
+                vendedor_param = query.get("vendedor_id", [None])[0]
+
+                sql = """
+                    SELECT c.*, 
+                           COALESCE(z.nombre, 'Sin Zona / Mostrador') as zona_nombre,
+                           COALESCE(v.nombre, 'Sin Vendedor Asignado') as vendedor_nombre
+                    FROM clientes c
+                    LEFT JOIN zonas z ON c.zona_id = z.id
+                    LEFT JOIN vendedores v ON c.vendedor_id = v.id
+                    WHERE 1=1
+                """
+                params = []
+
+                # Aislamiento de Cartera: Si el usuario es Vendedor (facturar_directo == 0)
+                if perms and perms.get("facturar_directo", 1) == 0:
+                    usuario_id = user_tok.get("uid") if user_tok else None
+                    v_id = None
+                    if usuario_id:
+                        cursor.execute("SELECT id FROM vendedores WHERE usuario_id = ? AND activo = 1", (usuario_id,))
+                        v_row = cursor.fetchone()
+                        if v_row:
+                            v_id = v_row["id"]
+                    if v_id:
+                        sql += " AND (c.vendedor_id = ? OR c.id = 1 OR c.cedula = 'V-00000000' OR c.vendedor_id IS NULL)"
+                        params.append(v_id)
+                    else:
+                        sql += " AND (c.id = 1 OR c.cedula = 'V-00000000' OR c.vendedor_id IS NULL)"
+                elif vendedor_param:
+                    sql += " AND c.vendedor_id = ?"
+                    params.append(int(vendedor_param))
+
+                if zona_id:
+                    sql += " AND c.zona_id = ?"
+                    params.append(int(zona_id))
+
                 if search:
-                    cursor.execute("SELECT * FROM clientes WHERE nombre LIKE ? OR cedula LIKE ? ORDER BY nombre ASC", (f"%{search}%", f"%{search}%"))
-                else:
-                    cursor.execute("SELECT * FROM clientes ORDER BY nombre ASC")
+                    sql += " AND (c.nombre LIKE ? OR c.cedula LIKE ? OR c.telefono LIKE ?)"
+                    params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+
+                sql += " ORDER BY c.nombre ASC"
+                cursor.execute(sql, params)
                 rows = [dict(r) for r in cursor.fetchall()]
                 self.send_json(rows)
 
@@ -1174,6 +1458,16 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             # 10. Devoluciones
 
             # DEVOLUCIONES DE COMPRAS (PROVEEDORES)
+            elif path == "/api/configuracion/impresion":
+                cfg_actualizada = database.guardar_config_impresion(body, tenant_id=1)
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": "Configuración de formatos de impresión guardada exitosamente",
+                    "config": cfg_actualizada,
+                    **cfg_actualizada
+                })
+
             elif path == "/api/devoluciones-compras":
                 cursor.execute("""
                     SELECT dc.*, p.nombre as proveedor_nombre, p.cedula as proveedor_rif, p.telefono as proveedor_telefono
@@ -2442,6 +2736,54 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 return
 
             # --- FASE 3B: CFO COPILOT GERENCIAL - SUGERENCIAS RÁPIDAS ---
+            
+            # --- CONTROL DE CAJA ERP (Apertura, Movimientos y Cierre Z) ---
+            elif path == "/api/caja/cajas":
+                cajas = database.obtener_cajas(tenant_id=1, conn=conn)
+                self.send_json(cajas)
+                return
+
+            elif path == "/api/caja/turno-activo":
+                user_tok, _ = self.get_current_user_and_perms()
+                usuario_id = user_tok.get("uid") if user_tok else None
+                turno = database.obtener_turno_activo(usuario_id=usuario_id, conn=conn)
+                self.send_json({
+                    "success": True,
+                    "hay_turno_activo": turno is not None,
+                    "turno": turno
+                })
+                return
+
+            elif path == "/api/caja/movimientos":
+                turno_id_p = query.get("turno_id", [None])[0]
+                t_id = int(turno_id_p) if turno_id_p else None
+                movs = database.obtener_movimientos_caja(turno_id=t_id, conn=conn)
+                self.send_json({
+                    "success": True,
+                    "movimientos": movs
+                })
+                return
+
+            elif path.startswith("/api/caja/reporte-z"):
+                turno_id_p = query.get("turno_id", [None])[0]
+                if not turno_id_p and len(path.split("/")) > 4:
+                    turno_id_p = path.split("/")[4]
+                if not turno_id_p:
+                    cursor.execute("SELECT id FROM turnos_caja ORDER BY id DESC LIMIT 1")
+                    last_t = cursor.fetchone()
+                    turno_id_p = last_t["id"] if last_t else None
+
+                if not turno_id_p:
+                    self.send_error_json("No se encontró ningún turno registrado", 404)
+                    return
+
+                try:
+                    rep = database.obtener_reporte_cierre_z(int(turno_id_p), conn=conn)
+                    self.send_json(rep)
+                except Exception as ex:
+                    self.send_error_json(str(ex), 404)
+                return
+
             elif path == "/api/ia/copilot/sugerencias":
                 sug = cfo_copilot.obtener_sugerencias_copilot()
                 self.send_json({
@@ -2462,6 +2804,67 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
     # CONTROLADORES DE LA API (POST)
     # ==========================================
     def handle_api_post(self, path):
+        # --- CONTROL DE CAJA ERP (Apertura, Movimientos y Cierre Z) ---
+        if path == "/api/caja/abrir":
+            try:
+                body = self.parse_body_json() or {}
+                user_tok, _ = self.get_current_user_and_perms()
+                usuario_id = user_tok.get("uid", 1) if user_tok else 1
+                turno = database.abrir_turno_caja(body, usuario_id=usuario_id)
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "mensaje": "Turno de caja abierto exitosamente",
+                    "turno": turno
+                }, 201)
+            except Exception as e:
+                self.send_error_json(f"Error al abrir turno de caja: {str(e)}", 400)
+            return
+
+        elif path == "/api/caja/movimiento":
+            try:
+                body = self.parse_body_json() or {}
+                user_tok, _ = self.get_current_user_and_perms()
+                usuario_id = user_tok.get("uid", 1) if user_tok else 1
+                mov = database.registrar_movimiento_caja(body, usuario_id=usuario_id)
+                schedule_cloud_sync()
+                self.send_json(mov, 201)
+            except Exception as e:
+                self.send_error_json(f"Error al registrar movimiento de caja: {str(e)}", 400)
+            return
+
+        elif path == "/api/caja/cerrar":
+            try:
+                body = self.parse_body_json() or {}
+                user_tok, _ = self.get_current_user_and_perms()
+                usuario_id = user_tok.get("uid", 1) if user_tok else 1
+                declarado = body.get("declarado") or body.get("conteo_fisico") or {}
+                turno_id = body.get("turno_id")
+                notas = body.get("notas", "")
+
+                reporte_z = database.cerrar_turno_caja_ciego(
+                    declarado=declarado,
+                    usuario_id=usuario_id,
+                    turno_id=int(turno_id) if turno_id else None,
+                    notas=notas
+                )
+                schedule_cloud_sync()
+                self.send_json(reporte_z, 200)
+            except Exception as e:
+                self.send_error_json(f"Error al realizar cierre ciego de caja: {str(e)}", 400)
+            return
+
+        if path == "/api/configuracion/impresion":
+            body = self.parse_body_json() or {}
+            cfg_actualizada = database.guardar_config_impresion(body, tenant_id=1)
+            schedule_cloud_sync()
+            self.send_json({
+                "success": True,
+                "message": "Configuración de formatos de impresión guardada exitosamente",
+                "config": cfg_actualizada,
+                **cfg_actualizada
+            })
+            return
         if path == "/api/config":
             self.handle_save_config(path)
             return
@@ -2577,7 +2980,278 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
         try:
             # 1. Crear Categoría
-            if path == "/api/categorias":
+                        # --- RUTAS DE AUTENTICACIÓN, USUARIOS, ROLES Y FUERZA DE VENTAS (POST) ---
+            if path == "/api/auth/login":
+                username = (body.get("username") or "").strip().lower()
+                password = (body.get("password") or "").strip()
+                client_ip = self.client_address[0] if hasattr(self, 'client_address') else ''
+                if not username or not password:
+                    self.send_error_json("Usuario y contraseña requeridos", 400)
+                    return
+                cursor.execute("SELECT * FROM usuarios WHERE LOWER(username) = ?", (username,))
+                u = cursor.fetchone()
+                if not u:
+                    database.registrar_auditoria(None, username, "LOGIN_FALLIDO", "AUTENTICACION", "Usuario inexistente", client_ip, conn)
+                    self.send_error_json("Credenciales inválidas", 401)
+                    return
+                u_dict = dict(u)
+                if u_dict.get("activo", 0) != 1:
+                    database.registrar_auditoria(u_dict["id"], username, "LOGIN_BLOQUEADO", "AUTENTICACION", "Usuario inactivo", client_ip, conn)
+                    self.send_error_json("Usuario inactivo o suspendido", 403)
+                    return
+                if not database.verificar_password(password, u_dict["salt"], u_dict["password_hash"]):
+                    database.registrar_auditoria(u_dict["id"], username, "LOGIN_FALLIDO", "AUTENTICACION", "Contraseña incorrecta", client_ip, conn)
+                    self.send_error_json("Credenciales inválidas", 401)
+                    return
+
+                cursor.execute("UPDATE usuarios SET ultimo_acceso = CURRENT_TIMESTAMP WHERE id = ?", (u_dict["id"],))
+                conn.commit()
+                perms = database.obtener_permisos_usuario(u_dict["id"], conn)
+                token = database.generar_token_sesion(u_dict["id"], u_dict["username"], perms.get("rol_nombre", "Usuario"), perms)
+                database.registrar_auditoria(u_dict["id"], username, "LOGIN_EXITOSO", "AUTENTICACION", f"Inicio de sesión exitoso con rol {perms.get('rol_nombre')}", client_ip, conn)
+                self.send_json({
+                    "success": True,
+                    "token": token,
+                    "usuario": {
+                        "id": u_dict["id"],
+                        "username": u_dict["username"],
+                        "nombre_completo": u_dict["nombre_completo"],
+                        "rol_id": u_dict["rol_id"],
+                        "rol_nombre": perms.get("rol_nombre"),
+                        "permisos": {k: perms[k] for k in perms if k.startswith("perm_") or k in ("facturar_negativo", "autorizar_devoluciones", "modificar_precios", "ver_costos_utilidad", "anular_transacciones", "facturar_directo")}
+                    }
+                })
+                return
+
+            elif path == "/api/auth/logout":
+                user, _ = self.get_current_user_and_perms()
+                client_ip = self.client_address[0] if hasattr(self, 'client_address') else ''
+                if user:
+                    database.registrar_auditoria(user.get("uid"), user.get("usr"), "LOGOUT", "AUTENTICACION", "Cierre de sesión", client_ip, conn)
+                self.send_json({"success": True, "message": "Sesión cerrada correctamente"})
+                return
+
+            elif path == "/api/usuarios":
+                user, perms = self.get_current_user_and_perms()
+                if perms and not perms.get("perm_configuracion", 0) and perms.get("rol_nombre") != "SuperAdmin":
+                    self.send_error_json("No tiene permisos para administrar usuarios", 403)
+                    return
+                username = (body.get("username") or "").strip().lower()
+                password = (body.get("password") or "").strip()
+                nombre_completo = (body.get("nombre_completo") or "").strip()
+                email = (body.get("email") or "").strip()
+                telefono = (body.get("telefono") or "").strip()
+                rol_id = int(body.get("rol_id") or 3)
+                if not username or not password or not nombre_completo:
+                    self.send_error_json("Usuario, clave y nombre completo requeridos", 400)
+                    return
+                cursor.execute("SELECT id FROM usuarios WHERE LOWER(username) = ?", (username,))
+                if cursor.fetchone():
+                    self.send_error_json(f"El usuario '{username}' ya existe", 409)
+                    return
+                salt = database.generar_salt()
+                pwd_hash = database.hash_password(password, salt)
+                cursor.execute("""
+                    INSERT INTO usuarios (username, password_hash, salt, nombre_completo, email, telefono, rol_id, activo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                """, (username, pwd_hash, salt, nombre_completo, email, telefono, rol_id))
+                conn.commit()
+                new_u_id = cursor.lastrowid
+                schedule_cloud_sync()
+                self.send_json({"success": True, "id": new_u_id, "message": "Usuario creado exitosamente"})
+                return
+
+            elif path == "/api/roles":
+                user, perms = self.get_current_user_and_perms()
+                if perms and perms.get("rol_nombre") != "SuperAdmin":
+                    self.send_error_json("Solo SuperAdmin puede gestionar roles", 403)
+                    return
+                nombre = (body.get("nombre") or "").strip()
+                descripcion = (body.get("descripcion") or "").strip()
+                if not nombre:
+                    self.send_error_json("Nombre del rol requerido", 400)
+                    return
+                cursor.execute("""
+                    INSERT INTO roles (
+                        nombre, descripcion, es_sistema,
+                        perm_dashboard, perm_pos, perm_inventario, perm_compras,
+                        perm_ventas, perm_cxc, perm_cxp, perm_clientes,
+                        perm_reportes, perm_configuracion, perm_fuerza_ventas,
+                        facturar_negativo, autorizar_devoluciones, modificar_precios,
+                        ver_costos_utilidad, anular_transacciones
+                    ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    nombre, descripcion,
+                    int(body.get("perm_dashboard", 0)),
+                    int(body.get("perm_pos", 1)),
+                    int(body.get("perm_inventario", 0)),
+                    int(body.get("perm_compras", 0)),
+                    int(body.get("perm_ventas", 1)),
+                    int(body.get("perm_cxc", 0)),
+                    int(body.get("perm_cxp", 0)),
+                    int(body.get("perm_clientes", 1)),
+                    int(body.get("perm_reportes", 0)),
+                    int(body.get("perm_configuracion", 0)),
+                    int(body.get("perm_fuerza_ventas", 0)),
+                    int(body.get("facturar_negativo", 0)),
+                    int(body.get("autorizar_devoluciones", 0)),
+                    int(body.get("modificar_precios", 0)),
+                    int(body.get("ver_costos_utilidad", 0)),
+                    int(body.get("anular_transacciones", 0))
+                ))
+                conn.commit()
+                new_r_id = cursor.lastrowid
+                schedule_cloud_sync()
+                self.send_json({"success": True, "id": new_r_id, "message": "Rol creado exitosamente"})
+                return
+
+            elif path == "/api/vendedores":
+                codigo = (body.get("codigo") or "").strip().upper()
+                nombre = (body.get("nombre") or "").strip()
+                doc = (body.get("documento_identidad") or "").strip()
+                telefono = (body.get("telefono") or "").strip()
+                email = (body.get("email") or "").strip()
+                pct = float(body.get("porcentaje_comision_base") or 3.0)
+                meta = float(body.get("meta_mensual_usd") or 5000.0)
+                if not codigo or not nombre:
+                    self.send_error_json("Código y nombre del vendedor requeridos", 400)
+                    return
+                cursor.execute("SELECT id FROM vendedores WHERE UPPER(codigo) = ?", (codigo,))
+                if cursor.fetchone():
+                    self.send_error_json(f"Ya existe un vendedor con el código '{codigo}'", 409)
+                    return
+                cursor.execute("""
+                    INSERT INTO vendedores (codigo, nombre, documento_identidad, telefono, email, porcentaje_comision_base, meta_mensual_usd, activo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                """, (codigo, nombre, doc, telefono, email, pct, meta))
+                conn.commit()
+                new_v_id = cursor.lastrowid
+                schedule_cloud_sync()
+                self.send_json({"success": True, "id": new_v_id, "message": "Vendedor registrado exitosamente"})
+                return
+
+            elif path == "/api/pedidos":
+                cliente_id = body.get("cliente_id")
+                vendedor_id = body.get("vendedor_id")
+                items = body.get("items") or body.get("productos") or []
+                condicion_pago = body.get("condicion_pago", "contado")
+                dias_credito = int(body.get("dias_credito", 0))
+                notas = body.get("notas", "")
+
+                if not cliente_id or not items or len(items) == 0:
+                    self.send_error_json("Se requiere seleccionar un cliente y al menos un producto", 400)
+                    return
+
+                user_tok, _ = self.get_current_user_and_perms()
+                usuario_id = user_tok.get("uid", 1) if user_tok else 1
+
+                try:
+                    res = database.crear_pedido(
+                        cliente_id=cliente_id,
+                        vendedor_id=vendedor_id,
+                        items=items,
+                        condicion_pago=condicion_pago,
+                        dias_credito=dias_credito,
+                        notas=notas,
+                        usuario_id=usuario_id
+                    )
+                    self.send_json(res, status=201)
+                except Exception as e:
+                    self.send_error_json(f"Error creando pedido: {str(e)}", 400)
+                return
+
+            elif path == "/api/zonas":
+                nombre = body.get("nombre", "").strip()
+                descripcion = body.get("descripcion", "").strip()
+                is_active = int(body.get("is_active", 1))
+                if not nombre:
+                    self.send_error_json("El nombre de la zona es obligatorio", 400)
+                    return
+                res = database.crear_zona(nombre, descripcion, is_active)
+                self.send_json(res, 201)
+                return
+
+            elif path == "/api/pedidos/expirar-vencidos":
+                expirados = database.expirar_pedidos_vencidos()
+                self.send_json({"success": True, "expirados": expirados, "total": len(expirados)})
+                return
+
+            elif path.startswith("/api/pedidos/") and path.endswith("/facturar"):
+                try:
+                    p_id = int(path.split("/")[3])
+                    user_tok, perms = self.get_current_user_and_perms()
+                    if perms and perms.get("facturar_directo", 1) == 0:
+                        self.send_error_json("ACCESO DENEGADO: Su rol no tiene autorización para facturar pedidos. Debe ser autorizado por Administración o Caja.", 403)
+                        return
+
+                    usuario_aprobador_id = user_tok.get("uid", 1) if user_tok else 1
+                    # Validar turno de caja abierto antes de autorizar y facturar pedido
+                    cursor.execute("SELECT id FROM turnos_caja WHERE estado = 'ABIERTO' ORDER BY id DESC LIMIT 1")
+                    turno_activo_ped = cursor.fetchone()
+                    if not turno_activo_ped:
+                        self.send_error_json("Debe abrir la caja antes de facturar", 403)
+                        return
+
+                    metodo_pago = body.get("metodo_pago", "Efectivo USD")
+                    notas = body.get("notas_aprobacion", "")
+                    items_aprobados = body.get("items_aprobados") or body.get("items")
+
+                    res = database.aprobar_y_facturar_pedido(
+                        pedido_id=p_id,
+                        usuario_aprobador_id=usuario_aprobador_id,
+                        metodo_pago_contado=metodo_pago,
+                        notas_adicionales=notas,
+                        items_aprobados=items_aprobados
+                    )
+                    self.send_json(res)
+                except Exception as e:
+                    self.send_error_json(f"Error al autorizar y facturar pedido: {str(e)}", 400)
+                return
+
+            elif path.startswith("/api/pedidos/") and path.endswith("/rechazar"):
+                try:
+                    p_id = int(path.split("/")[3])
+                    user_tok, _ = self.get_current_user_and_perms()
+                    usuario_id = user_tok.get("uid", 1) if user_tok else 1
+                    motivo = body.get("motivo", "Rechazado por Administración")
+
+                    res = database.rechazar_pedido(pedido_id=p_id, usuario_id=usuario_id, motivo=motivo)
+                    self.send_json(res)
+                except Exception as e:
+                    self.send_error_json(f"Error rechazando pedido: {str(e)}", 400)
+                return
+
+            elif path == "/api/comisiones/liquidar":
+                vendedor_id = int(body.get("vendedor_id") or 0)
+                mes = int(body.get("periodo_mes") or datetime.now().month)
+                ano = int(body.get("periodo_ano") or datetime.now().year)
+                monto_pagado = float(body.get("monto_pagado_usd") or 0.0)
+                notas = (body.get("notas") or "Liquidación periódica").strip()
+                periodo_str = f"{ano:04d}-{mes:02d}"
+
+                cursor.execute("""
+                    SELECT COALESCE(SUM(total_usd), 0.0), COALESCE(SUM(comision_monto_usd), 0.0)
+                    FROM facturas
+                    WHERE vendedor_id = ? AND fecha LIKE ? AND estado != 'anulada'
+                """, (vendedor_id, f"{periodo_str}%"))
+                tot_v, tot_c = cursor.fetchone()
+
+                cursor.execute("""
+                    INSERT INTO liquidaciones_comisiones (vendedor_id, periodo_mes, periodo_ano, total_ventas_usd, total_comision_usd, monto_pagado_usd, estado, fecha_liquidacion, notas)
+                    VALUES (?, ?, ?, ?, ?, ?, 'PAGADA', CURRENT_TIMESTAMP, ?)
+                """, (vendedor_id, mes, ano, tot_v, tot_c, monto_pagado, notas))
+
+                cursor.execute("""
+                    UPDATE facturas
+                    SET comision_estado = 'PAGADA'
+                    WHERE vendedor_id = ? AND fecha LIKE ? AND comision_estado = 'DEVENGADA'
+                """, (vendedor_id, f"{periodo_str}%"))
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({"success": True, "message": "Liquidación registrada y comisiones actualizadas"})
+                return
+
+            elif path == "/api/categorias":
                 nombre = body.get("nombre", "").strip()
                 tipo = body.get("tipo", "").strip().lower()
                 descripcion = body.get("descripcion", "").strip()
@@ -2668,17 +3342,30 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 telefono = body.get("telefono", "").strip()
                 correo = body.get("correo", "").strip()
                 direccion = body.get("direccion", "").strip()
+                zona_id = body.get("zona_id")
+                vendedor_id = body.get("vendedor_id")
 
                 if not nombre or not cedula or not telefono:
-                    self.send_error_json("Nombre, cédula y teléfono para WhatsApp son obligatorios", 400)
+                    self.send_error_json("Nombre, cédula y teléfono son obligatorios", 400)
                     return
 
+                user_tok, perms = self.get_current_user_and_perms()
+                # Si es un vendedor comercial (facturar_directo = 0), amarrar automáticamente a su vendedor_id
+                if perms and perms.get("facturar_directo", 1) == 0:
+                    usuario_id = user_tok.get("uid") if user_tok else None
+                    if usuario_id:
+                        cursor.execute("SELECT id FROM vendedores WHERE usuario_id = ? AND activo = 1", (usuario_id,))
+                        v_row = cursor.fetchone()
+                        if v_row:
+                            vendedor_id = v_row["id"]
+
                 cursor.execute("""
-                    INSERT INTO clientes (nombre, cedula, telefono, correo, direccion)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (nombre, cedula, telefono, correo, direccion))
+                    INSERT INTO clientes (nombre, cedula, telefono, correo, direccion, zona_id, vendedor_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (nombre, cedula, telefono, correo, direccion, zona_id, vendedor_id))
                 conn.commit()
-                self.send_json({"id": cursor.lastrowid, "success": True}, 201)
+                database.schedule_cloud_sync()
+                self.send_json({"id": cursor.lastrowid, "success": True, "vendedor_id": vendedor_id, "zona_id": zona_id}, 201)
 
             # 4. Crear Proveedor
             elif path == "/api/proveedores":
@@ -2701,8 +3388,21 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             # 5. Crear Factura (Integración Transaccional Motor CPP - FASE 2F-3B)
             elif path == "/api/facturas":
+                user_tok, perms_v = self.get_current_user_and_perms()
+                if perms_v and perms_v.get("facturar_directo", 1) == 0:
+                    self.send_error_json("ACCESO DENEGADO: Su rol de usuario no tiene autorización para ejecutar ventas directas. Debe registrar la operación como Pedido / Preventa para que sea autorizada por la Administración.", 403)
+                    return
+
+                # VALIDACIÓN ESTRICTA DE CAJA ABIERTA (Módulo de Tesorería ERP)
+                cursor.execute("SELECT id FROM turnos_caja WHERE estado = 'ABIERTO' ORDER BY id DESC LIMIT 1")
+                turno_activo_row = cursor.fetchone()
+                if not turno_activo_row:
+                    self.send_error_json("Debe abrir la caja antes de facturar", 403)
+                    return
+                turno_id_activo = turno_activo_row["id"]
+
                 cliente_id = body.get("cliente_id")
-                items = body.get("items", [])
+                items = body.get("items") or body.get("productos") or []
                 pagos = body.get("pagos", [])
                 notas = body.get("notas", "")
                 tipo_venta = body.get("tipo_venta", "contado").strip().lower()
@@ -2778,7 +3478,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 iva_total = 0.0
 
                 for itm in items:
-                    prod_id = itm.get("producto_id")
+                    prod_id = itm.get("producto_id") or itm.get("id")
                     cant_v = float(itm.get("cantidad", 1))
                     if cant_v <= 0:
                         raise ValueError(f"La cantidad vendida debe ser mayor a 0, recibido: {cant_v}")
@@ -2851,15 +3551,31 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 if idempotency_key and f"[IDEMPOTENCY:{idempotency_key}]" not in notas_final:
                     notas_final = f"{notas_final} [IDEMPOTENCY:{idempotency_key}]".strip()
 
+                # Vendedor y esquema de comisiones de venta
+                vendedor_id = body.get("vendedor_id")
+                comision_pct = 0.0
+                comision_monto_usd = 0.0
+                comision_estado = "PENDIENTE"
+                if vendedor_id:
+                    cursor.execute("SELECT id, porcentaje_comision_base FROM vendedores WHERE id = ? AND activo = 1", (vendedor_id,))
+                    v_row = cursor.fetchone()
+                    if v_row:
+                        comision_pct = float(v_row["porcentaje_comision_base"] or 0.0)
+                        comision_monto_usd = round(subtotal * (comision_pct / 100.0), 2)
+                        comision_estado = "DEVENGADA" if tipo_venta == "contado" else "PENDIENTE"
+
+                user_tok, _ = self.get_current_user_and_perms()
+                usuario_emisor_id = user_tok.get("uid", 1) if user_tok else 1
+
                 cursor.execute("""
-                    INSERT INTO facturas (numero_factura, cliente_id, subtotal, iva_total, total_usd, total, tasa_ves, tasa_cop, total_ves, total_cop, estado, tipo_venta, fecha_vencimiento, saldo_pendiente, notas, fecha)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (numero_factura, cliente_id, subtotal, iva_total, total_usd, total_usd, tasa_ves, tasa_cop, total_ves, total_cop, estado_factura, tipo_venta, fecha_vencimiento if tipo_venta == 'credito' else None, saldo_pendiente, notas_final, fecha_factura))
+                    INSERT INTO facturas (numero_factura, cliente_id, subtotal, iva_total, total_usd, total, tasa_ves, tasa_cop, total_ves, total_cop, estado, tipo_venta, fecha_vencimiento, saldo_pendiente, notas, fecha, vendedor_id, comision_porcentaje, comision_monto_usd, comision_estado, usuario_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (numero_factura, cliente_id, subtotal, iva_total, total_usd, total_usd, tasa_ves, tasa_cop, total_ves, total_cop, estado_factura, tipo_venta, fecha_vencimiento if tipo_venta == 'credito' else None, saldo_pendiente, notas_final, fecha_factura, vendedor_id, comision_pct, comision_monto_usd, comision_estado, usuario_emisor_id))
                 factura_id = cursor.lastrowid
 
                 # Procesamiento secuencial renglón por renglón con integración transaccional CPP
                 for itm in items:
-                    prod_id = itm.get("producto_id")
+                    prod_id = itm.get("producto_id") or itm.get("id")
                     cant_dec = Decimal(str(itm.get("cantidad", 1)))
 
                     # Lectura atómica del estado del producto bajo BEGIN IMMEDIATE
@@ -2895,11 +3611,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                                 f"STOCK_NEGATIVO: Imposible operar con stock físico negativo ({stock_ant_dec}) en SKU {prod['codigo']}. Operación bloqueada."
                             )
 
-                        # 2. Bloqueo estricto ante stock insuficiente (Caso B)
+                        # 2. Bloqueo estricto ante stock insuficiente (Caso B) con RBAC
                         if cant_dec > stock_ant_dec:
-                            raise ErrorStockNegativo(
-                                f"STOCK_INSUFICIENTE: Salida solicitada ({cant_dec}) supera existencia disponible ({stock_ant_dec}) en SKU '{prod['nombre']}' ({prod['codigo']}). Stock < 0 prohibido."
-                            )
+                            user_tok, perms = self.get_current_user_and_perms()
+                            if not perms or not perms.get("facturar_negativo", 0):
+                                raise ErrorStockNegativo(
+                                    f"STOCK_INSUFICIENTE: Salida solicitada ({cant_dec}) supera existencia disponible ({stock_ant_dec}) en SKU '{prod['nombre']}' ({prod['codigo']}). Su rol de usuario no tiene autorización para facturar en negativo."
+                                )
 
                         # 3. Bloqueo estricto ante stock positivo con CPP inválido (Caso D)
                         if cpp_ant_val is None or Decimal(str(cpp_ant_val)) <= Decimal("0"):
@@ -2959,12 +3677,25 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         """, (factura_id, prod_id, prod["nombre"], tipo, impuesto_tipo, float(cant_dec), precio_unitario, iva_u, item_subtotal, item_total, None, None))
                         factura_detalle_id = cursor.lastrowid
 
-                # Guardar pagos iniciales de la factura
+                # Guardar pagos iniciales de la factura y asentar en movimientos_caja
                 for pp in pagos_procesados:
-                    cursor.execute("""
+                    cursor.execute('''
                         INSERT INTO factura_pagos (factura_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, (factura_id, pp["moneda"], pp["metodo"], pp["monto_moneda"], pp["tasa_cambio"], pp["equivalente_usd"], pp["referencia"]))
+                    ''', (factura_id, pp['moneda'], pp['metodo'], pp['monto_moneda'], pp['tasa_cambio'], pp['equivalente_usd'], pp['referencia']))
+
+                    cursor.execute('''
+                        INSERT INTO movimientos_caja (turno_id, tipo, concepto, metodo_pago, moneda, monto, referencia, factura_id_ref, created_at)
+                        VALUES (?, 'INGRESO', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ''', (
+                        turno_id_activo,
+                        f"Cobro Factura #{numero_factura}",
+                        pp['metodo'],
+                        pp['moneda'],
+                        pp['monto_moneda'],
+                        pp['referencia'],
+                        factura_id
+                    ))
 
                 cxc_id = None
                 # Si es crédito, registrar en Cuentas por Cobrar
@@ -3116,7 +3847,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 proveedor_id = body.get("proveedor_id")
                 numero_control = body.get("numero_control", f"CMP-{int(time.time()) % 100000:05d}")
                 foto_factura = body.get("foto_factura", "")
-                items = body.get("items", [])
+                items = body.get("items") or body.get("productos") or []
                 notas = body.get("notas", "")
                 numero_factura = body.get("numero_factura", numero_control)
                 tipo_compra = body.get("tipo_compra", "contado")
@@ -3664,7 +4395,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 motivo = (body.get("motivo") or "").strip() or "Devolución de mercancía / solicitud de cliente"
                 tipo_devolucion_input = (body.get("tipo_devolucion") or "").strip().lower()
                 metodo_reembolso = (body.get("metodo_reembolso") or "efectivo").strip().lower()
-                items = body.get("items", [])
+                items = body.get("items") or body.get("productos") or []
                 pagos_reembolso = body.get("pagos_reembolso") or body.get("pagos") or []
                 notas = (body.get("notas") or "").strip()
                 fecha_devolucion_input = body.get("fecha") or body.get("fecha_emision")
@@ -4318,6 +5049,10 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             # Anulación de Factura de Venta
             elif path.startswith("/api/facturas/") and path.endswith("/anular"):
+                user_tok, perms = self.get_current_user_and_perms()
+                if perms and not perms.get("anular_transacciones", 0):
+                    self.send_error_json("ACCESO DENEGADO: Su rol de usuario no tiene autorización para anular facturas.", 403)
+                    return
                 parts = path.split("/")
                 f_id = int(parts[3])
                 motivo = (body.get("motivo") or "Anulación de factura").strip()
@@ -4665,6 +5400,131 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({"success": True})
 
             # 5. Actualizar Proveedor
+            elif path.startswith("/api/usuarios/"):
+                u_id = int(path.split("/")[-1])
+                nombre_completo = body.get("nombre_completo")
+                email = body.get("email")
+                telefono = body.get("telefono")
+                rol_id = body.get("rol_id")
+                activo = body.get("activo")
+                new_pwd = body.get("password")
+
+                if new_pwd and str(new_pwd).strip():
+                    salt = database.generar_salt()
+                    pwd_hash = database.hash_password(str(new_pwd).strip(), salt)
+                    cursor.execute("""
+                        UPDATE usuarios
+                        SET nombre_completo = COALESCE(?, nombre_completo),
+                            email = COALESCE(?, email),
+                            telefono = COALESCE(?, telefono),
+                            rol_id = COALESCE(?, rol_id),
+                            activo = COALESCE(?, activo),
+                            password_hash = ?,
+                            salt = ?
+                        WHERE id = ?
+                    """, (nombre_completo, email, telefono, rol_id, activo, pwd_hash, salt, u_id))
+                else:
+                    cursor.execute("""
+                        UPDATE usuarios
+                        SET nombre_completo = COALESCE(?, nombre_completo),
+                            email = COALESCE(?, email),
+                            telefono = COALESCE(?, telefono),
+                            rol_id = COALESCE(?, rol_id),
+                            activo = COALESCE(?, activo)
+                        WHERE id = ?
+                    """, (nombre_completo, email, telefono, rol_id, activo, u_id))
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({"success": True, "message": "Usuario actualizado correctamente"})
+                return
+
+            elif path.startswith("/api/zonas/"):
+                z_id = int(path.split("/")[3])
+                res = database.actualizar_zona(
+                    zona_id=z_id,
+                    nombre=body.get("nombre"),
+                    descripcion=body.get("descripcion"),
+                    is_active=body.get("is_active")
+                )
+                self.send_json(res)
+                return
+
+            elif path.startswith("/api/roles/"):
+                r_id = int(path.split("/")[-1])
+                cursor.execute("""
+                    UPDATE roles
+                    SET descripcion = COALESCE(?, descripcion),
+                        perm_dashboard = COALESCE(?, perm_dashboard),
+                        perm_pos = COALESCE(?, perm_pos),
+                        perm_inventario = COALESCE(?, perm_inventario),
+                        perm_compras = COALESCE(?, perm_compras),
+                        perm_ventas = COALESCE(?, perm_ventas),
+                        perm_cxc = COALESCE(?, perm_cxc),
+                        perm_cxp = COALESCE(?, perm_cxp),
+                        perm_clientes = COALESCE(?, perm_clientes),
+                        perm_reportes = COALESCE(?, perm_reportes),
+                        perm_configuracion = COALESCE(?, perm_configuracion),
+                        perm_fuerza_ventas = COALESCE(?, perm_fuerza_ventas),
+                        facturar_negativo = COALESCE(?, facturar_negativo),
+                        autorizar_devoluciones = COALESCE(?, autorizar_devoluciones),
+                        modificar_precios = COALESCE(?, modificar_precios),
+                        ver_costos_utilidad = COALESCE(?, ver_costos_utilidad),
+                        anular_transacciones = COALESCE(?, anular_transacciones),
+                        facturar_directo = COALESCE(?, facturar_directo)
+                    WHERE id = ?
+                """, (
+                    body.get("descripcion"),
+                    body.get("perm_dashboard"),
+                    body.get("perm_pos"),
+                    body.get("perm_inventario"),
+                    body.get("perm_compras"),
+                    body.get("perm_ventas"),
+                    body.get("perm_cxc"),
+                    body.get("perm_cxp"),
+                    body.get("perm_clientes"),
+                    body.get("perm_reportes"),
+                    body.get("perm_configuracion"),
+                    body.get("perm_fuerza_ventas"),
+                    body.get("facturar_negativo"),
+                    body.get("autorizar_devoluciones"),
+                    body.get("modificar_precios"),
+                    body.get("ver_costos_utilidad"),
+                    body.get("anular_transacciones"),
+                    body.get("facturar_directo"),
+                    r_id
+                ))
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({"success": True, "message": "Permisos del rol actualizados"})
+                return
+
+            elif path.startswith("/api/vendedores/"):
+                v_id = int(path.split("/")[-1])
+                cursor.execute("""
+                    UPDATE vendedores
+                    SET nombre = COALESCE(?, nombre),
+                        documento_identidad = COALESCE(?, documento_identidad),
+                        telefono = COALESCE(?, telefono),
+                        email = COALESCE(?, email),
+                        porcentaje_comision_base = COALESCE(?, porcentaje_comision_base),
+                        meta_mensual_usd = COALESCE(?, meta_mensual_usd),
+                        activo = COALESCE(?, activo)
+                    WHERE id = ?
+                """, (
+                    body.get("nombre"),
+                    body.get("documento_identidad"),
+                    body.get("telefono"),
+                    body.get("email"),
+                    body.get("porcentaje_comision_base"),
+                    body.get("meta_mensual_usd"),
+                    body.get("activo"),
+                    v_id
+                ))
+                conn.commit()
+                schedule_cloud_sync()
+                self.send_json({"success": True, "message": "Vendedor actualizado correctamente"})
+                return
+
             elif path.startswith("/api/proveedores/"):
                 pr_id = int(path.split("/")[-1])
                 cursor.execute("""

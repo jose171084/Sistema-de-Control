@@ -12,11 +12,126 @@ import threading
 import time
 import shutil
 import hashlib
+import hmac
+import base64
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime
+from datetime import datetime, timedelta
 
 DEFAULT_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inventario.db")
 DB_LIMPIA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inventario_limpia.db")
+
+
+# ==============================================================================
+# MÓDULO DE CRIPTOGRAFÍA, TOKENS DE SESIÓN Y SEGURIDAD RBAC (OWASP COMPLIANT)
+# ==============================================================================
+SESSION_SECRET = os.environ.get("SESSION_SECRET", "TAVO_CLOUD_SECRET_2026_SUPER_SECURE_KEY_@#$%")
+
+def generar_salt() -> str:
+    """Genera un salt criptográfico de 16 bytes aleatorios en formato hexadecimal."""
+    return os.urandom(16).hex()
+
+def hash_password(password: str, salt: str) -> str:
+    """Genera hash robusto con PBKDF2-HMAC-SHA256 (100.000 iteraciones)."""
+    pwd_bytes = (password or '').encode('utf-8')
+    salt_bytes = (salt or '').encode('utf-8')
+    key = hashlib.pbkdf2_hmac('sha256', pwd_bytes, salt_bytes, 100000)
+    return key.hex()
+
+def verificar_password(password: str, salt: str, password_hash: str) -> bool:
+    """Verifica en tiempo constante la contraseña suministrada contra el hash almacenado."""
+    if not password or not salt or not password_hash:
+        return False
+    expected = hash_password(password, salt)
+    return hmac.compare_digest(expected, password_hash)
+
+def generar_token_sesion(usuario_id: int, username: str, rol_nombre: str, permisos: dict = None) -> str:
+    """Genera un token de sesión firmado con HMAC-SHA256 y expiración dinámica (24 horas)."""
+    expira = int(time.time()) + (24 * 3600)
+    payload = {
+        "uid": usuario_id,
+        "usr": username,
+        "rol": rol_nombre,
+        "perm": permisos or {},
+        "exp": expira
+    }
+    raw = json.dumps(payload, separators=(',', ':'))
+    b64_payload = base64.urlsafe_b64encode(raw.encode('utf-8')).decode('ascii').rstrip('=')
+    sig = hmac.new(SESSION_SECRET.encode('utf-8'), b64_payload.encode('ascii'), hashlib.sha256).hexdigest()
+    return f"{b64_payload}.{sig}"
+
+def verificar_token_sesion(token: str):
+    """Verifica la firma y vigencia del token de sesión. Retorna el payload decodificado o None."""
+    if not token or '.' not in token:
+        return None
+    parts = token.split('.', 1)
+    if len(parts) != 2:
+        return None
+    b64_payload, sig = parts
+    expected_sig = hmac.new(SESSION_SECRET.encode('utf-8'), b64_payload.encode('ascii'), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected_sig):
+        return None
+    rem = len(b64_payload) % 4
+    if rem > 0:
+        b64_payload += '=' * (4 - rem)
+    try:
+        raw = base64.urlsafe_b64decode(b64_payload.encode('ascii')).decode('utf-8')
+        payload = json.loads(raw)
+        if payload.get("exp", 0) < int(time.time()):
+            return None  # Token expirado
+        return payload
+    except Exception:
+        return None
+
+def obtener_permisos_usuario(usuario_id: int, conn=None):
+    """Obtiene el perfil y conjunto completo de permisos granulares del usuario."""
+    close_at_end = False
+    if conn is None:
+        conn = get_connection()
+        close_at_end = True
+    try:
+        c = conn.cursor()
+        c.execute("""
+            SELECT u.id, u.username, u.nombre_completo, u.activo, u.rol_id,
+                   r.nombre as rol_nombre, r.descripcion as rol_descripcion,
+                   r.perm_dashboard, r.perm_pos, r.perm_inventario, r.perm_compras,
+                   r.perm_ventas, r.perm_cxc, r.perm_cxp, r.perm_clientes,
+                   r.perm_reportes, r.perm_configuracion, r.perm_fuerza_ventas,
+                   r.facturar_negativo, r.autorizar_devoluciones, r.modificar_precios,
+                   r.ver_costos_utilidad, r.anular_transacciones,
+                   COALESCE(r.facturar_directo, 1) as facturar_directo
+            FROM usuarios u
+            JOIN roles r ON u.rol_id = r.id
+            WHERE u.id = ?
+        """, (usuario_id,))
+        row = c.fetchone()
+        if not row:
+            return None
+        return dict(row)
+    except Exception as e:
+        print(f"[RBAC ERROR] No se pudieron obtener permisos: {e}")
+        return None
+    finally:
+        if close_at_end:
+            conn.close()
+
+def registrar_auditoria(usuario_id: int, username: str, accion: str, modulo: str, detalles: str = "", ip: str = "", conn=None):
+    """Registra evento en la bitácora inmutable de auditoría de seguridad."""
+    close_at_end = False
+    if conn is None:
+        conn = get_connection()
+        close_at_end = True
+    try:
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO auditoria_seguridad (usuario_id, username, accion, modulo, detalles, ip)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (usuario_id, username, accion, modulo, detalles, ip))
+        conn.commit()
+    except Exception as e:
+        print(f"[AUDITORIA ERROR] No se pudo registrar log: {e}")
+    finally:
+        if close_at_end:
+            conn.close()
 
 def resolver_db_path():
     """
@@ -25,6 +140,13 @@ def resolver_db_path():
     2. Si existe un disco montado y no contiene inventario.db, inicializa clonando la base del repositorio.
     3. Si no hay disco externo montado, opera sobre DEFAULT_DB_PATH local de forma segura.
     """
+    custom_path = os.environ.get("DB_PATH") or os.environ.get("SQLITE_DB_PATH")
+    if custom_path:
+        custom_abs = os.path.abspath(custom_path)
+        os.makedirs(os.path.dirname(custom_abs), exist_ok=True)
+        print(f"[ALMACENAMIENTO] Operando sobre base de datos personalizada: {custom_abs}")
+        return custom_abs
+
     candidate_dirs = [
         os.environ.get("PERSISTENT_DATA_PATH"),
         os.environ.get("DATA_DIR"),
@@ -476,6 +598,83 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     add_col_if_missing("facturas", "fecha_vencimiento", "TEXT")
     add_col_if_missing("facturas", "saldo_pendiente", "REAL DEFAULT 0.0")
     add_col_if_missing("facturas", "notas", "TEXT")
+    add_col_if_missing("facturas", "vendedor_id", "INTEGER")
+    add_col_if_missing("facturas", "comision_porcentaje", "REAL DEFAULT 0.0")
+    add_col_if_missing("facturas", "comision_monto_usd", "REAL DEFAULT 0.0")
+    add_col_if_missing("facturas", "comision_estado", "TEXT DEFAULT 'PENDIENTE'")
+    add_col_if_missing("facturas", "usuario_id", "INTEGER DEFAULT 1")
+    add_col_if_missing("roles", "facturar_directo", "INTEGER DEFAULT 1")
+    try:
+        cursor.execute("UPDATE roles SET facturar_directo = 0 WHERE nombre = 'Vendedor Comercial' AND es_sistema = 1")
+        cursor.execute("UPDATE roles SET facturar_directo = 0 WHERE nombre = 'Almacenista / Inventario' AND es_sistema = 1")
+    except Exception:
+        pass
+
+        # 13.5 GESTION DE TERRITORIOS Y ZONAS COMERCIALES (ERP)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS zonas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id INTEGER DEFAULT 1,
+        nombre TEXT NOT NULL,
+        descripcion TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_zonas_active ON zonas(is_active)")
+    add_col_if_missing("clientes", "zona_id", "INTEGER REFERENCES zonas(id)")
+    add_col_if_missing("clientes", "vendedor_id", "INTEGER REFERENCES vendedores(id)")
+    add_col_if_missing("productos", "stock_comprometido", "REAL DEFAULT 0.0")
+    add_col_if_missing("pedido_items", "cantidad_aprobada", "REAL")
+    add_col_if_missing("pedidos", "fecha_vencimiento", "TIMESTAMP")
+
+    # 14. TABLAS DE PEDIDOS Y PREVENTAS (FUERZA DE VENTAS CON AUTORIZACIÓN)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS pedidos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero_pedido TEXT UNIQUE NOT NULL,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        cliente_id INTEGER NOT NULL,
+        vendedor_id INTEGER,
+        usuario_id INTEGER,
+        subtotal REAL DEFAULT 0.0,
+        iva_porcentaje REAL DEFAULT 0.0,
+        iva_total REAL DEFAULT 0.0,
+        total_usd REAL DEFAULT 0.0,
+        tasa_ves REAL DEFAULT 1.0,
+        tasa_cop REAL DEFAULT 1.0,
+        condicion_pago TEXT DEFAULT 'contado',
+        dias_credito INTEGER DEFAULT 0,
+        estado TEXT DEFAULT 'PENDIENTE' CHECK(estado IN ('PENDIENTE', 'APROBADO', 'FACTURADO', 'RECHAZADO', 'VENCIDO')),
+        factura_id INTEGER,
+        fecha_aprobacion TIMESTAMP,
+        aprobado_por_usuario_id INTEGER,
+        motivo_rechazo TEXT,
+        notas TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+        FOREIGN KEY (vendedor_id) REFERENCES vendedores(id),
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+        FOREIGN KEY (factura_id) REFERENCES facturas(id)
+    )
+    ''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS pedido_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pedido_id INTEGER NOT NULL,
+        producto_id INTEGER NOT NULL,
+        cantidad REAL NOT NULL,
+        precio_unitario REAL NOT NULL,
+        subtotal REAL NOT NULL,
+        FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,
+        FOREIGN KEY (producto_id) REFERENCES productos(id)
+    )
+    ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON pedidos(estado, fecha DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_vendedor ON pedidos(vendedor_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON pedidos(cliente_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedido_items_pedido ON pedido_items(pedido_id)")
+
 
     # Sincronización de totales en facturas existentes
     try:
@@ -1004,6 +1203,168 @@ def auditar_y_migrar_db(conn=None, cursor=None):
         motivo_reapertura TEXT
     )
     """)
+
+    
+    # ==============================================================================
+    # 12. GESTIÓN DE USUARIOS Y CONTROL DE ACCESO (RBAC 100% CONFIGURABLE)
+    # ==============================================================================
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS roles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT UNIQUE NOT NULL,
+        descripcion TEXT,
+        es_sistema INTEGER DEFAULT 0,
+        perm_dashboard INTEGER DEFAULT 0,
+        perm_pos INTEGER DEFAULT 1,
+        perm_inventario INTEGER DEFAULT 0,
+        perm_compras INTEGER DEFAULT 0,
+        perm_ventas INTEGER DEFAULT 1,
+        perm_cxc INTEGER DEFAULT 0,
+        perm_cxp INTEGER DEFAULT 0,
+        perm_clientes INTEGER DEFAULT 1,
+        perm_reportes INTEGER DEFAULT 0,
+        perm_configuracion INTEGER DEFAULT 0,
+        perm_fuerza_ventas INTEGER DEFAULT 0,
+        facturar_negativo INTEGER DEFAULT 0,
+        autorizar_devoluciones INTEGER DEFAULT 0,
+        modificar_precios INTEGER DEFAULT 0,
+        ver_costos_utilidad INTEGER DEFAULT 0,
+        anular_transacciones INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        nombre_completo TEXT NOT NULL,
+        email TEXT,
+        telefono TEXT,
+        rol_id INTEGER NOT NULL,
+        activo INTEGER DEFAULT 1,
+        ultimo_acceso TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (rol_id) REFERENCES roles(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_usuarios_username ON usuarios(username)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_usuarios_rol ON usuarios(rol_id)")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS auditoria_seguridad (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario_id INTEGER,
+        username TEXT,
+        accion TEXT NOT NULL,
+        modulo TEXT NOT NULL,
+        detalles TEXT,
+        ip TEXT,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_auditoria_usuario ON auditoria_seguridad(usuario_id, fecha DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_auditoria_modulo ON auditoria_seguridad(modulo, fecha DESC)")
+
+    # Seeding Inicial de Roles del Organigrama si no existen
+    cursor.execute("SELECT COUNT(*) FROM roles")
+    if cursor.fetchone()[0] == 0:
+        cursor.executemany("""
+        INSERT INTO roles (
+            nombre, descripcion, es_sistema,
+            perm_dashboard, perm_pos, perm_inventario, perm_compras,
+            perm_ventas, perm_cxc, perm_cxp, perm_clientes,
+            perm_reportes, perm_configuracion, perm_fuerza_ventas,
+            facturar_negativo, autorizar_devoluciones, modificar_precios,
+            ver_costos_utilidad, anular_transacciones
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            (
+                'SuperAdmin', 'Control total e irrestricto de todo el sistema y seguridad', 1,
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+            ),
+            (
+                'Gerente General', 'Gestión operativa, inventarios, compras, ventas y tesorería', 1,
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1
+            ),
+            (
+                'Cajero / Facturador', 'Facturación POS, cobros y clientes. Sin acceso a costos ni anulaciones', 1,
+                0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0
+            ),
+            (
+                'Vendedor Comercial', 'Atención de clientes, cotizaciones y pedidos con comisiones', 1,
+                0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0
+            ),
+            (
+                'Almacenista / Inventario', 'Control físico de almacén, entradas de compra y ajustes de stock', 1,
+                0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            )
+        ])
+        print("[MIGRACIÓN AUTO] Roles iniciales del organigrama sembrados con éxito.")
+
+    # Seeding Inicial de Usuario Maestro 'admin' si no existen usuarios
+    cursor.execute("SELECT COUNT(*) FROM usuarios")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("SELECT id FROM roles WHERE nombre = 'SuperAdmin' LIMIT 1")
+        admin_rol = cursor.fetchone()
+        rol_id = admin_rol[0] if admin_rol else 1
+        salt_inicial = generar_salt()
+        pwd_hash = hash_password("admin123", salt_inicial)
+        cursor.execute("""
+            INSERT INTO usuarios (username, password_hash, salt, nombre_completo, email, telefono, rol_id, activo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+        """, ("admin", pwd_hash, salt_inicial, "Administrador Principal", "admin@tavocloud.com", "+58 412 0000000", rol_id))
+        print("[MIGRACIÓN AUTO] Usuario maestro inicial 'admin' creado exitosamente (clave inicial: admin123).")
+
+    # ==============================================================================
+    # 13. FUERZA DE VENTAS, VENDEDORES Y COMISIONES COMERCIALES
+    # ==============================================================================
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS vendedores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario_id INTEGER,
+        codigo TEXT UNIQUE NOT NULL,
+        nombre TEXT NOT NULL,
+        documento_identidad TEXT,
+        telefono TEXT,
+        email TEXT,
+        porcentaje_comision_base REAL DEFAULT 3.0,
+        meta_mensual_usd REAL DEFAULT 5000.0,
+        activo INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_vendedores_codigo ON vendedores(codigo)")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS liquidaciones_comisiones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        vendedor_id INTEGER NOT NULL,
+        periodo_mes INTEGER NOT NULL,
+        periodo_ano INTEGER NOT NULL,
+        total_ventas_usd REAL NOT NULL DEFAULT 0.0,
+        total_comision_usd REAL NOT NULL DEFAULT 0.0,
+        monto_pagado_usd REAL DEFAULT 0.0,
+        estado TEXT DEFAULT 'ABIERTA' CHECK(estado IN ('ABIERTA', 'APROBADA', 'PAGADA')),
+        fecha_liquidacion TIMESTAMP,
+        notas TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (vendedor_id) REFERENCES vendedores(id)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_liq_vendedor_periodo ON liquidaciones_comisiones(vendedor_id, periodo_ano, periodo_mes)")
+
+    # Seeding Inicial de Vendedor por Defecto
+    cursor.execute("SELECT COUNT(*) FROM vendedores")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO vendedores (codigo, nombre, porcentaje_comision_base, meta_mensual_usd, activo)
+            VALUES (?, ?, ?, ?, 1)
+        """, ('VEN-001', 'Ventas Mostrador / General', 0.0, 5000.0))
+        print("[MIGRACIÓN AUTO] Vendedor por defecto 'VEN-001' sembrado.")
 
     # Sembrar Cuentas de Tesorería por Defecto si está vacío
     cursor.execute("SELECT COUNT(*) FROM cuentas_tesoreria")
@@ -1912,7 +2273,89 @@ def init_db():
             ('Productos & Mercancía', 'producto', 'Artículos físicos con control de inventario y existencia (Controlan stock)')
         ])
 
+    # Tabla de Configuración de Formatos de Impresión por Tenant
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tenant_config_impresion (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id INTEGER NOT NULL DEFAULT 1,
+        color_primario TEXT NOT NULL DEFAULT '#0f172a',
+        mostrar_sku INTEGER NOT NULL DEFAULT 1,
+        mostrar_vendedor INTEGER NOT NULL DEFAULT 1,
+        mostrar_descuento_linea INTEGER NOT NULL DEFAULT 1,
+        logo_alineacion TEXT NOT NULL DEFAULT 'centro' CHECK(logo_alineacion IN ('izquierda', 'centro', 'derecha')),
+        texto_footer_factura TEXT NOT NULL DEFAULT 'Gracias por su compra. Conserve esta factura como comprobante de garantía.',
+        texto_header_ticket TEXT NOT NULL DEFAULT '*** COMPROBANTE DE COMPRA ***',
+        texto_footer_ticket TEXT NOT NULL DEFAULT '*** GRACIAS POR SU PREFERENCIA ***',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cursor.execute("SELECT COUNT(*) FROM tenant_config_impresion WHERE tenant_id = 1")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+        INSERT INTO tenant_config_impresion (
+            tenant_id, color_primario, mostrar_sku, mostrar_vendedor, mostrar_descuento_linea,
+            logo_alineacion, texto_footer_factura, texto_header_ticket, texto_footer_ticket
+        ) VALUES (
+            1, '#0f172a', 1, 1, 1, 'centro',
+            'Gracias por su compra. Conserve esta factura como comprobante de garantía.',
+            '*** COMPROBANTE DE COMPRA ***',
+            '*** GRACIAS POR SU PREFERENCIA ***'
+        )
+        """)
+
     # Sembrar 1 cliente genérico de contado para facturación rápida
+    
+    # Módulo de Tesorería y Control de Caja (Apertura, Movimientos y Cierre Z)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS cajas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id INTEGER NOT NULL DEFAULT 1,
+        nombre TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    cursor.execute("SELECT COUNT(*) FROM cajas WHERE id = 1")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO cajas (id, tenant_id, nombre, is_active) VALUES (1, 1, 'Caja Principal', 1)")
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS turnos_caja (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id INTEGER NOT NULL DEFAULT 1,
+        caja_id INTEGER NOT NULL DEFAULT 1,
+        usuario_id INTEGER NOT NULL,
+        fecha_apertura TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        fecha_cierre TIMESTAMP NULL,
+        fondo_inicial_usd REAL NOT NULL DEFAULT 0.0,
+        fondo_inicial_ves REAL NOT NULL DEFAULT 0.0,
+        estado TEXT NOT NULL CHECK(estado IN ('ABIERTO', 'CERRADO')) DEFAULT 'ABIERTO',
+        totales_esperados_json TEXT NULL,
+        totales_declarados_json TEXT NULL,
+        diferencias_json TEXT NULL,
+        notas TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (caja_id) REFERENCES cajas(id),
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS movimientos_caja (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        turno_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL CHECK(tipo IN ('INGRESO', 'EGRESO')),
+        concepto TEXT NOT NULL,
+        metodo_pago TEXT NOT NULL,
+        moneda TEXT NOT NULL CHECK(moneda IN ('USD', 'VES', 'COP')),
+        monto REAL NOT NULL,
+        referencia TEXT NULL,
+        factura_id_ref INTEGER NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (turno_id) REFERENCES turnos_caja(id) ON DELETE CASCADE
+    )
+    ''')
+
     cursor.execute("SELECT COUNT(*) FROM clientes")
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
@@ -6579,6 +7022,1474 @@ def obtener_gastos_operativos(filtros=None, conn=None):
             conn.close()
 
 
+
+# ==============================================================================
+# 15. FUNCIONES OPERACIONALES DE PEDIDOS Y PREVENTA (FUERZA DE VENTAS)
+# ==============================================================================
+
+# ========================================================
+# FUNCIONES DE GESTION TERRITORIAL (ZONAS)
+# ========================================================
+
+def obtener_zonas(solo_activas=True, conn=None):
+    """Consulta la lista de zonas comerciales configuradas."""
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        sql = "SELECT * FROM zonas WHERE 1=1"
+        if solo_activas:
+            sql += " AND is_active = 1"
+        sql += " ORDER BY nombre ASC"
+        cur.execute(sql)
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        if close_after:
+            conn.close()
+
+def crear_zona(nombre, descripcion='', is_active=1, tenant_id=1, conn=None):
+    """Crea una nueva zona o territorio de ventas."""
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO zonas (tenant_id, nombre, descripcion, is_active)
+            VALUES (?, ?, ?, ?)
+        """, (tenant_id, nombre.strip(), (descripcion or '').strip(), int(is_active)))
+        conn.commit()
+        schedule_cloud_sync()
+        return {"id": cur.lastrowid, "success": True, "nombre": nombre}
+    finally:
+        if close_after:
+            conn.close()
+
+def actualizar_zona(zona_id, nombre=None, descripcion=None, is_active=None, conn=None):
+    """Actualiza o desactiva una zona comercial."""
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM zonas WHERE id = ?", (zona_id,))
+        z = cur.fetchone()
+        if not z:
+            raise ValueError(f"Zona ID {zona_id} no existe")
+        
+        cur.execute("""
+            UPDATE zonas
+            SET nombre = COALESCE(?, nombre),
+                descripcion = COALESCE(?, descripcion),
+                is_active = COALESCE(?, is_active)
+            WHERE id = ?
+        """, (nombre, descripcion, is_active, zona_id))
+        conn.commit()
+        schedule_cloud_sync()
+        return {"id": zona_id, "success": True}
+    finally:
+        if close_after:
+            conn.close()
+
+# ========================================================
+# FUNCIONES DE FUERZA DE VENTAS, PEDIDOS Y RESERVA DE STOCK
+# ========================================================
+
+def crear_pedido(cliente_id, vendedor_id=None, items=None, condicion_pago='contado', dias_credito=0, notas='', usuario_id=1, fecha_vencimiento=None, horas_vigencia=48, conn=None):
+    """
+    Crea un pedido / preventa con Logica ERP de 'Stock Comprometido':
+    - Valida existencia y solvencia de cliente.
+    - Asigna vendedor por cliente, usuario o seleccion.
+    - Valida disponibilidad = (stock_fisico - stock_comprometido).
+    - SUMA las cantidades al stock_comprometido (Reserva Garantizada).
+    - Asigna vigencia temporal (fecha_vencimiento, default 48h).
+    """
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        # 1. Verificar cliente y territorio
+        cur.execute("SELECT id, nombre, cedula, zona_id, vendedor_id FROM clientes WHERE id = ?", (cliente_id,))
+        cli = cur.fetchone()
+        if not cli:
+            raise ValueError(f"Cliente ID {cliente_id} no existe")
+        cli_dict = dict(cli)
+
+        # Si no se paso vendedor_id, heredar del cliente o del usuario autenticado
+        if not vendedor_id:
+            if cli_dict.get("vendedor_id"):
+                vendedor_id = cli_dict["vendedor_id"]
+            elif usuario_id:
+                cur.execute("SELECT id FROM vendedores WHERE usuario_id = ? AND activo = 1", (usuario_id,))
+                v_encontrado = cur.fetchone()
+                if v_encontrado:
+                    vendedor_id = v_encontrado["id"]
+
+        # 2. Configuracion de tasas e IVA
+        cur.execute("SELECT tasa_ves, tasa_cop, iva_porcentaje FROM configuracion WHERE id = 1")
+        cfg = cur.fetchone()
+        tasa_ves = float(cfg["tasa_ves"]) if cfg else 45.0
+        tasa_cop = float(cfg["tasa_cop"]) if cfg else 4100.0
+        iva_pct = float(cfg["iva_porcentaje"]) if cfg else 16.0
+
+        subtotal = Decimal('0.0')
+        iva_total = Decimal('0.0')
+
+        if not items or len(items) == 0:
+            raise ValueError("El pedido debe contener al menos un producto o servicio")
+
+        # Verificar si el usuario tiene permiso de facturar en negativo
+        cur.execute("""
+            SELECT r.facturar_negativo
+            FROM usuarios u
+            JOIN roles r ON u.rol_id = r.id
+            WHERE u.id = ?
+        """, (usuario_id,))
+        u_perm = cur.fetchone()
+        can_neg = u_perm and u_perm["facturar_negativo"] == 1
+
+        items_procesados = []
+        for itm in items:
+            p_id = itm.get("producto_id") or itm.get("id")
+            cant = Decimal(str(itm.get("cantidad", 1)))
+            if cant <= Decimal('0.0'):
+                raise ValueError("La cantidad de cada item debe ser mayor a 0")
+
+            cur.execute("""
+                SELECT id, codigo, nombre, tipo, impuesto_tipo, precio_base, stock,
+                       COALESCE(stock_comprometido, 0.0) as stock_comprometido
+                FROM productos WHERE id = ?
+            """, (p_id,))
+            p = cur.fetchone()
+            if not p:
+                raise ValueError(f"Producto ID {p_id} no existe")
+
+            p_dict = dict(p)
+
+            # Validacion de Disponibilidad = stock_fisico - stock_comprometido
+            if p_dict["tipo"] == "producto":
+                stk_fis = Decimal(str(p_dict.get("stock") or 0.0))
+                stk_comp = Decimal(str(p_dict.get("stock_comprometido") or 0.0))
+                disp = stk_fis - stk_comp
+
+                if cant > disp and not can_neg:
+                    raise ValueError(
+                        f"Disponibilidad insuficiente para '{p_dict['nombre']}' ({p_dict['codigo']}): "
+                        f"Solicitado: {cant}, Fisico: {stk_fis}, Reservado: {stk_comp}, Disponible: {disp}"
+                    )
+
+            p_prec = itm.get("precio_unitario") or itm.get("precio") or p_dict["precio_base"]
+            pu = Decimal(str(p_prec))
+            it_sub = (cant * pu).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+            it_iva = (it_sub * (Decimal(str(iva_pct)) / Decimal('100.0'))).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP) if p_dict.get("impuesto_tipo") == "gravado" else Decimal('0.0')
+
+            subtotal += it_sub
+            iva_total += it_iva
+            items_procesados.append({
+                "producto_id": p_id,
+                "nombre": p_dict["nombre"],
+                "tipo": p_dict["tipo"],
+                "cantidad": float(cant),
+                "precio_unitario": float(pu),
+                "subtotal": float(it_sub)
+            })
+
+        total_usd = (subtotal + iva_total).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # Generar numero correlativo
+        cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM pedidos")
+        next_id = cur.fetchone()[0]
+        numero_pedido = f"PED-{next_id:06d}"
+
+        # 3. Calcular vigencia / fecha_vencimiento (default 48 horas)
+        if not fecha_vencimiento:
+            horas = int(horas_vigencia or 48)
+            fecha_vencimiento = (datetime.now() + timedelta(hours=horas)).strftime("%Y-%m-%d %H:%M:%S")
+
+        # 4. Insertar cabecera de pedido
+        cur.execute("""
+            INSERT INTO pedidos (
+                numero_pedido, cliente_id, vendedor_id, usuario_id,
+                subtotal, iva_porcentaje, iva_total, total_usd,
+                tasa_ves, tasa_cop, condicion_pago, dias_credito,
+                estado, notas, fecha_vencimiento
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDIENTE', ?, ?)
+        """, (
+            numero_pedido, cliente_id, vendedor_id, usuario_id,
+            float(subtotal), float(iva_pct), float(iva_total), float(total_usd),
+            tasa_ves, tasa_cop, condicion_pago, dias_credito, notas, fecha_vencimiento
+        ))
+        pedido_id = cur.lastrowid
+
+        # 5. Insertar renglones y SUMAR a stock_comprometido (Reserva Activa)
+        for it in items_procesados:
+            cur.execute("""
+                INSERT INTO pedido_items (pedido_id, producto_id, cantidad, cantidad_aprobada, precio_unitario, subtotal)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (pedido_id, it["producto_id"], it["cantidad"], it["cantidad"], it["precio_unitario"], it["subtotal"]))
+
+            if it["tipo"] == "producto":
+                cur.execute("""
+                    UPDATE productos
+                    SET stock_comprometido = COALESCE(stock_comprometido, 0.0) + ?
+                    WHERE id = ?
+                """, (it["cantidad"], it["producto_id"]))
+
+        # Registro en auditoria
+        try:
+            cur.execute("""
+                INSERT INTO auditoria_seguridad (usuario_id, username, accion, modulo, detalles)
+                VALUES (?, (SELECT username FROM usuarios WHERE id = ?), 'CREAR_PEDIDO', 'FUERZA_VENTAS', ?)
+            """, (usuario_id, usuario_id, f"Pedido {numero_pedido} registrado por ${float(total_usd):.2f} USD. Reserva de stock comprometido activada (Vence: {fecha_vencimiento})"))
+        except Exception:
+            pass
+
+        conn.commit()
+        schedule_cloud_sync()
+
+        return {
+            "success": True,
+            "pedido_id": pedido_id,
+            "numero_pedido": numero_pedido,
+            "total_usd": float(total_usd),
+            "estado": "PENDIENTE",
+            "fecha_vencimiento": fecha_vencimiento,
+            "mensaje": f"Pedido {numero_pedido} registrado exitosamente. Stock comprometido reservado por 48 horas."
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+
+def expirar_pedidos_vencidos(conn=None):
+    """
+    Rutina automatica ERP: Revisa pedidos PENDIENTES cuya fecha_vencimiento ha expirado.
+    Libera el stock_comprometido de vuelta al inventario disponible y marca el pedido como 'VENCIDO'.
+    """
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        cur.execute("""
+            SELECT id, numero_pedido, fecha_vencimiento
+            FROM pedidos
+            WHERE estado = 'PENDIENTE' 
+              AND fecha_vencimiento IS NOT NULL 
+              AND datetime(fecha_vencimiento) <= datetime('now', 'localtime')
+        """)
+        vencidos = [dict(r) for r in cur.fetchall()]
+        expirados_info = []
+
+        for ped in vencidos:
+            p_id = ped["id"]
+            num_ped = ped["numero_pedido"]
+
+            cur.execute("""
+                SELECT pi.producto_id, pi.cantidad, p.tipo, p.nombre
+                FROM pedido_items pi
+                JOIN productos p ON pi.producto_id = p.id
+                WHERE pi.pedido_id = ?
+            """, (p_id,))
+            items = [dict(r) for r in cur.fetchall()]
+
+            for it in items:
+                if it["tipo"] == "producto":
+                    cur.execute("""
+                        UPDATE productos
+                        SET stock_comprometido = MAX(0.0, COALESCE(stock_comprometido, 0.0) - ?)
+                        WHERE id = ?
+                    """, (float(it["cantidad"]), it["producto_id"]))
+
+            cur.execute("""
+                UPDATE pedidos
+                SET estado = 'VENCIDO',
+                    motivo_rechazo = 'Expiracion automatica por vigencia de reserva (48h cumplidas)',
+                    fecha_aprobacion = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (p_id,))
+
+            try:
+                cur.execute("""
+                    INSERT INTO auditoria_seguridad (usuario_id, username, accion, modulo, detalles)
+                    VALUES (1, 'SYSTEM', 'EXPIRAR_PEDIDO', 'FUERZA_VENTAS', ?)
+                """, (f"Pedido {num_ped} expirado automaticamente. Stock comprometido liberado al inventario disponible.",))
+            except Exception:
+                pass
+
+            expirados_info.append({"id": p_id, "numero_pedido": num_ped})
+
+        conn.commit()
+        if expirados_info:
+            schedule_cloud_sync()
+        return expirados_info
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+
+def obtener_pedidos(filtros=None, conn=None):
+    """Consulta la lista de pedidos con informacion enriquecida de cliente, zona y vendedor."""
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        try:
+            expirar_pedidos_vencidos(conn)
+        except Exception:
+            pass
+
+        cur = conn.cursor()
+        query = """
+        SELECT p.id, p.numero_pedido, p.fecha, p.cliente_id, p.vendedor_id, p.usuario_id,
+               p.subtotal, p.iva_porcentaje, p.iva_total, p.total_usd, p.tasa_ves, p.tasa_cop,
+               p.condicion_pago, p.dias_credito, p.estado, p.factura_id, p.fecha_aprobacion,
+               p.aprobado_por_usuario_id, p.motivo_rechazo, p.notas, p.fecha_vencimiento,
+               c.nombre as cliente_nombre, c.cedula as cliente_cedula, c.telefono as cliente_telefono,
+               z.nombre as zona_nombre,
+               v.nombre as vendedor_nombre, v.codigo as vendedor_codigo,
+               u.username as usuario_username,
+               f.numero_factura as factura_numero,
+               (SELECT COUNT(*) FROM pedido_items WHERE pedido_id = p.id) as items_count
+        FROM pedidos p
+        JOIN clientes c ON p.cliente_id = c.id
+        LEFT JOIN zonas z ON c.zona_id = z.id
+        LEFT JOIN vendedores v ON p.vendedor_id = v.id
+        LEFT JOIN usuarios u ON p.usuario_id = u.id
+        LEFT JOIN facturas f ON p.factura_id = f.id
+        WHERE 1=1
+        """
+        params = []
+        if filtros:
+            if filtros.get("estado") and filtros["estado"] != "TODOS":
+                query += " AND p.estado = ?"
+                params.append(filtros["estado"])
+            if filtros.get("vendedor_id"):
+                query += " AND p.vendedor_id = ?"
+                params.append(filtros["vendedor_id"])
+            if filtros.get("cliente_id"):
+                query += " AND p.cliente_id = ?"
+                params.append(filtros["cliente_id"])
+            if filtros.get("zona_id"):
+                query += " AND c.zona_id = ?"
+                params.append(filtros["zona_id"])
+
+        query += " ORDER BY p.id DESC"
+        cur.execute(query, params)
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        if close_after:
+            conn.close()
+
+
+def obtener_pedido_detalle(pedido_id, conn=None):
+    """Obtiene el detalle completo de un pedido con disponibilidad de stock e inputs de aprobacion."""
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT p.id, p.numero_pedido, p.fecha, p.cliente_id, p.vendedor_id, p.usuario_id,
+                   p.subtotal, p.iva_porcentaje, p.iva_total, p.total_usd, p.tasa_ves, p.tasa_cop,
+                   p.condicion_pago, p.dias_credito, p.estado, p.factura_id, p.fecha_aprobacion,
+                   p.aprobado_por_usuario_id, p.motivo_rechazo, p.notas, p.fecha_vencimiento,
+                   c.nombre as cliente_nombre, c.cedula as cliente_cedula, c.telefono as cliente_telefono, c.direccion as cliente_direccion,
+                   c.zona_id, z.nombre as zona_nombre,
+                   v.nombre as vendedor_nombre, v.codigo as vendedor_codigo,
+                   u.username as usuario_username,
+                   f.numero_factura as factura_numero
+            FROM pedidos p
+            JOIN clientes c ON p.cliente_id = c.id
+            LEFT JOIN zonas z ON c.zona_id = z.id
+            LEFT JOIN vendedores v ON p.vendedor_id = v.id
+            LEFT JOIN usuarios u ON p.usuario_id = u.id
+            LEFT JOIN facturas f ON p.factura_id = f.id
+            WHERE p.id = ?
+        """, (pedido_id,))
+        ped = cur.fetchone()
+        if not ped:
+            return None
+
+        pedido_dict = dict(ped)
+
+        cur.execute("""
+            SELECT pi.id, pi.producto_id, pi.cantidad, COALESCE(pi.cantidad_aprobada, pi.cantidad) as cantidad_aprobada,
+                   pi.precio_unitario, pi.subtotal,
+                   pr.codigo as producto_codigo, pr.nombre as producto_nombre, pr.tipo as producto_tipo,
+                   pr.stock as stock_fisico, COALESCE(pr.stock_comprometido, 0.0) as stock_comprometido,
+                   MAX(0.0, pr.stock - COALESCE(pr.stock_comprometido, 0.0)) as stock_disponible,
+                   pr.impuesto_tipo
+            FROM pedido_items pi
+            JOIN productos pr ON pi.producto_id = pr.id
+            WHERE pi.pedido_id = ?
+            ORDER BY pi.id ASC
+        """, (pedido_id,))
+        pedido_dict["items"] = [dict(r) for r in cur.fetchall()]
+
+        return pedido_dict
+    finally:
+        if close_after:
+            conn.close()
+
+
+def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_contado='Efectivo USD', notas_adicionales='', items_aprobados=None, conn=None):
+    """
+    Autoriza un pedido y lo convierte en Factura real con soporte para APROBACION PARCIAL (Backorders):
+    - Permite al Administrador editar cantidades (ej. aprobar 8 de 10).
+    - Libera el 100% de la reserva original de stock_comprometido.
+    - Descuenta del stock fisico unicamente lo aprobado.
+    - Genera factura con los montos recalculados y asienta en Kardex inmutable.
+    """
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        cur.execute("SELECT * FROM pedidos WHERE id = ?", (pedido_id,))
+        ped = cur.fetchone()
+        if not ped:
+            raise ValueError(f"Pedido ID {pedido_id} no encontrado")
+
+        ped_dict = dict(ped)
+        if ped_dict["estado"] != "PENDIENTE":
+            raise ValueError(f"El pedido no esta pendiente de aprobacion (Estado actual: '{ped_dict['estado']}')")
+
+        # Verificar vigencia
+        if ped_dict.get("fecha_vencimiento"):
+            try:
+                f_venc = datetime.strptime(ped_dict["fecha_vencimiento"], "%Y-%m-%d %H:%M:%S")
+                if f_venc < datetime.now():
+                    raise ValueError(f"El pedido {ped_dict['numero_pedido']} ha vencido ({ped_dict['fecha_vencimiento']}). Su reserva de stock ha expirado.")
+            except ValueError as ve:
+                if "ha vencido" in str(ve): raise ve
+
+        # Verificar permisos del aprobador
+        cur.execute("""
+            SELECT r.perm_pos, r.perm_ventas, r.facturar_directo, r.facturar_negativo
+            FROM usuarios u
+            JOIN roles r ON u.rol_id = r.id
+            WHERE u.id = ?
+        """, (usuario_aprobador_id,))
+        aprob_perm = cur.fetchone()
+        can_negative = aprob_perm and aprob_perm["facturar_negativo"] == 1
+
+        # Cargar renglones originales
+        cur.execute("""
+            SELECT pi.*, p.codigo, p.nombre, p.tipo, p.stock, p.costo, p.costo_cpp, p.impuesto_tipo,
+                   COALESCE(p.stock_comprometido, 0.0) as stock_comprometido
+            FROM pedido_items pi
+            JOIN productos p ON pi.producto_id = p.id
+            WHERE pi.pedido_id = ?
+        """, (pedido_id,))
+        items_db = [dict(r) for r in cur.fetchall()]
+
+        # Mapear cantidades aprobadas (Aprobacion Parcial / Backorder)
+        aprob_map = {}
+        if items_aprobados:
+            if isinstance(items_aprobados, list):
+                for ia in items_aprobados:
+                    pid = ia.get("producto_id") or ia.get("id")
+                    if pid is not None:
+                        aprob_map[int(pid)] = Decimal(str(ia.get("cantidad", 0)))
+            elif isinstance(items_aprobados, dict):
+                for k, v in items_aprobados.items():
+                    aprob_map[int(k)] = Decimal(str(v))
+
+        # Procesar renglones y calcular nuevos totales
+        iva_pct_dec = Decimal(str(ped_dict.get("iva_porcentaje") or 16.0))
+        subtotal_aprob = Decimal('0.0')
+        iva_total_aprob = Decimal('0.0')
+        items_finales = []
+        hubo_aprobacion_parcial = False
+
+        for it in items_db:
+            pid = int(it["producto_id"])
+            cant_orig = Decimal(str(it["cantidad"]))
+            pu = Decimal(str(it["precio_unitario"]))
+
+            if pid in aprob_map:
+                cant_aprob = max(Decimal('0.0'), min(aprob_map[pid], cant_orig))
+            else:
+                cant_aprob = cant_orig
+
+            if cant_aprob < cant_orig:
+                hubo_aprobacion_parcial = True
+
+            # Validar stock fisico para la cantidad aprobada
+            if it["tipo"] == "producto" and cant_aprob > Decimal('0.0'):
+                stk_fis = Decimal(str(it["stock"] or 0.0))
+                if cant_aprob > stk_fis and not can_negative:
+                    raise ValueError(f"Stock fisico insuficiente para '{it['nombre']}' (Aprobar: {cant_aprob}, Disponible: {stk_fis})")
+
+            it_sub = (cant_aprob * pu).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+            it_iva = (it_sub * (iva_pct_dec / Decimal('100.0'))).quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP) if it.get("impuesto_tipo") == "gravado" else Decimal('0.0')
+
+            subtotal_aprob += it_sub
+            iva_total_aprob += it_iva
+
+            items_finales.append({
+                "item_id": it["id"],
+                "producto_id": pid,
+                "nombre": it["nombre"],
+                "tipo": it["tipo"],
+                "impuesto_tipo": it.get("impuesto_tipo", "exento"),
+                "cant_original": cant_orig,
+                "cant_aprobada": cant_aprob,
+                "pu": pu,
+                "subtotal": it_sub,
+                "iva": it_iva,
+                "total": it_sub + it_iva,
+                "stock": it["stock"],
+                "costo": it.get("costo") or 0.0,
+                "costo_cpp": it.get("costo_cpp") or it.get("costo") or 0.0
+            })
+
+        total_usd_aprob = (subtotal_aprob + iva_total_aprob).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # Generar numero correlativo de factura
+        cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM facturas")
+        correlativo = cur.fetchone()[0]
+        numero_factura = f"FAC-{correlativo:06d}"
+
+        subtotal = float(subtotal_aprob)
+        iva_total = float(iva_total_aprob)
+        total_usd = float(total_usd_aprob)
+        tasa_ves = float(ped_dict["tasa_ves"])
+        tasa_cop = float(ped_dict["tasa_cop"])
+        total_ves = round(total_usd * tasa_ves, 2)
+        total_cop = round(total_usd * tasa_cop, 2)
+        tipo_venta = ped_dict["condicion_pago"] or "contado"
+        dias_cred = int(ped_dict["dias_credito"] or 15)
+
+        fecha_factura = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        fecha_venc = (datetime.now() + timedelta(days=dias_cred)).strftime("%Y-%m-%d") if tipo_venta == "credito" else None
+        saldo_pendiente = total_usd if tipo_venta == "credito" else 0.0
+        estado_factura = "pendiente" if tipo_venta == "credito" else "pagada"
+
+        # Calculo de comisiones del vendedor sobre lo efectivamente aprobado
+        vendedor_id = ped_dict.get("vendedor_id")
+        comision_pct = 0.0
+        comision_monto_usd = 0.0
+        comision_estado = "PENDIENTE"
+        if vendedor_id:
+            cur.execute("SELECT id, porcentaje_comision_base FROM vendedores WHERE id = ? AND activo = 1", (vendedor_id,))
+            v_row = cur.fetchone()
+            if v_row:
+                comision_pct = float(v_row["porcentaje_comision_base"] or 0.0)
+                comision_monto_usd = round(subtotal * (comision_pct / 100.0), 2)
+                comision_estado = "DEVENGADA" if tipo_venta == "contado" else "PENDIENTE"
+
+        notas_fac = f"Facturado desde Pedido {ped_dict['numero_pedido']}."
+        if hubo_aprobacion_parcial:
+            notas_fac += " [Aprobacion Parcial / Backorder procesado]."
+        if notas_adicionales:
+            notas_fac += f" {notas_adicionales}"
+
+        # 1. Insertar Factura
+        cur.execute("""
+            INSERT INTO facturas (
+                numero_factura, cliente_id, subtotal, iva_total, total_usd, total,
+                tasa_ves, tasa_cop, total_ves, total_cop, estado, tipo_venta,
+                fecha_vencimiento, saldo_pendiente, notas, fecha,
+                vendedor_id, comision_porcentaje, comision_monto_usd, comision_estado, usuario_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            numero_factura, ped_dict["cliente_id"], subtotal, iva_total, total_usd, total_usd,
+            tasa_ves, tasa_cop, total_ves, total_cop, estado_factura, tipo_venta,
+            fecha_venc, saldo_pendiente, notas_fac, fecha_factura,
+            vendedor_id, comision_pct, comision_monto_usd, comision_estado, usuario_aprobador_id
+        ))
+        factura_id = cur.lastrowid
+
+        # 2. Insertar Detalles, Liberar Stock Comprometido, Descontar Stock Fisico y Kardex
+        for it in items_finales:
+            p_id = it["producto_id"]
+            cant_orig = it["cant_original"]
+            cant_aprob = it["cant_aprobada"]
+            pu = float(it["pu"])
+            it_sub = float(it["subtotal"])
+            iva_u = round(pu * (float(ped_dict.get("iva_porcentaje") or 16.0) / 100.0), 4) if it.get("impuesto_tipo") == "gravado" else 0.0
+            it_tot = float(it["total"])
+
+            costo_u = it.get("costo_cpp") or it.get("costo") or 0.0
+            costo_tot = round(float(costo_u) * float(cant_aprob), 4) if costo_u else None
+
+            # Actualizar en pedido_items la cantidad aprobada
+            cur.execute("""
+                UPDATE pedido_items
+                SET cantidad_aprobada = ?
+                WHERE id = ?
+            """, (float(cant_aprob), it["item_id"]))
+
+            # Liberar reserva de stock comprometido original
+            if it["tipo"] == "producto":
+                cur.execute("""
+                    UPDATE productos
+                    SET stock_comprometido = MAX(0.0, COALESCE(stock_comprometido, 0.0) - ?)
+                    WHERE id = ?
+                """, (float(cant_orig), p_id))
+
+            # Si se aprobo cantidad > 0, registrar en factura y descontar stock fisico
+            if cant_aprob > Decimal('0.0'):
+                cur.execute("""
+                    INSERT INTO factura_detalles (
+                        factura_id, producto_id, nombre_producto, tipo, impuesto_tipo,
+                        cantidad, precio_unitario, iva_unitario, subtotal, total,
+                        costo_unitario, costo_total
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    factura_id, p_id, it["nombre"], it.get("tipo", "producto"), it.get("impuesto_tipo", "exento"),
+                    float(cant_aprob), pu, iva_u, it_sub, it_tot,
+                    float(costo_u) if costo_u is not None else 0.0,
+                    float(costo_tot) if costo_tot is not None else 0.0
+                ))
+                factura_detalle_id = cur.lastrowid
+
+                if it["tipo"] == "producto":
+                    stock_ant = float(it["stock"] or 0.0)
+                    stock_nuevo = round(stock_ant - float(cant_aprob), 4)
+                    # Descuento fisico
+                    cur.execute("UPDATE productos SET stock = stock - ? WHERE id = ?", (float(cant_aprob), p_id))
+                    # Asiento en Kardex inmutable
+                    registrar_movimiento_inventario(
+                        cursor=cur,
+                        producto_id=p_id,
+                        fecha=fecha_factura,
+                        tipo_movimiento="venta",
+                        sentido="SALIDA",
+                        cantidad=float(cant_aprob),
+                        costo_unitario=float(costo_u),
+                        costo_total=costo_tot,
+                        stock_anterior=stock_ant,
+                        stock_nuevo=stock_nuevo,
+                        documento_tipo="factura",
+                        documento_id=factura_id,
+                        documento_numero=numero_factura,
+                        motivo=f"Venta aprobada de Pedido {ped_dict['numero_pedido']}" + (f" (Aprobacion parcial {float(cant_aprob)}/{float(cant_orig)})" if cant_aprob < cant_orig else ""),
+                        usuario_id=usuario_aprobador_id,
+                        documento_linea_id=factura_detalle_id
+                    )
+
+        # 3. Flujo Contable y Tesoreria alineado al motor oficial
+        if tipo_venta == "contado":
+            cur.execute("""
+                INSERT INTO factura_pagos (factura_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
+                VALUES (?, 'USD', ?, ?, 1.0, ?, ?)
+            """, (factura_id, metodo_pago_contado, total_usd, total_usd, f"Pago de contado Pedido {ped_dict['numero_pedido']}"))
+
+            # Asentar ingreso en movimientos_caja amarrado al turno activo
+            cur.execute("SELECT id FROM turnos_caja WHERE estado = 'ABIERTO' ORDER BY id DESC LIMIT 1")
+            t_open = cur.fetchone()
+            if t_open:
+                cur.execute("""
+                    INSERT INTO movimientos_caja (turno_id, tipo, concepto, metodo_pago, moneda, monto, referencia, factura_id_ref, created_at)
+                    VALUES (?, 'INGRESO', ?, ?, 'USD', ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    t_open["id"],
+                    f"Cobro Factura #{numero_factura} (Pedido {ped_dict['numero_pedido']})",
+                    metodo_pago_contado,
+                    total_usd,
+                    f"PED-{pedido_id}",
+                    factura_id
+                ))
+        else:
+            cur.execute("""
+                INSERT INTO cuentas_por_cobrar (
+                    factura_id, cliente_id, monto_total, monto_pagado, saldo_pendiente,
+                    fecha_emision, fecha_vencimiento, estado, notas
+                ) VALUES (?, ?, ?, 0.0, ?, ?, ?, 'pendiente', ?)
+            """, (factura_id, ped_dict["cliente_id"], total_usd, total_usd, fecha_factura, fecha_venc, f"Credito desde Pedido {ped_dict['numero_pedido']}"))
+
+        # 4. Actualizar Estado del Pedido
+        cur.execute("""
+            UPDATE pedidos
+            SET estado = 'FACTURADO', factura_id = ?, fecha_aprobacion = CURRENT_TIMESTAMP, aprobado_por_usuario_id = ?
+            WHERE id = ?
+        """, (factura_id, usuario_aprobador_id, pedido_id))
+
+        # 5. Registro de Auditoria
+        try:
+            cur.execute("""
+                INSERT INTO auditoria_seguridad (usuario_id, username, accion, modulo, detalles)
+                VALUES (?, (SELECT username FROM usuarios WHERE id = ?), 'APROBAR_Y_FACTURAR_PEDIDO', 'FUERZA_VENTAS', ?)
+            """, (usuario_aprobador_id, usuario_aprobador_id, f"Pedido {ped_dict['numero_pedido']} facturado con {numero_factura} por ${total_usd:.2f} USD (Reserva liberada)"))
+        except Exception:
+            pass
+
+        conn.commit()
+        schedule_cloud_sync()
+
+        return {
+            "success": True,
+            "pedido_id": pedido_id,
+            "factura_id": factura_id,
+            "numero_factura": numero_factura,
+            "total_usd": total_usd,
+            "tipo_venta": tipo_venta,
+            "comision_monto_usd": comision_monto_usd,
+            "comision_estado": comision_estado,
+            "hubo_aprobacion_parcial": hubo_aprobacion_parcial,
+            "mensaje": f"Pedido {ped_dict['numero_pedido']} aprobado y facturado exitosamente como {numero_factura}."
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+
+def rechazar_pedido(pedido_id, usuario_id=1, motivo='', conn=None):
+    """
+    Rechaza un pedido pendiente de aprobacion y LIBERA el stock_comprometido de vuelta a disponibilidad.
+    """
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        cur.execute("SELECT id, numero_pedido, estado FROM pedidos WHERE id = ?", (pedido_id,))
+        ped = cur.fetchone()
+        if not ped:
+            raise ValueError(f"Pedido ID {pedido_id} no encontrado")
+
+        if ped["estado"] == "FACTURADO":
+            raise ValueError("No se puede rechazar un pedido que ya ha sido facturado")
+
+        # Liberar stock comprometido
+        cur.execute("""
+            SELECT pi.producto_id, pi.cantidad, p.tipo
+            FROM pedido_items pi
+            JOIN productos p ON pi.producto_id = p.id
+            WHERE pi.pedido_id = ?
+        """, (pedido_id,))
+        items = [dict(r) for r in cur.fetchall()]
+
+        for it in items:
+            if it["tipo"] == "producto":
+                cur.execute("""
+                    UPDATE productos
+                    SET stock_comprometido = MAX(0.0, COALESCE(stock_comprometido, 0.0) - ?)
+                    WHERE id = ?
+                """, (float(it["cantidad"]), it["producto_id"]))
+
+        cur.execute("""
+            UPDATE pedidos
+            SET estado = 'RECHAZADO', motivo_rechazo = ?, fecha_aprobacion = CURRENT_TIMESTAMP, aprobado_por_usuario_id = ?
+            WHERE id = ?
+        """, (motivo or 'Rechazado por Administracion', usuario_id, pedido_id))
+
+        try:
+            cur.execute("""
+                INSERT INTO auditoria_seguridad (usuario_id, username, accion, modulo, detalles)
+                VALUES (?, (SELECT username FROM usuarios WHERE id = ?), 'RECHAZAR_PEDIDO', 'FUERZA_VENTAS', ?)
+            """, (usuario_id, usuario_id, f"Pedido {ped['numero_pedido']} rechazado. Stock comprometido liberado. Motivo: {motivo}"))
+        except Exception:
+            pass
+
+        conn.commit()
+        schedule_cloud_sync()
+
+        return {
+            "success": True,
+            "pedido_id": pedido_id,
+            "mensaje": f"Pedido {ped['numero_pedido']} rechazado y mercancia liberada."
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
 if __name__ == "__main__":
     init_db()
     print("Base de datos inicializada correctamente.")
+
+
+# ==============================================================================
+# MOTOR DE FORMATOS PARAMETRIZADOS POR TENANT (FASE 3C)
+# ==============================================================================
+def obtener_config_impresion(tenant_id=1, conn=None):
+    """
+    Retorna la configuración de formatos de impresión para un tenant.
+    Si no existe registro, crea uno con los valores por defecto.
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tenant_config_impresion WHERE tenant_id = ?", (tenant_id,))
+        row = cursor.fetchone()
+        if not row:
+            cursor.execute("""
+                INSERT INTO tenant_config_impresion (
+                    tenant_id, color_primario, mostrar_sku, mostrar_vendedor, mostrar_descuento_linea,
+                    logo_alineacion, texto_footer_factura, texto_header_ticket, texto_footer_ticket
+                ) VALUES (
+                    ?, '#0f172a', 1, 1, 1, 'centro',
+                    'Gracias por su compra. Conserve esta factura como comprobante de garantía.',
+                    '*** COMPROBANTE DE COMPRA ***',
+                    '*** GRACIAS POR SU PREFERENCIA ***'
+                )
+            """, (tenant_id,))
+            conn.commit()
+            cursor.execute("SELECT * FROM tenant_config_impresion WHERE tenant_id = ?", (tenant_id,))
+            row = cursor.fetchone()
+        res = dict(row)
+        res["mostrar_sku"] = bool(res.get("mostrar_sku", 1))
+        res["mostrar_vendedor"] = bool(res.get("mostrar_vendedor", 1))
+        res["mostrar_descuento_linea"] = bool(res.get("mostrar_descuento_linea", 1))
+        return res
+    finally:
+        if should_close:
+            conn.close()
+
+def guardar_config_impresion(datos, tenant_id=1, conn=None):
+    """
+    Actualiza la configuración de formatos de impresión de un tenant.
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    try:
+        cursor = conn.cursor()
+        color_primario = (datos.get("color_primario") or "#0f172a").strip()
+        mostrar_sku = 1 if datos.get("mostrar_sku", True) else 0
+        mostrar_vendedor = 1 if datos.get("mostrar_vendedor", True) else 0
+        mostrar_descuento_linea = 1 if datos.get("mostrar_descuento_linea", True) else 0
+        logo_alineacion = (datos.get("logo_alineacion") or "centro").strip().lower()
+        if logo_alineacion not in ("izquierda", "centro", "derecha"):
+            logo_alineacion = "centro"
+        texto_footer_factura = datos.get("texto_footer_factura", "Gracias por su compra. Conserve esta factura como comprobante de garantía.")
+        texto_header_ticket = datos.get("texto_header_ticket", "*** COMPROBANTE DE COMPRA ***")
+        texto_footer_ticket = datos.get("texto_footer_ticket", "*** GRACIAS POR SU PREFERENCIA ***")
+
+        cursor.execute("SELECT id FROM tenant_config_impresion WHERE tenant_id = ?", (tenant_id,))
+        existe = cursor.fetchone()
+        if existe:
+            cursor.execute("""
+                UPDATE tenant_config_impresion
+                SET color_primario = ?,
+                    mostrar_sku = ?,
+                    mostrar_vendedor = ?,
+                    mostrar_descuento_linea = ?,
+                    logo_alineacion = ?,
+                    texto_footer_factura = ?,
+                    texto_header_ticket = ?,
+                    texto_footer_ticket = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE tenant_id = ?
+            """, (
+                color_primario, mostrar_sku, mostrar_vendedor, mostrar_descuento_linea,
+                logo_alineacion, texto_footer_factura, texto_header_ticket, texto_footer_ticket,
+                tenant_id
+            ))
+        else:
+            cursor.execute("""
+                INSERT INTO tenant_config_impresion (
+                    tenant_id, color_primario, mostrar_sku, mostrar_vendedor, mostrar_descuento_linea,
+                    logo_alineacion, texto_footer_factura, texto_header_ticket, texto_footer_ticket
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                tenant_id, color_primario, mostrar_sku, mostrar_vendedor, mostrar_descuento_linea,
+                logo_alineacion, texto_footer_factura, texto_header_ticket, texto_footer_ticket
+            ))
+        conn.commit()
+        return obtener_config_impresion(tenant_id=tenant_id, conn=conn)
+    finally:
+        if should_close:
+            conn.close()
+
+
+# ==============================================================================
+# MÓDULO DE CONTROL DE CAJA (APERTURA, ARQUEO, MOVIMIENTOS Y CIERRE Z)
+# Estándar ERP con Principio de Cierre Ciego y Multimoneda (USD, VES, COP)
+# ==============================================================================
+
+def normalizar_metodo_moneda_caja(metodo, moneda):
+    metodo = (metodo or '').strip().lower()
+    moneda = (moneda or 'USD').strip().upper()
+
+    if moneda == 'USD':
+        if 'zelle' in metodo:
+            return 'zelle_usd'
+        elif 'transfer' in metodo or 'banco' in metodo:
+            return 'transferencia_usd'
+        elif 'efectivo' in metodo or 'dolar' in metodo or 'dólar' in metodo or 'cash' in metodo:
+            return 'efectivo_usd'
+        else:
+            return 'otros_usd'
+    elif moneda == 'VES':
+        if 'movil' in metodo or 'móvil' in metodo:
+            return 'pago_movil_ves'
+        elif 'punto' in metodo or 'debito' in metodo or 'débito' in metodo or 'tarjeta' in metodo or 'pos' in metodo:
+            return 'punto_venta_ves'
+        elif 'transfer' in metodo or 'banco' in metodo:
+            return 'transferencia_ves'
+        elif 'efectivo' in metodo or 'bolivar' in metodo or 'bolívar' in metodo or 'cash' in metodo:
+            return 'efectivo_ves'
+        else:
+            return 'otros_ves'
+    elif moneda == 'COP':
+        if 'transfer' in metodo or 'banco' in metodo:
+            return 'transferencia_cop'
+        elif 'efectivo' in metodo or 'peso' in metodo or 'cash' in metodo:
+            return 'efectivo_cop'
+        else:
+            return 'otros_cop'
+    else:
+        return 'otros'
+
+
+def obtener_cajas(tenant_id=1, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM cajas WHERE tenant_id = ? AND is_active = 1 ORDER BY id ASC", (tenant_id,))
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        if close_after:
+            conn.close()
+
+
+def obtener_turno_activo(usuario_id=None, caja_id=None, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        query = """
+            SELECT t.*, c.nombre as caja_nombre, u.username, u.nombre_completo as usuario_nombre
+            FROM turnos_caja t
+            LEFT JOIN cajas c ON t.caja_id = c.id
+            LEFT JOIN usuarios u ON t.usuario_id = u.id
+            WHERE t.estado = 'ABIERTO'
+        """
+        params = []
+        if usuario_id is not None and caja_id is not None:
+            query += " AND t.caja_id = ? AND (t.usuario_id = ? OR t.usuario_id = 1)"
+            params.extend([caja_id, usuario_id])
+        elif usuario_id is not None:
+            query += " AND (t.usuario_id = ? OR t.usuario_id = 1)"
+            params.append(usuario_id)
+        elif caja_id is not None:
+            query += " AND t.caja_id = ?"
+            params.append(caja_id)
+
+        query += " ORDER BY t.id DESC LIMIT 1"
+        cur.execute(query, params)
+        row = cur.fetchone()
+        if not row:
+            # Si no encontró por usuario específico, buscar cualquier turno ABIERTO general en la caja principal
+            cur.execute("""
+                SELECT t.*, c.nombre as caja_nombre, u.username, u.nombre_completo as usuario_nombre
+                FROM turnos_caja t
+                LEFT JOIN cajas c ON t.caja_id = c.id
+                LEFT JOIN usuarios u ON t.usuario_id = u.id
+                WHERE t.estado = 'ABIERTO'
+                ORDER BY t.id DESC LIMIT 1
+            """)
+            row = cur.fetchone()
+
+        if row:
+            d = dict(row)
+            # Contar movimientos actuales
+            cur.execute("""
+                SELECT 
+                    COUNT(*) as total_movs,
+                    COALESCE(SUM(CASE WHEN tipo = 'INGRESO' AND moneda = 'USD' THEN monto ELSE 0 END), 0.0) as ing_usd,
+                    COALESCE(SUM(CASE WHEN tipo = 'INGRESO' AND moneda = 'VES' THEN monto ELSE 0 END), 0.0) as ing_ves,
+                    COALESCE(SUM(CASE WHEN tipo = 'INGRESO' AND moneda = 'COP' THEN monto ELSE 0 END), 0.0) as ing_cop,
+                    COALESCE(SUM(CASE WHEN tipo = 'EGRESO' AND moneda = 'USD' THEN monto ELSE 0 END), 0.0) as egr_usd,
+                    COALESCE(SUM(CASE WHEN tipo = 'EGRESO' AND moneda = 'VES' THEN monto ELSE 0 END), 0.0) as egr_ves,
+                    COALESCE(SUM(CASE WHEN tipo = 'EGRESO' AND moneda = 'COP' THEN monto ELSE 0 END), 0.0) as egr_cop
+                FROM movimientos_caja
+                WHERE turno_id = ?
+            """, (d["id"],))
+            s = dict(cur.fetchone())
+            d["total_movimientos"] = s["total_movs"]
+            d["total_ingresos_usd"] = round(s["ing_usd"], 2)
+            d["total_ingresos_ves"] = round(s["ing_ves"], 2)
+            d["total_ingresos_cop"] = round(s["ing_cop"], 2)
+            d["total_egresos_usd"] = round(s["egr_usd"], 2)
+            d["total_egresos_ves"] = round(s["egr_ves"], 2)
+            d["total_egresos_cop"] = round(s["egr_cop"], 2)
+            return d
+        return None
+    finally:
+        if close_after:
+            conn.close()
+
+
+def abrir_turno_caja(datos, usuario_id=1, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        caja_id = int(datos.get("caja_id", 1) or 1)
+        fondo_inicial_usd = float(datos.get("fondo_inicial_usd", 0.0) or 0.0)
+        fondo_inicial_ves = float(datos.get("fondo_inicial_ves", 0.0) or 0.0)
+        notas = (datos.get("notas") or "").strip()
+
+        # Verificar si ya existe un turno abierto para esta caja
+        cur.execute("SELECT id FROM turnos_caja WHERE caja_id = ? AND estado = 'ABIERTO'", (caja_id,))
+        existente = cur.fetchone()
+        if existente:
+            raise ValueError(f"Ya existe un turno de caja abierto (Turno #{existente['id']}) para esta caja.")
+
+        cur.execute("""
+            INSERT INTO turnos_caja (
+                tenant_id, caja_id, usuario_id, fondo_inicial_usd, fondo_inicial_ves,
+                estado, notas, fecha_apertura
+            ) VALUES (?, ?, ?, ?, ?, 'ABIERTO', ?, CURRENT_TIMESTAMP)
+        """, (1, caja_id, usuario_id, fondo_inicial_usd, fondo_inicial_ves, notas))
+        turno_id = cur.lastrowid
+
+        # Si hay fondos iniciales, registrarlos como movimientos de apertura
+        if fondo_inicial_usd > 0:
+            cur.execute("""
+                INSERT INTO movimientos_caja (turno_id, tipo, concepto, metodo_pago, moneda, monto, referencia)
+                VALUES (?, 'INGRESO', 'Fondo Inicial de Caja USD', 'Efectivo USD', 'USD', ?, 'APERTURA')
+            """, (turno_id, fondo_inicial_usd))
+
+        if fondo_inicial_ves > 0:
+            cur.execute("""
+                INSERT INTO movimientos_caja (turno_id, tipo, concepto, metodo_pago, moneda, monto, referencia)
+                VALUES (?, 'INGRESO', 'Fondo Inicial de Caja VES', 'Efectivo VES', 'VES', ?, 'APERTURA')
+            """, (turno_id, fondo_inicial_ves))
+
+        # Auditoría
+        try:
+            cur.execute("""
+                INSERT INTO auditoria_seguridad (usuario_id, username, accion, modulo, detalles)
+                VALUES (?, (SELECT username FROM usuarios WHERE id = ?), 'APERTURA_CAJA', 'TESORERIA', ?)
+            """, (usuario_id, usuario_id, f"Apertura de turno #{turno_id} en Caja #{caja_id}. Fondo USD: ${fondo_inicial_usd:.2f}, VES: Bs.{fondo_inicial_ves:.2f}"))
+        except Exception:
+            pass
+
+        conn.commit()
+        return obtener_turno_activo(usuario_id=usuario_id, caja_id=caja_id, conn=conn)
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+
+def registrar_movimiento_caja(datos, usuario_id=1, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        turno_id = datos.get("turno_id")
+        if not turno_id:
+            turno_act = obtener_turno_activo(usuario_id=usuario_id, conn=conn)
+            if not turno_act:
+                raise ValueError("No hay un turno de caja abierto para registrar el movimiento.")
+            turno_id = turno_act["id"]
+        else:
+            turno_id = int(turno_id)
+            cur.execute("SELECT id, estado FROM turnos_caja WHERE id = ?", (turno_id,))
+            t_row = cur.fetchone()
+            if not t_row:
+                raise ValueError(f"Turno de caja #{turno_id} no encontrado.")
+            if t_row["estado"] != "ABIERTO":
+                raise ValueError(f"El turno de caja #{turno_id} no está abierto.")
+
+        tipo = (datos.get("tipo") or "EGRESO").strip().upper()
+        if tipo not in ("INGRESO", "EGRESO"):
+            raise ValueError(f"Tipo de movimiento inválido: '{tipo}'. Debe ser 'INGRESO' o 'EGRESO'.")
+
+        concepto = (datos.get("concepto") or "").strip()
+        if not concepto:
+            raise ValueError("El concepto o descripción del movimiento es obligatorio.")
+
+        metodo_pago = (datos.get("metodo_pago") or "Efectivo").strip()
+        moneda = (datos.get("moneda") or "USD").strip().upper()
+        if moneda not in ("USD", "VES", "COP"):
+            raise ValueError(f"Moneda inválida: '{moneda}'. Solo se admite 'USD', 'VES' o 'COP'.")
+
+        monto = float(datos.get("monto", 0.0) or 0.0)
+        if monto <= 0.0:
+            raise ValueError("El monto del movimiento debe ser estrictamente mayor a 0.00.")
+
+        referencia = (datos.get("referencia") or "").strip()
+        factura_id_ref = datos.get("factura_id_ref")
+        if factura_id_ref is not None:
+            try:
+                factura_id_ref = int(factura_id_ref)
+            except Exception:
+                factura_id_ref = None
+
+        cur.execute("""
+            INSERT INTO movimientos_caja (
+                turno_id, tipo, concepto, metodo_pago, moneda, monto, referencia, factura_id_ref, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (turno_id, tipo, concepto, metodo_pago, moneda, monto, referencia, factura_id_ref))
+        mov_id = cur.lastrowid
+
+        # Auditoría
+        try:
+            cur.execute("""
+                INSERT INTO auditoria_seguridad (usuario_id, username, accion, modulo, detalles)
+                VALUES (?, (SELECT username FROM usuarios WHERE id = ?), 'MOVIMIENTO_CAJA', 'TESORERIA', ?)
+            """, (usuario_id, usuario_id, f"{tipo} Turno #{turno_id}: {concepto} por {monto:.2f} {moneda} ({metodo_pago})"))
+        except Exception:
+            pass
+
+        conn.commit()
+        return {
+            "success": True,
+            "id": mov_id,
+            "turno_id": turno_id,
+            "tipo": tipo,
+            "concepto": concepto,
+            "metodo_pago": metodo_pago,
+            "moneda": moneda,
+            "monto": monto,
+            "referencia": referencia,
+            "factura_id_ref": factura_id_ref
+        }
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+
+def cerrar_turno_caja_ciego(declarado, usuario_id=1, turno_id=None, notas='', conn=None):
+    """
+    Cierre Ciego de Turno de Caja (Estándar ERP TAVO CLOUD):
+    - El cajero ingresa ÚNICAMENTE lo que tiene contado en físico (declarado).
+    - El backend calcula de manera hermética e inmutable el saldo esperado teórico.
+    - Se genera el JSON de diferencias (EXACTO, SOBRANTE, FALTANTE) por método y por moneda.
+    - Se cierra el turno con timestamp UTC/local inmutable.
+    """
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+
+        if turno_id is None:
+            cur.execute("SELECT * FROM turnos_caja WHERE estado = 'ABIERTO' ORDER BY id DESC LIMIT 1")
+            t_row = cur.fetchone()
+            if not t_row:
+                raise ValueError("No se encontró ningún turno de caja abierto para cerrar.")
+            turno_id = t_row["id"]
+        else:
+            cur.execute("SELECT * FROM turnos_caja WHERE id = ?", (turno_id,))
+            t_row = cur.fetchone()
+            if not t_row:
+                raise ValueError(f"Turno de caja #{turno_id} no encontrado.")
+            if t_row["estado"] != "ABIERTO":
+                raise ValueError(f"El turno de caja #{turno_id} ya se encuentra cerrado.")
+
+        t_dict = dict(t_row)
+        fondo_usd = float(t_dict.get("fondo_inicial_usd", 0.0) or 0.0)
+        fondo_ves = float(t_dict.get("fondo_inicial_ves", 0.0) or 0.0)
+
+        # Cargar todos los movimientos del turno (excluyendo registros duplicados de APERTURA si ya están en fondo inicial)
+        cur.execute("""
+            SELECT * FROM movimientos_caja 
+            WHERE turno_id = ? AND referencia != 'APERTURA'
+            ORDER BY id ASC
+        """, (turno_id,))
+        movs = [dict(r) for r in cur.fetchall()]
+
+        # Calcular totales esperados teóricos
+        esperados_metodo = {
+            'efectivo_usd': fondo_usd,
+            'efectivo_ves': fondo_ves,
+            'efectivo_cop': 0.0,
+            'pago_movil_ves': 0.0,
+            'punto_venta_ves': 0.0,
+            'zelle_usd': 0.0,
+            'transferencia_ves': 0.0,
+            'transferencia_usd': 0.0,
+            'transferencia_cop': 0.0,
+            'otros_usd': 0.0,
+            'otros_ves': 0.0,
+            'otros_cop': 0.0,
+        }
+
+        resumen_ventas = {
+            'total_ingresos_usd': 0.0,
+            'total_ingresos_ves': 0.0,
+            'total_ingresos_cop': 0.0,
+            'total_egresos_usd': 0.0,
+            'total_egresos_ves': 0.0,
+            'total_egresos_cop': 0.0,
+            'cantidad_ingresos': 0,
+            'cantidad_egresos': 0,
+            'cantidad_ventas': 0
+        }
+
+        facturas_vistas = set()
+
+        for m in movs:
+            norm_key = normalizar_metodo_moneda_caja(m['metodo_pago'], m['moneda'])
+            monto = float(m['monto'])
+            moneda = m['moneda']
+            if norm_key not in esperados_metodo:
+                esperados_metodo[norm_key] = 0.0
+
+            if m['tipo'] == 'INGRESO':
+                esperados_metodo[norm_key] += monto
+                if moneda == 'USD': resumen_ventas['total_ingresos_usd'] += monto
+                elif moneda == 'VES': resumen_ventas['total_ingresos_ves'] += monto
+                elif moneda == 'COP': resumen_ventas['total_ingresos_cop'] += monto
+                resumen_ventas['cantidad_ingresos'] += 1
+                if m.get('factura_id_ref') and m['factura_id_ref'] not in facturas_vistas:
+                    facturas_vistas.add(m['factura_id_ref'])
+                    resumen_ventas['cantidad_ventas'] += 1
+            elif m['tipo'] == 'EGRESO':
+                esperados_metodo[norm_key] -= monto
+                if moneda == 'USD': resumen_ventas['total_egresos_usd'] += monto
+                elif moneda == 'VES': resumen_ventas['total_egresos_ves'] += monto
+                elif moneda == 'COP': resumen_ventas['total_egresos_cop'] += monto
+                resumen_ventas['cantidad_egresos'] += 1
+
+        # Redondear esperados
+        for k in esperados_metodo:
+            esperados_metodo[k] = round(esperados_metodo[k], 2)
+
+        # Procesar valores declarados por el cajero
+        if not isinstance(declarado, dict):
+            declarado = {}
+
+        declarados_metodo = {}
+        diferencias_metodo = {}
+
+        todas_llaves = set(list(esperados_metodo.keys()) + list(declarado.keys()))
+        for k in sorted(todas_llaves):
+            esp = round(esperados_metodo.get(k, 0.0), 2)
+            # Manejo flexible de llaves declaradas
+            dec_raw = declarado.get(k)
+            if dec_raw is None:
+                # Intentar buscar sin sufijo si aplica
+                dec_raw = 0.0
+            dec = round(float(dec_raw or 0.0), 2)
+            declarados_metodo[k] = dec
+            dif = round(dec - esp, 2)
+            if dif == 0.0:
+                est = 'EXACTO'
+            elif dif > 0.0:
+                est = 'SOBRANTE'
+            else:
+                est = 'FALTANTE'
+
+            diferencias_metodo[k] = {
+                'esperado': esp,
+                'declarado': dec,
+                'diferencia': dif,
+                'estado': est
+            }
+
+        # Consolidado por moneda
+        totales_moneda = {
+            'USD': {'esperado': 0.0, 'declarado': 0.0, 'diferencia': 0.0, 'estado': 'EXACTO'},
+            'VES': {'esperado': 0.0, 'declarado': 0.0, 'diferencia': 0.0, 'estado': 'EXACTO'},
+            'COP': {'esperado': 0.0, 'declarado': 0.0, 'diferencia': 0.0, 'estado': 'EXACTO'}
+        }
+
+        for k, v in diferencias_metodo.items():
+            if k.endswith('_usd'): mon = 'USD'
+            elif k.endswith('_ves'): mon = 'VES'
+            elif k.endswith('_cop'): mon = 'COP'
+            else: continue
+            totales_moneda[mon]['esperado'] += v['esperado']
+            totales_moneda[mon]['declarado'] += v['declarado']
+
+        for mon in totales_moneda:
+            esp = round(totales_moneda[mon]['esperado'], 2)
+            dec = round(totales_moneda[mon]['declarado'], 2)
+            dif = round(dec - esp, 2)
+            totales_moneda[mon]['esperado'] = esp
+            totales_moneda[mon]['declarado'] = dec
+            totales_moneda[mon]['diferencia'] = dif
+            if dif == 0.0: totales_moneda[mon]['estado'] = 'EXACTO'
+            elif dif > 0.0: totales_moneda[mon]['estado'] = 'SOBRANTE'
+            else: totales_moneda[mon]['estado'] = 'FALTANTE'
+
+        totales_esperados_payload = {
+            'por_metodo': esperados_metodo,
+            'totales_moneda': {m: totales_moneda[m]['esperado'] for m in totales_moneda},
+            'resumen': resumen_ventas,
+            'fondo_inicial_usd': fondo_usd,
+            'fondo_inicial_ves': fondo_ves
+        }
+
+        totales_declarados_payload = {
+            'por_metodo': declarados_metodo,
+            'totales_moneda': {m: totales_moneda[m]['declarado'] for m in totales_moneda}
+        }
+
+        diferencias_payload = {
+            'por_metodo': diferencias_metodo,
+            'totales_moneda': totales_moneda
+        }
+
+        esp_json = json.dumps(totales_esperados_payload, ensure_ascii=False)
+        dec_json = json.dumps(totales_declarados_payload, ensure_ascii=False)
+        dif_json = json.dumps(diferencias_payload, ensure_ascii=False)
+
+        cur.execute("""
+            UPDATE turnos_caja
+            SET estado = 'CERRADO',
+                fecha_cierre = CURRENT_TIMESTAMP,
+                totales_esperados_json = ?,
+                totales_declarados_json = ?,
+                diferencias_json = ?,
+                notas = ?
+            WHERE id = ?
+        """, (esp_json, dec_json, dif_json, notas, turno_id))
+
+        # Auditoría
+        try:
+            cur.execute("""
+                INSERT INTO auditoria_seguridad (usuario_id, username, accion, modulo, detalles)
+                VALUES (?, (SELECT username FROM usuarios WHERE id = ?), 'CIERRE_CAJA_Z', 'TESORERIA', ?)
+            """, (usuario_id, usuario_id, f"Cierre Z de turno #{turno_id}. Cuadre USD: {totales_moneda['USD']['estado']} ({totales_moneda['USD']['diferencia']:+.2f}), VES: {totales_moneda['VES']['estado']} ({totales_moneda['VES']['diferencia']:+.2f})"))
+        except Exception:
+            pass
+
+        conn.commit()
+        return obtener_reporte_cierre_z(turno_id=turno_id, conn=conn)
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        if close_after:
+            conn.close()
+
+
+def obtener_movimientos_caja(turno_id=None, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        if turno_id is not None:
+            cur.execute("""
+                SELECT m.*, f.numero_factura, c.nombre as cliente_nombre
+                FROM movimientos_caja m
+                LEFT JOIN facturas f ON m.factura_id_ref = f.id
+                LEFT JOIN clientes c ON f.cliente_id = c.id
+                WHERE m.turno_id = ?
+                ORDER BY m.id DESC
+            """, (turno_id,))
+        else:
+            cur.execute("""
+                SELECT m.*, f.numero_factura, c.nombre as cliente_nombre
+                FROM movimientos_caja m
+                LEFT JOIN facturas f ON m.factura_id_ref = f.id
+                LEFT JOIN clientes c ON f.cliente_id = c.id
+                ORDER BY m.id DESC LIMIT 100
+            """)
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        if close_after:
+            conn.close()
+
+
+def obtener_reporte_cierre_z(turno_id, conn=None):
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT t.*, c.nombre as caja_nombre, u.username, u.nombre_completo as usuario_nombre
+            FROM turnos_caja t
+            LEFT JOIN cajas c ON t.caja_id = c.id
+            LEFT JOIN usuarios u ON t.usuario_id = u.id
+            WHERE t.id = ?
+        """, (turno_id,))
+        t_row = cur.fetchone()
+        if not t_row:
+            raise ValueError(f"Turno de caja #{turno_id} no encontrado")
+
+        turno = dict(t_row)
+        esperados = json.loads(turno["totales_esperados_json"] or "{}") if turno.get("totales_esperados_json") else {}
+        declarados = json.loads(turno["totales_declarados_json"] or "{}") if turno.get("totales_declarados_json") else {}
+        diferencias = json.loads(turno["diferencias_json"] or "{}") if turno.get("diferencias_json") else {}
+
+        # Movimientos del turno
+        cur.execute("""
+            SELECT m.*, f.numero_factura, c.nombre as cliente_nombre
+            FROM movimientos_caja m
+            LEFT JOIN facturas f ON m.factura_id_ref = f.id
+            LEFT JOIN clientes c ON f.cliente_id = c.id
+            WHERE m.turno_id = ?
+            ORDER BY m.id ASC
+        """, (turno_id,))
+        movimientos = [dict(r) for r in cur.fetchall()]
+
+        # Facturas cobradas en el turno
+        cur.execute("""
+            SELECT DISTINCT f.id, f.numero_factura, f.fecha, f.total_usd, f.tipo_venta, c.nombre as cliente_nombre
+            FROM movimientos_caja m
+            JOIN facturas f ON m.factura_id_ref = f.id
+            LEFT JOIN clientes c ON f.cliente_id = c.id
+            WHERE m.turno_id = ? AND m.tipo = 'INGRESO'
+            ORDER BY f.id ASC
+        """, (turno_id,))
+        facturas = [dict(r) for r in cur.fetchall()]
+
+        return {
+            "success": True,
+            "turno": turno,
+            "esperados": esperados,
+            "declarados": declarados,
+            "diferencias": diferencias,
+            "movimientos": movimientos,
+            "facturas": facturas,
+            "fecha_reporte": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+    finally:
+        if close_after:
+            conn.close()
