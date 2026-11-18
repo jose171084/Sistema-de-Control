@@ -1,10 +1,12 @@
-<!-- login_modal.html -->
+<!-- login_modal.html (enhanced) -->
 <div id="login-modal" class="modal" aria-hidden="true" role="dialog" aria-labelledby="login-title">
+  <div class="modal-backdrop" aria-hidden="true"></div>
   <div class="modal-content" role="document">
+    <img src="logo.png" alt="TAVO CLOUD ERP" class="logo" />
     <h2 id="login-title" class="modal-title">Iniciar sesión</h2>
     <form id="login-form" novalidate>
       <div class="form-group">
-        <label for="login-email">Correo electrónico o usuario</label>
+        <label for="login-email">Usuario o correo electrónico</label>
         <input type="text" id="login-email" name="email" autocomplete="username" required />
         <span class="error" aria-live="polite"></span>
       </div>
