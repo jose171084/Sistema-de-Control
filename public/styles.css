@@ -1636,3 +1636,90 @@ body.hide-anular .btn-anular-transaccion,
 body.hide-anular [data-perm="anular_transacciones"] {
   display: none !important;
 }
+
+
+/* ========================================================
+   PORTAL DE ACCESO CORPORATIVO FAIL-CLOSED (TAVO CLOUD)
+   Oculta herméticamente el workspace ERP hasta validar sesión
+   ======================================================== */
+body.auth-locked #appSidebar,
+body.auth-locked .app-main-wrapper,
+body.auth-locked #sidebarBackdrop,
+body.auth-locked #mobileBottomNav {
+  display: none !important;
+}
+
+body.auth-locked {
+  background-color: #071B49 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  display: block !important;
+}
+
+#modalLogin.hidden {
+  display: none !important;
+}
+
+.tavo-login-portal {
+  background-color: #F5F8FC;
+}
+
+.tavo-login-hero {
+  background: radial-gradient(circle at 18% 20%, rgba(0, 198, 232, 0.18) 0%, transparent 45%),
+              radial-gradient(circle at 82% 78%, rgba(8, 127, 232, 0.28) 0%, transparent 50%),
+              linear-gradient(145deg, #040F2B 0%, #071B49 48%, #0A2766 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.tavo-login-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse at center, black 40%, transparent 90%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 90%);
+  pointer-events: none;
+}
+
+.tavo-login-form-bg {
+  background-color: #F5F8FC;
+  background-image: radial-gradient(rgba(7, 85, 201, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+#modalLogin input.tavo-login-input {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease !important;
+}
+
+#modalLogin input.tavo-login-input:focus {
+  outline: none !important;
+  background-color: #ffffff !important;
+  border-color: #0755C9 !important;
+  box-shadow: 0 0 0 4px rgba(7, 85, 201, 0.14) !important;
+}
+
+@keyframes tavoLoginShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+.login-shake {
+  animation: tavoLoginShake 0.36s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes tavoFadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tavo-login-card-enter {
+  animation: tavoFadeUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+

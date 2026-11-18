@@ -36,8 +36,12 @@ window.fetch = function(url, options = {}) {
       localStorage.removeItem('tavo_auth_token');
       localStorage.removeItem('tavo_csrf_token');
       AppState.usuarioActual = null;
+      if (typeof window._resetWorkspaceBootFlag === 'function') {
+        window._resetWorkspaceBootFlag();
+      }
+      document.body.classList.add('auth-locked');
       if (typeof openLoginModal === 'function') {
-        openLoginModal();
+        openLoginModal('Su sesión expiró o fue cerrada por seguridad. Inicie sesión nuevamente.');
       }
     }
     return response;
@@ -281,21 +285,9 @@ const DEFAULT_LABELS = {
 };
 
 // ========================================================
-// INICIALIZACIÓN
+// INICIALIZACIÓN SEGURA FAIL-CLOSED
 // ========================================================
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadConfig();
-  initPersonalizacion();
-  await loadCategorias();
-  await loadProductos();
-  await loadClientes();
-  await loadProveedores();
-  await loadDashboard();
-  await loadDatabaseStatus();
-  initRolUsuario();
-  initAuth();
-  cargarVendedoresEnPos();
-
   // Fecha por defecto en compras (hoy)
   const today = new Date().toISOString().split('T')[0];
   const compraFechaInput = document.getElementById('compraFecha');
@@ -304,19 +296,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Iniciar con un pago por defecto en efectivo USD para mayor comodidad
   initDefaultPosPago();
 
-  // Sincronizar automáticamente tasas oficiales SÓLO SI el modo automático está activado
-  try {
-    const modoAuto = !AppState.config || AppState.config.sincronizacion_tasas_auto !== 0;
-    if (modoAuto) {
-      const hoyStr = new Date().toISOString().split('T')[0];
-      const fechaActualizacion = (AppState.config && AppState.config.fecha_tasas_actualizacion) || '';
-      if (!fechaActualizacion.startsWith(hoyStr)) {
-        sincronizarTasasOficiales(true);
-      }
-    } else {
-      console.log('Modo manual de tasas activo: se preservan las tasas configuradas por el usuario.');
-    }
-  } catch(e) {}
+  // Cargar configuración pública sanitizada para branding del portal (sin invocar endpoints protegidos)
+  loadConfig().then(() => {
+    initPersonalizacion();
+  }).catch(() => {});
+
+  // Verificar sesión antes de exponer el espacio de trabajo o disparar rutas protegidas
+  await initAuth();
 
   // Cerrar lista flotante de clientes en POS y facturas en Devoluciones al hacer clic afuera
   document.addEventListener('click', (e) => {
@@ -943,7 +929,7 @@ async function loadConfig() {
       AppState.config = data;
       updateConfigUI();
     }
-    if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.cargarConfigImpresion === 'function') {
+    if (AppState.usuarioActual && typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.cargarConfigImpresion === 'function') {
       AppState.configImpresion = await MasterReportLayout.cargarConfigImpresion();
     }
   } catch (err) {
@@ -959,6 +945,25 @@ function updateConfigUI() {
   if (hName) hName.textContent = businessName;
   const sName = document.getElementById('sidebarBusinessName');
   if (sName) sName.textContent = businessName;
+
+  // Hidratación del Portal de Acceso Corporativo (Tenant Branding Público)
+  const loginTenantName = document.getElementById('loginTenantName');
+  if (loginTenantName) loginTenantName.textContent = businessName;
+  const loginTenantNameMob = document.getElementById('loginTenantNameMobile');
+  if (loginTenantNameMob) loginTenantNameMob.textContent = businessName;
+  const loginTenantLogo = document.getElementById('loginTenantLogo');
+  const loginTenantLogoFallback = document.getElementById('loginTenantLogoFallback');
+  if (loginTenantLogo && loginTenantLogoFallback) {
+    if (cfg.logo_url) {
+      loginTenantLogo.src = cfg.logo_url;
+      loginTenantLogo.classList.remove('hidden');
+      loginTenantLogoFallback.classList.add('hidden');
+    } else {
+      loginTenantLogo.classList.add('hidden');
+      loginTenantLogoFallback.classList.remove('hidden');
+    }
+  }
+
   // Hidratación Multi-Tenant del Logotipo de la Empresa
   const logoPlaceholders = document.querySelectorAll('#businessLogoPlaceholder, .businessLogoImg');
   const defaultBrandIcon = document.getElementById('defaultBrandIcon');
@@ -17310,8 +17315,52 @@ window.verPdfEnPantalla = verPdfEnPantalla;
 // ==============================================================================
 // GESTIÓN DE SEGURIDAD, AUTENTICACIÓN Y PERMISOS RBAC (OWASP COMPLIANT)
 // ==============================================================================
+let _workspaceBooted = false;
+window._resetWorkspaceBootFlag = function() { _workspaceBooted = false; };
+
+async function bootAuthenticatedWorkspace() {
+  if (_workspaceBooted || !AppState.usuarioActual) return;
+  _workspaceBooted = true;
+  try {
+    await loadConfig();
+    initPersonalizacion();
+    initRolUsuario();
+    actualizarUIUsuarioYPermisos();
+    await Promise.allSettled([
+      loadCategorias(),
+      loadProductos(),
+      loadClientes(),
+      loadProveedores(),
+      loadDashboard(),
+      loadDatabaseStatus(),
+      cargarVendedoresEnPos(),
+      typeof actualizarEstadoCajaPOS === 'function' ? actualizarEstadoCajaPOS() : Promise.resolve()
+    ]);
+
+    // Sincronizar tasas oficiales sólo tras autenticar si el modo automático está activo
+    try {
+      const modoAuto = !AppState.config || AppState.config.sincronizacion_tasas_auto !== 0;
+      if (modoAuto) {
+        const hoyStr = new Date().toISOString().split('T')[0];
+        const fechaActualizacion = (AppState.config && AppState.config.fecha_tasas_actualizacion) || '';
+        if (!fechaActualizacion.startsWith(hoyStr)) {
+          sincronizarTasasOficiales(true);
+        }
+      }
+    } catch (e) {}
+  } catch (err) {
+    console.error('Error inicializando entorno operativo:', err);
+  }
+}
+window.bootAuthenticatedWorkspace = bootAuthenticatedWorkspace;
+
+function _hideAuthBootScreen() {
+  const boot = document.getElementById('authBootScreen');
+  if (boot) boot.classList.add('hidden');
+}
+
 async function initAuth() {
-  let token = localStorage.getItem('tavo_auth_token');
+  const token = localStorage.getItem('tavo_auth_token');
   if (token) {
     try {
       const resp = await originalFetch('/api/auth/me', {
@@ -17320,20 +17369,26 @@ async function initAuth() {
       if (resp.ok) {
         const data = await resp.json();
         AppState.usuarioActual = data.usuario;
-      } else {
-        localStorage.removeItem('tavo_auth_token');
-        localStorage.removeItem('tavo_csrf_token');
-        AppState.usuarioActual = null;
-        if (typeof openLoginModal === 'function') openLoginModal();
+        document.body.classList.remove('auth-locked');
+        closeLoginModal();
+        _hideAuthBootScreen();
+        actualizarUIUsuarioYPermisos();
+        await bootAuthenticatedWorkspace();
+        return;
       }
+      localStorage.removeItem('tavo_auth_token');
+      localStorage.removeItem('tavo_csrf_token');
+      AppState.usuarioActual = null;
     } catch (e) {
       console.error('Error verificando sesión activa:', e);
-      if (typeof openLoginModal === 'function') openLoginModal();
+      AppState.usuarioActual = null;
     }
-  } else {
-    if (typeof openLoginModal === 'function') openLoginModal();
   }
 
+  _workspaceBooted = false;
+  document.body.classList.add('auth-locked');
+  _hideAuthBootScreen();
+  openLoginModal();
   actualizarUIUsuarioYPermisos();
 }
 window.initAuth = initAuth;
@@ -17349,6 +17404,8 @@ function actualizarUIUsuarioYPermisos() {
     if (badgeText) badgeText.textContent = u.rol_nombre || 'Usuario';
     if (userNombre) userNombre.textContent = u.nombre_completo || u.username;
     if (userRol) userRol.textContent = u.rol_nombre || 'Rol';
+    const btnOut = document.getElementById('btnHeaderCerrarSesion');
+    if (btnOut) btnOut.title = `Cerrar Sesión (${u.nombre_completo || u.username} • ${u.rol_nombre || 'Usuario'})`;
 
     const p = u.permisos || {};
 
@@ -17399,26 +17456,122 @@ function actualizarUIUsuarioYPermisos() {
 }
 window.actualizarUIUsuarioYPermisos = actualizarUIUsuarioYPermisos;
 
-function openLoginModal() {
+function _setLoginLoadingState(isLoading) {
+  const btn = document.getElementById('btnSubmitLogin');
+  const icon = document.getElementById('loginBtnIcon');
+  const spinner = document.getElementById('loginBtnSpinner');
+  const txt = document.getElementById('loginBtnText');
+  if (btn) btn.disabled = isLoading;
+  if (icon) icon.classList.toggle('hidden', isLoading);
+  if (spinner) spinner.classList.toggle('hidden', !isLoading);
+  if (txt) txt.textContent = isLoading ? 'Verificando acceso...' : 'Acceder al Sistema';
+}
+
+function toggleLoginPasswordVisibility() {
+  const pwdInput = document.getElementById('loginPassword');
+  const icon = document.getElementById('iconToggleLoginPassword');
+  if (!pwdInput) return;
+  const isPwd = pwdInput.type === 'password';
+  pwdInput.type = isPwd ? 'text' : 'password';
+  if (icon) {
+    icon.classList.toggle('fa-eye', !isPwd);
+    icon.classList.toggle('fa-eye-slash', isPwd);
+  }
+}
+window.toggleLoginPasswordVisibility = toggleLoginPasswordVisibility;
+
+function detectLoginCapsLock(event) {
+  const warn = document.getElementById('loginCapsLockWarning');
+  if (!warn || !event || typeof event.getModifierState !== 'function') return;
+  if (event.getModifierState('CapsLock')) {
+    warn.classList.remove('hidden');
+  } else {
+    warn.classList.add('hidden');
+  }
+}
+window.detectLoginCapsLock = detectLoginCapsLock;
+
+function openLoginModal(noticeMessage = null) {
+  if (!AppState.usuarioActual) {
+    document.body.classList.add('auth-locked');
+  }
+  _hideAuthBootScreen();
   const m = document.getElementById('modalLogin');
   if (m) m.classList.remove('hidden');
-  const err = document.getElementById('loginErrorMsg');
-  if (err) err.classList.add('hidden');
+  _setLoginLoadingState(false);
+
+  const errBox = document.getElementById('loginErrorMsg');
+  const errTxt = document.getElementById('loginErrorText');
+  if (noticeMessage && errBox && errTxt) {
+    errTxt.textContent = noticeMessage;
+    errBox.classList.remove('hidden');
+  } else if (errBox) {
+    errBox.classList.add('hidden');
+  }
+
+  const usrInput = document.getElementById('loginUsername');
+  const pwdInput = document.getElementById('loginPassword');
+  if (pwdInput) {
+    pwdInput.value = '';
+    pwdInput.type = 'password';
+  }
+  const icon = document.getElementById('iconToggleLoginPassword');
+  if (icon) {
+    icon.classList.add('fa-eye');
+    icon.classList.remove('fa-eye-slash');
+  }
+  setTimeout(() => {
+    if (usrInput && !usrInput.value.trim()) {
+      usrInput.focus();
+    } else if (pwdInput) {
+      pwdInput.focus();
+    }
+  }, 50);
 }
 window.openLoginModal = openLoginModal;
 
 function closeLoginModal() {
+  if (!AppState.usuarioActual) return; // Fail-closed: nunca cerrar puerta sin sesión verificada
+  document.body.classList.remove('auth-locked');
   const m = document.getElementById('modalLogin');
   if (m) m.classList.add('hidden');
 }
 window.closeLoginModal = closeLoginModal;
 
+let _loginInFlight = false;
 async function ejecutarLogin(event) {
   event.preventDefault();
-  const username = document.getElementById('loginUsername')?.value.trim();
-  const password = document.getElementById('loginPassword')?.value;
+  if (_loginInFlight) return;
+  const usrInput = document.getElementById('loginUsername');
+  const pwdInput = document.getElementById('loginPassword');
+  const username = (usrInput?.value || '').trim().toLowerCase();
+  const password = (pwdInput?.value || '').trim();
   const errBox = document.getElementById('loginErrorMsg');
   const errTxt = document.getElementById('loginErrorText');
+  const cardBox = document.getElementById('loginCardBox');
+
+  const showLoginError = (msg) => {
+    if (errBox && errTxt) {
+      errTxt.textContent = msg;
+      errBox.classList.remove('hidden');
+    }
+    if (cardBox) {
+      cardBox.classList.remove('login-shake');
+      void cardBox.offsetWidth; // Reiniciar animación
+      cardBox.classList.add('login-shake');
+    }
+  };
+
+  if (!username || !password) {
+    showLoginError('Ingrese su nombre de usuario y contraseña para continuar.');
+    if (!username && usrInput) usrInput.focus();
+    else if (pwdInput) pwdInput.focus();
+    return;
+  }
+
+  _loginInFlight = true;
+  if (errBox) errBox.classList.add('hidden');
+  _setLoginLoadingState(true);
 
   try {
     const res = await originalFetch('/api/auth/login', {
@@ -17426,38 +17579,63 @@ async function ejecutarLogin(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     });
-    const data = await res.json();
+    let data = {};
+    try {
+      data = await res.json();
+    } catch (_) {
+      data = {};
+    }
+
     if (res.ok && data.success) {
       localStorage.setItem('tavo_auth_token', data.token);
       if (data.csrf_token) {
         localStorage.setItem('tavo_csrf_token', data.csrf_token);
       }
       AppState.usuarioActual = data.usuario;
+      if (pwdInput) pwdInput.value = '';
       actualizarUIUsuarioYPermisos();
       closeLoginModal();
       showToast(`Bienvenido/a, ${data.usuario.nombre_completo} (${data.usuario.rol_nombre})`, 'success');
+      await bootAuthenticatedWorkspace();
       navigate('dashboard');
     } else {
-      if (errBox) errBox.classList.remove('hidden');
-      if (errTxt) errTxt.textContent = data.error || 'Credenciales inválidas';
+      let friendlyMsg = data.error || 'Credenciales inválidas';
+      if (res.status === 401) {
+        friendlyMsg = 'Usuario o contraseña incorrectos. Verifique sus credenciales (ej. usuario "admin").';
+      }
+      showLoginError(friendlyMsg);
+      if (pwdInput) {
+        pwdInput.focus();
+        pwdInput.select();
+      }
     }
   } catch (err) {
-    if (errBox) errBox.classList.remove('hidden');
-    if (errTxt) errTxt.textContent = 'Error de conexión con el servidor';
+    showLoginError('No se pudo conectar con el servidor de autenticación. Verifique su conexión e intente nuevamente.');
+  } finally {
+    _loginInFlight = false;
+    _setLoginLoadingState(false);
   }
 }
 window.ejecutarLogin = ejecutarLogin;
 
 async function cerrarSesionActual() {
   try {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    const token = localStorage.getItem('tavo_auth_token');
+    if (token) {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    }
   } catch (e) {}
   localStorage.removeItem('tavo_auth_token');
   localStorage.removeItem('tavo_csrf_token');
   AppState.usuarioActual = null;
-  showToast('Sesión cerrada correctamente', 'info');
-  closeLoginModal();
-  setTimeout(() => location.reload(), 500);
+  _workspaceBooted = false;
+  const usrInput = document.getElementById('loginUsername');
+  if (usrInput) usrInput.value = '';
+  document.body.classList.add('auth-locked');
+  openLoginModal();
+  if (typeof showToast === 'function') {
+    showToast('Sesión cerrada correctamente', 'info');
+  }
 }
 window.cerrarSesionActual = cerrarSesionActual;
 
@@ -18583,9 +18761,3 @@ window.verReporteCierreZ = verReporteCierreZ;
 window.mostrarModalReporteCierreZ = mostrarModalReporteCierreZ;
 window.closeModalReporteCierreZ = closeModalReporteCierreZ;
 window.imprimirReporteCierreZActual = imprimirReporteCierreZActual;
-
-window.addEventListener('DOMContentLoaded', () => {
-  if (typeof actualizarEstadoCajaPOS === 'function') {
-    actualizarEstadoCajaPOS();
-  }
-});
