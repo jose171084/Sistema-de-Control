@@ -1,0 +1,22 @@
+<!-- login_modal.html -->
+<div id="login-modal" class="modal" aria-hidden="true" role="dialog" aria-labelledby="login-title">
+  <div class="modal-content" role="document">
+    <h2 id="login-title" class="modal-title">Iniciar sesión</h2>
+    <form id="login-form" novalidate>
+      <div class="form-group">
+        <label for="login-email">Correo electrónico o usuario</label>
+        <input type="text" id="login-email" name="email" autocomplete="username" required />
+        <span class="error" aria-live="polite"></span>
+      </div>
+      <div class="form-group">
+        <label for="login-password">Contraseña</label>
+        <input type="password" id="login-password" name="password" autocomplete="current-password" required />
+        <span class="error" aria-live="polite"></span>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">Entrar</button>
+        <a href="#" id="forgot-password" class="link-muted">¿Olvidó su contraseña?</a>
+      </div>
+    </form>
+  </div>
+</div>
