@@ -21,6 +21,8 @@ import email.parser
 import email.policy
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+import security_core
+from security_middleware import SecurityMiddleware
 import database
 from database import (
     procesar_devolucion_compra,
@@ -129,8 +131,24 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         """
         Extrae y valida el token Bearer del header Authorization o cookie.
         Retorna (payload_dict, permisos_dict). Si no hay token válido, retorna (None, None).
-        Para retrocompatibilidad de llamadas legacy internas, si no hay token se suministra SuperAdmin.
+        Cero bypass: Erradicación definitiva de fallback automático a SuperAdmin.
         """
+        # 1. Si la sesión ya fue validada por SecurityMiddleware en esta petición
+        if hasattr(self, "current_session") and self.current_session:
+            s = self.current_session
+            uid = s.get("usuario_id")
+            rol = s.get("rol", "Usuario")
+            try:
+                conn = get_connection()
+                full_perms = database.obtener_permisos_usuario(uid, conn)
+                conn.close()
+                if full_perms and full_perms.get("activo", 0) == 1:
+                    return {"uid": uid, "usr": full_perms.get("username", f"user_{uid}"), "rol": rol}, full_perms
+            except Exception:
+                pass
+            return {"uid": uid, "usr": f"user_{uid}", "rol": rol}, s.get("perms", {})
+
+        # 2. Extracción directa segura
         auth_header = self.headers.get("Authorization", "")
         token = None
         if auth_header.startswith("Bearer "):
@@ -142,22 +160,18 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     break
 
         if token:
-            payload = database.verificar_token_sesion(token)
+            payload = security_core.decodificar_y_verificar_jwt(token)
             if payload:
-                user_id = payload.get("uid")
-                perms = database.obtener_permisos_usuario(user_id)
-                if perms and perms.get("activo", 0) == 1:
-                    return payload, perms
-
-        # Retrocompatibilidad defensiva para instancias en despliegue
-        try:
-            conn = get_connection()
-            admin_perms = database.obtener_permisos_usuario(1, conn)
-            conn.close()
-            if admin_perms:
-                return {"uid": 1, "usr": "admin", "rol": "SuperAdmin"}, admin_perms
-        except Exception:
-            pass
+                user_id = payload.get("sub")
+                if user_id:
+                    try:
+                        conn = get_connection()
+                        full_perms = database.obtener_permisos_usuario(user_id, conn)
+                        conn.close()
+                        if full_perms and full_perms.get("activo", 0) == 1:
+                            return {"uid": user_id, "usr": full_perms.get("username", f"user_{user_id}"), "rol": full_perms.get("rol_nombre")}, full_perms
+                    except Exception:
+                        pass
 
         return None, None
 
@@ -167,7 +181,8 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token, Idempotency-Key")
+        self.send_header("Access-Control-Expose-Headers", "X-New-Session-Token")
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
@@ -188,7 +203,8 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token, Idempotency-Key")
+        self.send_header("Access-Control-Expose-Headers", "X-New-Session-Token")
         self.end_headers()
 
     # --- ENRUTADOR GET ---
@@ -291,6 +307,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
     # CONTROLADORES DE LA API (GET)
     # ==========================================
     def handle_api_get(self, path, query):
+        conn_sec = get_connection()
+        try:
+            if SecurityMiddleware.interceptar(self, "GET", path, conn_sec):
+                return
+        finally:
+            conn_sec.close()
+
         conn = get_connection()
         cursor = conn.cursor()
 
@@ -2804,6 +2827,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
     # CONTROLADORES DE LA API (POST)
     # ==========================================
     def handle_api_post(self, path):
+        conn_sec = get_connection()
+        try:
+            if SecurityMiddleware.interceptar(self, "POST", path, conn_sec):
+                return
+        finally:
+            conn_sec.close()
+
         # --- CONTROL DE CAJA ERP (Apertura, Movimientos y Cierre Z) ---
         if path == "/api/caja/abrir":
             try:
@@ -3005,25 +3035,56 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 cursor.execute("UPDATE usuarios SET ultimo_acceso = CURRENT_TIMESTAMP WHERE id = ?", (u_dict["id"],))
-                conn.commit()
                 perms = database.obtener_permisos_usuario(u_dict["id"], conn)
-                token = database.generar_token_sesion(u_dict["id"], u_dict["username"], perms.get("rol_nombre", "Usuario"), perms)
-                database.registrar_auditoria(u_dict["id"], username, "LOGIN_EXITOSO", "AUTENTICACION", f"Inicio de sesión exitoso con rol {perms.get('rol_nombre')}", client_ip, conn)
+                rol_nombre = perms.get("rol_nombre", "Usuario")
+                
+                # Generación formal de sesión Fase 1 (OWASP Token + Anti-CSRF + Sesión Activa BD)
+                import secrets
+                import hashlib
+                from datetime import datetime, timezone, timedelta
+                
+                jti = secrets.token_hex(32)
+                csrf_token = secrets.token_hex(32)
+                token = security_core.emitir_jwt(
+                    jti=jti,
+                    usuario_id=u_dict["id"],
+                    instance_id=1,
+                    rol=rol_nombre,
+                    perms=perms,
+                    duracion_segundos=1800
+                )
+                token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
+                expira_en = (datetime.now(timezone.utc) + timedelta(seconds=1800)).isoformat()
+                
+                cursor.execute("""
+                    INSERT INTO sesiones_activas (
+                        jti, token_hash, usuario_id, instance_id, csrf_token,
+                        expira_en, estado, ip_origen
+                    ) VALUES (?, ?, ?, 1, ?, ?, 'ACTIVA', ?)
+                """, (jti, token_hash, u_dict["id"], csrf_token, expira_en, client_ip))
+                conn.commit()
+
+                database.registrar_auditoria(u_dict["id"], username, "LOGIN_EXITOSO", "AUTENTICACION", f"Inicio de sesión exitoso con rol {rol_nombre}", client_ip, conn)
                 self.send_json({
                     "success": True,
                     "token": token,
+                    "csrf_token": csrf_token,
                     "usuario": {
                         "id": u_dict["id"],
                         "username": u_dict["username"],
                         "nombre_completo": u_dict["nombre_completo"],
                         "rol_id": u_dict["rol_id"],
-                        "rol_nombre": perms.get("rol_nombre"),
+                        "rol_nombre": rol_nombre,
                         "permisos": {k: perms[k] for k in perms if k.startswith("perm_") or k in ("facturar_negativo", "autorizar_devoluciones", "modificar_precios", "ver_costos_utilidad", "anular_transacciones", "facturar_directo")}
                     }
                 })
                 return
 
             elif path == "/api/auth/logout":
+                sesion = getattr(self, "current_session", None)
+                if sesion and "jti" in sesion:
+                    cursor.execute("UPDATE sesiones_activas SET estado = 'REVOCADA' WHERE jti = ?", (sesion["jti"],))
+                    conn.commit()
                 user, _ = self.get_current_user_and_perms()
                 client_ip = self.client_address[0] if hasattr(self, 'client_address') else ''
                 if user:
@@ -5285,6 +5346,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
     # CONTROLADORES DE LA API (PUT)
     # ==========================================
     def handle_api_put(self, path):
+        conn_sec = get_connection()
+        try:
+            if SecurityMiddleware.interceptar(self, "PUT", path, conn_sec):
+                return
+        finally:
+            conn_sec.close()
+
         if path == "/api/config":
             self.handle_save_config(path)
             return
@@ -5548,6 +5616,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
     # CONTROLADORES DE LA API (DELETE)
     # ==========================================
     def handle_api_delete(self, path):
+        conn_sec = get_connection()
+        try:
+            if SecurityMiddleware.interceptar(self, "DELETE", path, conn_sec):
+                return
+        finally:
+            conn_sec.close()
+
         conn = get_connection()
         cursor = conn.cursor()
 

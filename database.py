@@ -45,19 +45,19 @@ def verificar_password(password: str, salt: str, password_hash: str) -> bool:
     return hmac.compare_digest(expected, password_hash)
 
 def generar_token_sesion(usuario_id: int, username: str, rol_nombre: str, permisos: dict = None) -> str:
-    """Genera un token de sesión firmado con HMAC-SHA256 y expiración dinámica (24 horas)."""
-    expira = int(time.time()) + (24 * 3600)
-    payload = {
-        "uid": usuario_id,
-        "usr": username,
-        "rol": rol_nombre,
-        "perm": permisos or {},
-        "exp": expira
-    }
-    raw = json.dumps(payload, separators=(',', ':'))
-    b64_payload = base64.urlsafe_b64encode(raw.encode('utf-8')).decode('ascii').rstrip('=')
-    sig = hmac.new(SESSION_SECRET.encode('utf-8'), b64_payload.encode('ascii'), hashlib.sha256).hexdigest()
-    return f"{b64_payload}.{sig}"
+    """Genera un token de sesión firmado JWT estándar Fase 1."""
+    try:
+        import security_core as sec
+        import secrets
+        jti = secrets.token_hex(32)
+        return sec.emitir_jwt(jti=jti, usuario_id=usuario_id, instance_id=1, rol=rol_nombre, perms=permisos or {}, duracion_segundos=1800)
+    except Exception:
+        expira = int(time.time()) + 1800
+        payload = {"uid": usuario_id, "usr": username, "rol": rol_nombre, "perm": permisos or {}, "exp": expira}
+        raw = json.dumps(payload, separators=(',', ':'))
+        b64 = base64.urlsafe_b64encode(raw.encode('utf-8')).decode('ascii').rstrip('=')
+        sig = hmac.new(SESSION_SECRET.encode('utf-8'), b64.encode('ascii'), hashlib.sha256).hexdigest()
+        return f"{b64}.{sig}"
 
 def verificar_token_sesion(token: str):
     """Verifica la firma y vigencia del token de sesión. Retorna el payload decodificado o None."""
@@ -6222,9 +6222,12 @@ def registrar_pago_financiero(datos, conn=None):
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
 
         idempotency_key = datos.get('idempotency_key')
         if idempotency_key:
@@ -6450,7 +6453,8 @@ def registrar_pago_financiero(datos, conn=None):
             'duplicado_ignorado': False
         }
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
@@ -6461,9 +6465,12 @@ def anular_pago_financiero(pago_id, usuario_id=1, motivo="", conn=None):
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
 
         cur.execute("SELECT id, estado, concepto FROM pagos WHERE id = ?", (pago_id,))
         p = cur.fetchone()
@@ -6541,7 +6548,8 @@ def anular_pago_financiero(pago_id, usuario_id=1, motivo="", conn=None):
         conn.commit()
         return {'id': pago_id, 'estado': 'anulado', 'anulado_at': now_str}
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
@@ -6552,9 +6560,12 @@ def aplicar_anticipo_cliente(anticipo_id, aplicaciones, usuario_id=1, conn=None)
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
 
         cur.execute("SELECT id, pago_origen_id, saldo_disponible_usd, estado FROM anticipos_clientes WHERE id = ?", (anticipo_id,))
         ant = cur.fetchone()
@@ -6623,7 +6634,8 @@ def aplicar_anticipo_cliente(anticipo_id, aplicaciones, usuario_id=1, conn=None)
             'estado_anticipo': estado_ant
         }
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
@@ -6634,9 +6646,12 @@ def abrir_caja_turno(cuenta_tesoreria_id, usuario_id=1, monto_inicial_usd=0.0, m
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
 
         cur.execute("SELECT id FROM caja_aperturas WHERE cuenta_tesoreria_id = ? AND estado = 'abierta'", (cuenta_tesoreria_id,))
         if cur.fetchone():
@@ -6656,7 +6671,8 @@ def abrir_caja_turno(cuenta_tesoreria_id, usuario_id=1, monto_inicial_usd=0.0, m
         conn.commit()
         return {'id': apertura_id, 'cuenta_tesoreria_id': cuenta_tesoreria_id, 'estado': 'abierta', 'monto_inicial_usd': monto_inicial_usd}
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
@@ -6667,9 +6683,12 @@ def cerrar_caja_turno(caja_apertura_id, usuario_id=1, saldo_real_fisico_usd=0.0,
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
 
         cur.execute("SELECT id, cuenta_tesoreria_id, fecha_apertura, monto_inicial_usd, monto_inicial_moneda, estado FROM caja_aperturas WHERE id = ?", (caja_apertura_id,))
         ap = cur.fetchone()
@@ -6749,7 +6768,8 @@ def cerrar_caja_turno(caja_apertura_id, usuario_id=1, saldo_real_fisico_usd=0.0,
             'diferencia_moneda': diferencia_moneda
         }
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
@@ -6760,9 +6780,12 @@ def registrar_gasto_operativo(datos, usuario_id=1, conn=None):
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
 
         categoria = datos.get('categoria_gasto') or datos.get('categoria') or 'Operativo'
         beneficiario = datos.get('beneficiario', 'Proveedor de Servicios')
@@ -6831,7 +6854,8 @@ def registrar_gasto_operativo(datos, usuario_id=1, conn=None):
             'cuenta_por_pagar_id': cxp_id
         }
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
@@ -6842,9 +6866,12 @@ def transferir_entre_cuentas_tesoreria(cuenta_origen_id, cuenta_destino_id, mont
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
 
         cur.execute("SELECT id, moneda, saldo_actual FROM cuentas_tesoreria WHERE id = ?", (cuenta_origen_id,))
         orig = cur.fetchone()
@@ -6895,7 +6922,8 @@ def transferir_entre_cuentas_tesoreria(cuenta_origen_id, cuenta_destino_id, mont
             'saldo_destino_nuevo': saldo_dest_nue
         }
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
@@ -7061,8 +7089,9 @@ def crear_zona(nombre, descripcion='', is_active=1, tenant_id=1, conn=None):
             INSERT INTO zonas (tenant_id, nombre, descripcion, is_active)
             VALUES (?, ?, ?, ?)
         """, (tenant_id, nombre.strip(), (descripcion or '').strip(), int(is_active)))
-        conn.commit()
-        schedule_cloud_sync()
+        if auto_commit and started_tx and conn.in_transaction:
+            conn.commit()
+            schedule_cloud_sync()
         return {"id": cur.lastrowid, "success": True, "nombre": nombre}
     finally:
         if close_after:
@@ -7088,8 +7117,9 @@ def actualizar_zona(zona_id, nombre=None, descripcion=None, is_active=None, conn
                 is_active = COALESCE(?, is_active)
             WHERE id = ?
         """, (nombre, descripcion, is_active, zona_id))
-        conn.commit()
-        schedule_cloud_sync()
+        if auto_commit and started_tx and conn.in_transaction:
+            conn.commit()
+            schedule_cloud_sync()
         return {"id": zona_id, "success": True}
     finally:
         if close_after:
@@ -7112,9 +7142,12 @@ def crear_pedido(cliente_id, vendedor_id=None, items=None, condicion_pago='conta
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
 
         # 1. Verificar cliente y territorio
         cur.execute("SELECT id, nombre, cedula, zona_id, vendedor_id FROM clientes WHERE id = ?", (cliente_id,))
@@ -7252,8 +7285,9 @@ def crear_pedido(cliente_id, vendedor_id=None, items=None, condicion_pago='conta
         except Exception:
             pass
 
-        conn.commit()
-        schedule_cloud_sync()
+        if auto_commit and started_tx and conn.in_transaction:
+            conn.commit()
+            schedule_cloud_sync()
 
         return {
             "success": True,
@@ -7265,7 +7299,8 @@ def crear_pedido(cliente_id, vendedor_id=None, items=None, condicion_pago='conta
             "mensaje": f"Pedido {numero_pedido} registrado exitosamente. Stock comprometido reservado por 48 horas."
         }
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
@@ -7281,9 +7316,12 @@ def expirar_pedidos_vencidos(conn=None):
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
 
         cur.execute("""
             SELECT id, numero_pedido, fecha_vencimiento
@@ -7338,7 +7376,8 @@ def expirar_pedidos_vencidos(conn=None):
             schedule_cloud_sync()
         return expirados_info
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
@@ -7452,7 +7491,7 @@ def obtener_pedido_detalle(pedido_id, conn=None):
             conn.close()
 
 
-def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_contado='Efectivo USD', notas_adicionales='', items_aprobados=None, conn=None):
+def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_contado='Efectivo USD', notas_adicionales='', items_aprobados=None, conn=None, auto_commit=True):
     """
     Autoriza un pedido y lo convierte en Factura real con soporte para APROBACION PARCIAL (Backorders):
     - Permite al Administrador editar cantidades (ej. aprobar 8 de 10).
@@ -7464,9 +7503,12 @@ def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_con
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
 
         cur.execute("SELECT * FROM pedidos WHERE id = ?", (pedido_id,))
         ped = cur.fetchone()
@@ -7739,8 +7781,9 @@ def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_con
         except Exception:
             pass
 
-        conn.commit()
-        schedule_cloud_sync()
+        if auto_commit and started_tx and conn.in_transaction:
+            conn.commit()
+            schedule_cloud_sync()
 
         return {
             "success": True,
@@ -7755,14 +7798,15 @@ def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_con
             "mensaje": f"Pedido {ped_dict['numero_pedido']} aprobado y facturado exitosamente como {numero_factura}."
         }
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
             conn.close()
 
 
-def rechazar_pedido(pedido_id, usuario_id=1, motivo='', conn=None):
+def rechazar_pedido(pedido_id, usuario_id=1, motivo='', conn=None, auto_commit=True):
     """
     Rechaza un pedido pendiente de aprobacion y LIBERA el stock_comprometido de vuelta a disponibilidad.
     """
@@ -7770,9 +7814,12 @@ def rechazar_pedido(pedido_id, usuario_id=1, motivo='', conn=None):
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
 
         cur.execute("SELECT id, numero_pedido, estado FROM pedidos WHERE id = ?", (pedido_id,))
         ped = cur.fetchone()
@@ -7813,8 +7860,9 @@ def rechazar_pedido(pedido_id, usuario_id=1, motivo='', conn=None):
         except Exception:
             pass
 
-        conn.commit()
-        schedule_cloud_sync()
+        if auto_commit and started_tx and conn.in_transaction:
+            conn.commit()
+            schedule_cloud_sync()
 
         return {
             "success": True,
@@ -7822,7 +7870,8 @@ def rechazar_pedido(pedido_id, usuario_id=1, motivo='', conn=None):
             "mensaje": f"Pedido {ped['numero_pedido']} rechazado y mercancia liberada."
         }
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
@@ -8025,7 +8074,11 @@ def obtener_turno_activo(usuario_id=None, caja_id=None, conn=None):
             row = cur.fetchone()
 
         if row:
-            d = dict(row)
+            if isinstance(row, sqlite3.Row):
+                d = dict(row)
+            else:
+                cols = [c[0] for c in cur.description]
+                d = dict(zip(cols, row))
             # Contar movimientos actuales
             cur.execute("""
                 SELECT 
@@ -8054,13 +8107,17 @@ def obtener_turno_activo(usuario_id=None, caja_id=None, conn=None):
             conn.close()
 
 
-def abrir_turno_caja(datos, usuario_id=1, conn=None):
+def abrir_turno_caja(datos, usuario_id=1, conn=None, auto_commit=True):
     close_after = False
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
         caja_id = int(datos.get("caja_id", 1) or 1)
         fondo_inicial_usd = float(datos.get("fondo_inicial_usd", 0.0) or 0.0)
         fondo_inicial_ves = float(datos.get("fondo_inicial_ves", 0.0) or 0.0)
@@ -8070,7 +8127,8 @@ def abrir_turno_caja(datos, usuario_id=1, conn=None):
         cur.execute("SELECT id FROM turnos_caja WHERE caja_id = ? AND estado = 'ABIERTO'", (caja_id,))
         existente = cur.fetchone()
         if existente:
-            raise ValueError(f"Ya existe un turno de caja abierto (Turno #{existente['id']}) para esta caja.")
+            ext_id = existente["id"] if isinstance(existente, sqlite3.Row) else existente[0]
+            raise ValueError(f"Ya existe un turno de caja abierto (Turno #{ext_id}) para esta caja.")
 
         cur.execute("""
             INSERT INTO turnos_caja (
@@ -8102,23 +8160,30 @@ def abrir_turno_caja(datos, usuario_id=1, conn=None):
         except Exception:
             pass
 
-        conn.commit()
+        if auto_commit and started_tx and conn.in_transaction:
+            conn.commit()
+            schedule_cloud_sync()
         return obtener_turno_activo(usuario_id=usuario_id, caja_id=caja_id, conn=conn)
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
             conn.close()
 
 
-def registrar_movimiento_caja(datos, usuario_id=1, conn=None):
+def registrar_movimiento_caja(datos, usuario_id=1, conn=None, auto_commit=True):
     close_after = False
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
         turno_id = datos.get("turno_id")
         if not turno_id:
             turno_act = obtener_turno_activo(usuario_id=usuario_id, conn=conn)
@@ -8175,7 +8240,9 @@ def registrar_movimiento_caja(datos, usuario_id=1, conn=None):
         except Exception:
             pass
 
-        conn.commit()
+        if auto_commit and started_tx and conn.in_transaction:
+            conn.commit()
+            schedule_cloud_sync()
         return {
             "success": True,
             "id": mov_id,
@@ -8189,14 +8256,15 @@ def registrar_movimiento_caja(datos, usuario_id=1, conn=None):
             "factura_id_ref": factura_id_ref
         }
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
             conn.close()
 
 
-def cerrar_turno_caja_ciego(declarado, usuario_id=1, turno_id=None, notas='', conn=None):
+def cerrar_turno_caja_ciego(declarado, usuario_id=1, turno_id=None, notas='', conn=None, auto_commit=True):
     """
     Cierre Ciego de Turno de Caja (Estándar ERP TAVO CLOUD):
     - El cajero ingresa ÚNICAMENTE lo que tiene contado en físico (declarado).
@@ -8208,9 +8276,12 @@ def cerrar_turno_caja_ciego(declarado, usuario_id=1, turno_id=None, notas='', co
     if conn is None:
         conn = get_connection()
         close_after = True
+    started_tx = False
     try:
         cur = conn.cursor()
-        cur.execute("BEGIN IMMEDIATE")
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
 
         if turno_id is None:
             cur.execute("SELECT * FROM turnos_caja WHERE estado = 'ABIERTO' ORDER BY id DESC LIMIT 1")
@@ -8395,10 +8466,13 @@ def cerrar_turno_caja_ciego(declarado, usuario_id=1, turno_id=None, notas='', co
         except Exception:
             pass
 
-        conn.commit()
+        if auto_commit and started_tx and conn.in_transaction:
+            conn.commit()
+            schedule_cloud_sync()
         return obtener_reporte_cierre_z(turno_id=turno_id, conn=conn)
     except Exception as e:
-        conn.rollback()
+        if started_tx and conn is not None and conn.in_transaction:
+            conn.rollback()
         raise e
     finally:
         if close_after:
