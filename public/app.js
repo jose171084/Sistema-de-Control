@@ -2311,10 +2311,62 @@ async function deleteProducto(id) {
 // ========================================================
 // MÓDULO 3: CLIENTES
 // ========================================================
+async function cargarCatalogosComerciales(forzar = false) {
+  try {
+    if (forzar || !AppState.vendedores || AppState.vendedores.length === 0) {
+      const resV = await fetch('/api/vendedores');
+      if (resV.ok) AppState.vendedores = await resV.json();
+    }
+    if (forzar || !AppState.zonas || AppState.zonas.length === 0) {
+      const resZ = await fetch('/api/zonas?all=1');
+      if (resZ.ok) AppState.zonas = await resZ.json();
+    }
+  } catch (e) {
+    console.warn('Error cargando catálogos comerciales:', e);
+  }
+  poblarSelectsClientesComerciales();
+}
+window.cargarCatalogosComerciales = cargarCatalogosComerciales;
+
+function poblarSelectsClientesComerciales() {
+  const vendedores = (AppState.vendedores || []).filter(v => v.activo !== 0);
+  const zonas = (AppState.zonas || []).filter(z => z.is_active !== 0);
+
+  const selVendModal = document.getElementById('clienteVendedorId');
+  if (selVendModal) {
+    const prev = selVendModal.value;
+    selVendModal.innerHTML = '<option value="">-- Sin vendedor / Mostrador --</option>' +
+      vendedores.map(v => `<option value="${v.id}">${escapeHtml(v.codigo)} - ${escapeHtml(v.nombre)}</option>`).join('');
+    if (prev) selVendModal.value = prev;
+  }
+
+  const selZonaModal = document.getElementById('clienteZonaId');
+  if (selZonaModal) {
+    const prev = selZonaModal.value;
+    selZonaModal.innerHTML = '<option value="">-- Sin zona asignada --</option>' +
+      zonas.map(z => `<option value="${z.id}">${escapeHtml(z.nombre)}</option>`).join('');
+    if (prev) selZonaModal.value = prev;
+  }
+
+  const selFilterVend = document.getElementById('clienteFilterVendedorSelect');
+  if (selFilterVend) {
+    const prev = selFilterVend.value;
+    selFilterVend.innerHTML = '<option value="">Todos los vendedores</option>' +
+      vendedores.map(v => `<option value="${v.id}">${escapeHtml(v.codigo)} - ${escapeHtml(v.nombre)}</option>`).join('');
+    if (prev) selFilterVend.value = prev;
+  }
+}
+
 async function loadClientes() {
   try {
+    await cargarCatalogosComerciales();
     const search = document.getElementById('clienteSearchInput')?.value.trim() || '';
-    const url = search ? `/api/clientes?q=${encodeURIComponent(search)}` : '/api/clientes';
+    const vendFilter = document.getElementById('clienteFilterVendedorSelect')?.value || '';
+    const params = new URLSearchParams();
+    if (search) params.append('q', search);
+    if (vendFilter) params.append('vendedor_id', vendFilter);
+    const qs = params.toString();
+    const url = qs ? `/api/clientes?${qs}` : '/api/clientes';
     const res = await fetch(url);
     if (!res.ok) return;
     AppState.clientes = await res.json();
@@ -2329,19 +2381,30 @@ function renderClientesTable() {
   if (!tbody) return;
 
   if (AppState.clientes.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-400">No se encontraron clientes.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-400">No se encontraron clientes.</td></tr>`;
     return;
   }
 
   tbody.innerHTML = AppState.clientes.map(c => {
     // Generar enlace directo de WhatsApp
-    const waPhone = c.telefono.replace(/[^0-9]/g, '');
+    const waPhone = (c.telefono || '').replace(/[^0-9]/g, '');
     const waLink = `https://wa.me/${waPhone}?text=${encodeURIComponent(`Hola ${c.nombre}, te contactamos de ${AppState.config.nombre_negocio}.`)}`;
+    const hasVend = Boolean(c.vendedor_id);
+    const hasZona = Boolean(c.zona_id);
+    const vendBadge = hasVend
+      ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-[#0755C9] border border-blue-200"><i class="fa-solid fa-user-tie mr-1 text-[10px]"></i>${escapeHtml(c.vendedor_nombre || 'Vendedor #' + c.vendedor_id)}</span>`
+      : `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-500">Mostrador / Libre</span>`;
+    const zonaBadge = hasZona
+      ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 mt-1"><i class="fa-solid fa-map-pin mr-1 text-[9px]"></i>${escapeHtml(c.zona_nombre || '')}</span>`
+      : '';
 
     return `
       <tr class="hover:bg-slate-50 transition">
         <td class="py-3 px-4 font-mono text-xs font-bold text-slate-700">${escapeHtml(c.cedula)}</td>
         <td class="py-3 px-4 font-bold text-slate-900">${escapeHtml(c.nombre)}</td>
+        <td class="py-3 px-4">
+          <div class="flex flex-col items-start">${vendBadge}${zonaBadge}</div>
+        </td>
         <td class="py-3 px-4">
           <a href="${waLink}" target="_blank" rel="noopener noreferrer" 
              class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition">
@@ -2352,7 +2415,7 @@ function renderClientesTable() {
         <td class="py-3 px-4 text-xs text-slate-500">${escapeHtml(c.correo || '-')}</td>
         <td class="py-3 px-4 text-xs text-slate-500">${escapeHtml(c.direccion || '-')}</td>
         <td class="py-3 px-4 text-right space-x-1">
-          <button onclick="editCliente(${c.id})" class="p-1.5 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg" title="Editar">
+          <button onclick="editCliente(${c.id})" class="p-1.5 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg" title="Editar / Asignar Vendedor">
             <i class="fa-solid fa-pen-to-square"></i>
           </button>
           <button onclick="deleteCliente(${c.id})" class="p-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg" title="Eliminar">
@@ -2364,8 +2427,9 @@ function renderClientesTable() {
   }).join('');
 }
 
-function openClienteModal(isEdit = false, origen = 'clientes') {
+async function openClienteModal(isEdit = false, origen = 'clientes') {
   AppState.clienteModalOrigen = origen;
+  await cargarCatalogosComerciales();
   document.getElementById('clienteModalTitle').textContent = isEdit ? 'Editar Cliente' : 'Registrar Cliente';
   if (!isEdit) {
     document.getElementById('clienteId').value = '';
@@ -2374,6 +2438,10 @@ function openClienteModal(isEdit = false, origen = 'clientes') {
     document.getElementById('clienteTelefono').value = '';
     document.getElementById('clienteCorreo').value = '';
     document.getElementById('clienteDireccion').value = '';
+    const selV = document.getElementById('clienteVendedorId');
+    const selZ = document.getElementById('clienteZonaId');
+    if (selV) selV.value = '';
+    if (selZ) selZ.value = '';
   }
   document.getElementById('modalCliente').classList.remove('hidden');
 }
@@ -2382,27 +2450,35 @@ function closeClienteModal() {
   document.getElementById('modalCliente').classList.add('hidden');
 }
 
-function editCliente(id) {
+async function editCliente(id) {
   const c = AppState.clientes.find(cli => cli.id === id);
   if (!c) return;
+  await openClienteModal(true, 'clientes');
   document.getElementById('clienteId').value = c.id;
   document.getElementById('clienteNombre').value = c.nombre;
   document.getElementById('clienteCedula').value = c.cedula;
   document.getElementById('clienteTelefono').value = c.telefono;
   document.getElementById('clienteCorreo').value = c.correo || '';
   document.getElementById('clienteDireccion').value = c.direccion || '';
-  openClienteModal(true, 'clientes');
+  const selV = document.getElementById('clienteVendedorId');
+  const selZ = document.getElementById('clienteZonaId');
+  if (selV) selV.value = c.vendedor_id ? String(c.vendedor_id) : '';
+  if (selZ) selZ.value = c.zona_id ? String(c.zona_id) : '';
 }
 
 async function saveCliente(e) {
   e.preventDefault();
   const id = document.getElementById('clienteId').value;
+  const rawVend = document.getElementById('clienteVendedorId')?.value || '';
+  const rawZona = document.getElementById('clienteZonaId')?.value || '';
   const payload = {
     nombre: document.getElementById('clienteNombre').value.trim(),
     cedula: document.getElementById('clienteCedula').value.trim(),
     telefono: document.getElementById('clienteTelefono').value.trim(),
     correo: document.getElementById('clienteCorreo').value.trim(),
-    direccion: document.getElementById('clienteDireccion').value.trim()
+    direccion: document.getElementById('clienteDireccion').value.trim(),
+    vendedor_id: rawVend ? parseInt(rawVend) : null,
+    zona_id: rawZona ? parseInt(rawZona) : null
   };
 
   try {
@@ -2418,7 +2494,7 @@ async function saveCliente(e) {
       closeClienteModal();
       await loadClientes();
 
-      const nuevoId = (resData && resData.id) || (AppState.clientes.find(cli => cli.cedula === payload.cedula)?.id);
+      const nuevoId = (resData && resData.id) || (id ? parseInt(id) : null) || (AppState.clientes.find(cli => cli.cedula === payload.cedula)?.id);
 
       if (AppState.clienteModalOrigen === 'facturacion' || AppState.currentView === 'facturacion') {
         populatePosSelectors();
@@ -2432,6 +2508,9 @@ async function saveCliente(e) {
         }
       }
       AppState.clienteModalOrigen = 'clientes';
+      if (typeof showToast === 'function') {
+        showToast(id ? 'Cliente actualizado correctamente' : 'Cliente registrado correctamente', 'success');
+      }
     } else {
       const err = await res.json();
       alert('Error: ' + (err.error || 'No se pudo guardar el cliente'));
@@ -2493,26 +2572,52 @@ function buscarClientePOS(query = '') {
     return;
   }
 
-  resultsDiv.innerHTML = matches.slice(0, 8).map(c => `
-    <div onclick="seleccionarClientePOS(${c.id})" class="p-2.5 hover:bg-indigo-50 cursor-pointer flex items-center justify-between text-xs transition">
-      <div>
-        <p class="font-bold text-slate-800">${escapeHtml(c.nombre)}</p>
-        <p class="text-slate-500 font-mono text-[11px]">${escapeHtml(c.cedula)} &bull; Tel: ${escapeHtml(c.telefono)}</p>
+  resultsDiv.innerHTML = matches.slice(0, 8).map(c => {
+    const metaVend = c.vendedor_id && c.vendedor_nombre ? ` &bull; Asesor: ${escapeHtml(c.vendedor_nombre)}` : '';
+    const metaZona = c.zona_id && c.zona_nombre ? ` (${escapeHtml(c.zona_nombre)})` : '';
+    return `
+      <div onclick="seleccionarClientePOS(${c.id})" class="p-2.5 hover:bg-indigo-50 cursor-pointer flex items-center justify-between text-xs transition">
+        <div>
+          <p class="font-bold text-slate-800">${escapeHtml(c.nombre)}</p>
+          <p class="text-slate-500 font-mono text-[11px]">${escapeHtml(c.cedula)} &bull; Tel: ${escapeHtml(c.telefono)}${metaVend}${metaZona}</p>
+        </div>
+        <span class="text-indigo-600 text-xs font-bold">Seleccionar &rarr;</span>
       </div>
-      <span class="text-indigo-600 text-xs font-bold">Seleccionar &rarr;</span>
-    </div>
-  `).join('');
+    `;
+  }).join('');
   resultsDiv.classList.remove('hidden');
 }
 
 function seleccionarClientePOS(clienteId) {
-  const c = AppState.clientes.find(cli => cli.id === clienteId);
+  const c = AppState.clientes.find(cli => Number(cli.id) === Number(clienteId));
   if (!c) return;
 
+  AppState.posClienteSeleccionado = c;
   document.getElementById('posClienteSelect').value = c.id;
   document.getElementById('posSelectedClienteNombre').textContent = c.nombre;
   document.getElementById('posSelectedClienteCedula').textContent = c.cedula;
   document.getElementById('posSelectedClienteTelefono').textContent = c.telefono;
+
+  const badgeVend = document.getElementById('posSelectedClienteVendedorBadge');
+  if (badgeVend) {
+    const parts = [];
+    if (c.vendedor_id && c.vendedor_nombre) parts.push(`Asesor: ${c.vendedor_nombre}`);
+    if (c.zona_id && c.zona_nombre) parts.push(`Zona: ${c.zona_nombre}`);
+    if (parts.length > 0) {
+      badgeVend.textContent = parts.join(' • ');
+      badgeVend.classList.remove('hidden');
+    } else {
+      badgeVend.textContent = '';
+      badgeVend.classList.add('hidden');
+    }
+  }
+
+  // Auto-seleccionar el vendedor asignado al cliente en el selector del POS
+  const selV = document.getElementById('posVendedorSelect');
+  if (selV) {
+    selV.value = c.vendedor_id ? String(c.vendedor_id) : '';
+    if (typeof actualizarComisionPosBadge === 'function') actualizarComisionPosBadge();
+  }
 
   document.getElementById('posClienteSelectedCard').classList.remove('hidden');
   document.getElementById('posClienteSearchResults').classList.add('hidden');
@@ -2521,11 +2626,22 @@ function seleccionarClientePOS(clienteId) {
 }
 
 function limpiarClientePOS() {
+  AppState.posClienteSeleccionado = null;
   document.getElementById('posClienteSelect').value = '';
   document.getElementById('posClienteSelectedCard').classList.add('hidden');
   document.getElementById('posClienteSearchResults').classList.add('hidden');
   document.getElementById('posClienteSearchInput').value = '';
   document.getElementById('btnClearClientePOS').classList.add('hidden');
+  const badgeVend = document.getElementById('posSelectedClienteVendedorBadge');
+  if (badgeVend) {
+    badgeVend.textContent = '';
+    badgeVend.classList.add('hidden');
+  }
+  const selV = document.getElementById('posVendedorSelect');
+  if (selV) {
+    selV.value = '';
+    if (typeof actualizarComisionPosBadge === 'function') actualizarComisionPosBadge();
+  }
   document.getElementById('posClienteSearchInput').focus();
 }
 
@@ -2574,8 +2690,10 @@ function renderPosCatalog() {
            <i class="fa-solid ${esProducto ? 'fa-box' : 'fa-wrench'}"></i>
          </div>`;
 
+    const stkComp = parseFloat(p.stock_comprometido || 0);
+    const stkDisp = Math.max(0, parseFloat(p.stock || 0) - stkComp);
     const badgeStock = esProducto
-      ? `<span class="text-[10px] font-bold ${agotado ? 'text-rose-600' : 'text-emerald-600'}">Stock: ${p.stock}</span>`
+      ? `<span class="text-[10px] font-bold ${agotado ? 'text-rose-600' : 'text-emerald-600'}">Stock: ${p.stock}${stkComp > 0 ? ` <span class="text-amber-600">(Disp: ${stkDisp})</span>` : ''}</span>`
       : `<span class="text-[10px] font-medium text-purple-600">Servicio</span>`;
 
     const badgeImpuesto = p.impuesto_tipo === 'gravado'
@@ -2616,14 +2734,19 @@ function addPosItem(productoId) {
 
   const existing = AppState.posCart.find(i => i.producto_id === productoId);
 
-  // Si es producto, validar stock
+  // Si es producto, validar stock disponible (descontando reservas activas de pedidos)
+  const stockDisponible = prod.tipo === 'producto'
+    ? Math.max(0, parseFloat(prod.stock || 0) - parseFloat(prod.stock_comprometido || 0))
+    : parseFloat(prod.stock || 0);
+
   if (prod.tipo === 'producto') {
     const currentCant = existing ? existing.cantidad : 0;
-    if (currentCant + 1 > prod.stock) {
+    if (currentCant + 1 > stockDisponible) {
+      const msg = `Existencias disponibles insuficientes para '${prod.nombre}'. Disponible: ${stockDisponible} (Físico: ${prod.stock}, Reservado: ${prod.stock_comprometido || 0})`;
       if (typeof showToast === 'function') {
-        showToast(`Existencias insuficientes para '${prod.nombre}'. Disponibles: ${prod.stock}`, 'warning');
+        showToast(msg, 'warning');
       } else {
-        alert(`Existencias insuficientes para '${prod.nombre}'. Disponibles: ${prod.stock}`);
+        alert(msg);
       }
       return;
     }
@@ -2634,6 +2757,7 @@ function addPosItem(productoId) {
 
   if (existing) {
     existing.cantidad += 1;
+    existing.stock_disponible = stockDisponible;
     existing.subtotal = existing.precio_unitario * existing.cantidad;
     existing.iva_total = existing.iva_unitario * existing.cantidad;
     existing.total = existing.subtotal + existing.iva_total;
@@ -2647,7 +2771,7 @@ function addPosItem(productoId) {
       precio_unitario: prod.precio_base,
       iva_unitario: ivaUnitario,
       cantidad: 1,
-      stock_disponible: prod.stock,
+      stock_disponible: stockDisponible,
       subtotal: prod.precio_base,
       iva_total: ivaUnitario,
       total: prod.precio_base + ivaUnitario
@@ -2994,6 +3118,7 @@ function setVencimientoDias(dias) {
 function limpiarPOS() {
   AppState.posCart = [];
   limpiarClientePOS();
+  if (document.getElementById('posNotasVenta')) document.getElementById('posNotasVenta').value = '';
   renderPosCart();
   setPosTipoVenta('contado');
   initDefaultPosPago();
@@ -3057,8 +3182,12 @@ async function procesarFactura(tipoVentaForzado = null) {
     }
   }
 
+  const vendedorId = document.getElementById('posVendedorSelect')?.value || '';
+  const notasInput = (document.getElementById('posNotasVenta')?.value || '').trim();
+  const notaDefault = tipoVenta === 'credito' ? 'Venta a crédito enviada a cuentas por cobrar' : 'Venta por mostrador al contado';
   const payload = {
     cliente_id: parseInt(clienteId),
+    vendedor_id: vendedorId ? parseInt(vendedorId) : null,
     tipo_venta: tipoVenta,
     fecha_vencimiento: fechaVencimiento,
     items: AppState.posCart.map(i => ({
@@ -3067,7 +3196,7 @@ async function procesarFactura(tipoVentaForzado = null) {
       precio_unitario: i.precio_unitario
     })),
     pagos: pagos,
-    notas: tipoVenta === 'credito' ? 'Venta a crédito enviada a cuentas por cobrar' : 'Venta por mostrador al contado'
+    notas: notasInput || notaDefault
   };
 
   try {
@@ -17452,6 +17581,11 @@ function actualizarUIUsuarioYPermisos() {
     if (navUsuarios) {
       navUsuarios.style.display = (p.perm_configuracion || u.rol_nombre === 'SuperAdmin') ? 'flex' : 'none';
     }
+    const navFuerzaVentas = document.getElementById('nav-fuerza-ventas');
+    if (navFuerzaVentas) {
+      const puedeVerFv = (p.perm_fuerza_ventas !== undefined ? p.perm_fuerza_ventas : 1) || p.perm_ventas || u.rol_nombre === 'SuperAdmin';
+      navFuerzaVentas.style.display = puedeVerFv ? 'flex' : 'none';
+    }
   }
 }
 window.actualizarUIUsuarioYPermisos = actualizarUIUsuarioYPermisos;
@@ -17643,7 +17777,12 @@ window.cerrarSesionActual = cerrarSesionActual;
 // MÓDULO 14: FUERZA DE VENTAS & GESTIÓN DE VENDEDORES (ERP)
 // ==============================================================================
 async function loadFuerzaVentas() {
-  await Promise.all([cargarDirectorioVendedores(), cargarReporteComisiones()]);
+  await Promise.allSettled([
+    cargarDirectorioVendedores(),
+    cargarReporteComisiones(),
+    cargarPedidosAdmin(),
+    cargarZonasFuerzaVentas()
+  ]);
 }
 window.loadFuerzaVentas = loadFuerzaVentas;
 
@@ -17656,18 +17795,26 @@ async function cargarDirectorioVendedores() {
 
     // Actualizar KPIs de Fuerza de Ventas
     let totalVentas = 0;
-    let totalComisiones = 0;
+    let totalComisionesDevengadas = 0;
+    let totalComisionesPendientes = 0;
     vendedores.forEach(v => {
       totalVentas += parseFloat(v.ventas_mes_usd || 0);
-      totalComisiones += parseFloat(v.comisiones_mes_usd || 0);
+      totalComisionesDevengadas += parseFloat(
+        v.comisiones_devengadas_usd !== undefined ? v.comisiones_devengadas_usd : (v.comisiones_mes_usd || 0)
+      );
+      totalComisionesPendientes += parseFloat(v.comisiones_pendientes_usd || 0);
     });
 
     const kpiVentas = document.getElementById('kpiFvVentasMes');
     const kpiCom = document.getElementById('kpiFvComisionesDevengadas');
+    const kpiPend = document.getElementById('kpiFvComisionesPendientes');
     const kpiTotal = document.getElementById('kpiFvTotalVendedores');
 
     if (kpiVentas) kpiVentas.textContent = `$${totalVentas.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
-    if (kpiCom) kpiCom.textContent = `$${totalComisiones.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+    if (kpiCom) kpiCom.textContent = `$${totalComisionesDevengadas.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+    if (kpiPend && vendedores.some(v => v.comisiones_pendientes_usd !== undefined)) {
+      kpiPend.textContent = `$${totalComisionesPendientes.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+    }
     if (kpiTotal) kpiTotal.textContent = `${vendedores.length} Asesores`;
 
     renderVendedoresTable(vendedores);
@@ -17691,15 +17838,38 @@ function renderVendedoresTable(vendedores) {
     const meta = parseFloat(v.meta_mensual_usd || 5000);
     const pct = meta > 0 ? Math.min(100, Math.round((ventas / meta) * 100)) : 0;
     const pctBadgeClass = pct >= 100 ? 'bg-emerald-100 text-emerald-800' : pct >= 50 ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-700';
+    const devengado = parseFloat(
+      v.comisiones_devengadas_usd !== undefined ? v.comisiones_devengadas_usd : (v.comisiones_mes_usd || 0)
+    );
+    const pendientes = parseFloat(v.comisiones_pendientes_usd || 0);
+    const clientesCount = parseInt(v.clientes_asignados || 0, 10);
+    const usrBadge = v.usuario_username
+      ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold"><i class="fa-solid fa-user-check mr-1"></i>@${escapeHtml(v.usuario_username)}</span>`
+      : '<span class="text-[10px] text-slate-400 italic">Sin usuario</span>';
+    const nombreEsc = String(v.nombre || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
     return `
       <tr class="hover:bg-slate-50 transition border-b border-slate-100">
-        <td class="py-3 px-4 font-mono font-bold text-slate-800">${v.codigo}</td>
-        <td class="py-3 px-4 font-bold text-slate-900">${v.nombre}</td>
-        <td class="py-3 px-4 text-slate-600">${v.telefono || '-'}</td>
+        <td class="py-3 px-4 font-mono font-bold text-slate-800">${escapeHtml(v.codigo)}</td>
+        <td class="py-3 px-4">
+          <div class="font-bold text-slate-900">${escapeHtml(v.nombre)}</div>
+          <div class="flex flex-wrap items-center gap-1.5 mt-1">
+            ${usrBadge}
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-semibold">
+              <i class="fa-solid fa-users mr-1 text-slate-400"></i>${clientesCount} cliente${clientesCount === 1 ? '' : 's'}
+            </span>
+          </div>
+        </td>
+        <td class="py-3 px-4 text-slate-600">
+          <div>${escapeHtml(v.telefono || '-')}</div>
+          ${v.email ? `<div class="text-[10px] text-slate-400">${escapeHtml(v.email)}</div>` : ''}
+        </td>
         <td class="py-3 px-4 text-center font-bold text-emerald-700 bg-emerald-50/50">${parseFloat(v.porcentaje_comision_base || 0).toFixed(1)}%</td>
         <td class="py-3 px-4 text-right font-mono font-bold text-slate-800">$${meta.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-        <td class="py-3 px-4 text-right font-mono font-bold text-blue-700">$${ventas.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td class="py-3 px-4 text-right font-mono">
+          <div class="font-bold text-blue-700">$${ventas.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
+          <div class="text-[10px] text-emerald-700 font-semibold">Dev: $${devengado.toFixed(2)}${pendientes > 0 ? ` · CxC: $${pendientes.toFixed(2)}` : ''}</div>
+        </td>
         <td class="py-3 px-4 text-center">
           <div class="flex items-center justify-center space-x-1.5">
             <div class="w-16 bg-slate-200 rounded-full h-2 overflow-hidden">
@@ -17713,7 +17883,7 @@ function renderVendedoresTable(vendedores) {
             <button onclick="editarVendedorModal(${v.id})" class="p-1.5 text-blue-700 hover:bg-blue-50 rounded-lg transition" title="Editar Vendedor">
               <i class="fa-solid fa-pen-to-square"></i>
             </button>
-            <button onclick="abrirModalLiquidar(${v.id}, '${v.nombre.replace(/'/g, "\'")}', ${v.comisiones_mes_usd || 0})" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[10px] font-bold transition flex items-center" title="Liquidar Comisiones">
+            <button onclick="abrirModalLiquidar(${v.id}, '${nombreEsc}', ${devengado})" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[10px] font-bold transition flex items-center" title="Liquidar Comisiones Devengadas ($${devengado.toFixed(2)})">
               <i class="fa-solid fa-hand-holding-dollar mr-1"></i>Liquidar
             </button>
           </div>
@@ -17783,12 +17953,15 @@ function cambiarSubtabFuerzaVentas(subtab) {
   const pVend = document.getElementById('panelFvVendedores');
   const pCom = document.getElementById('panelFvComisiones');
   const pPed = document.getElementById('panelFvPedidos');
+  const pZon = document.getElementById('panelFvZonas');
   const bVend = document.getElementById('subtabFvVendedores');
   const bCom = document.getElementById('subtabFvComisiones');
   const bPed = document.getElementById('subtabFvPedidos');
+  const bZon = document.getElementById('subtabFvZonas');
 
-  [pVend, pCom, pPed].forEach(p => p && p.classList.add('hidden'));
-  [bVend, bCom, bPed].forEach(b => b && (b.className = 'px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition'));
+  [pVend, pCom, pPed, pZon].forEach(p => p && p.classList.add('hidden'));
+  [bVend, bCom, bZon].forEach(b => b && (b.className = 'px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition'));
+  if (bPed) bPed.className = 'px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition flex items-center space-x-1.5';
 
   if (subtab === 'vendedores') {
     if (pVend) pVend.classList.remove('hidden');
@@ -17800,13 +17973,37 @@ function cambiarSubtabFuerzaVentas(subtab) {
     cargarReporteComisiones();
   } else if (subtab === 'pedidos') {
     if (pPed) pPed.classList.remove('hidden');
-    if (bPed) bPed.className = 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition';
+    if (bPed) bPed.className = 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition flex items-center space-x-1.5';
     cargarPedidosAdmin();
+  } else if (subtab === 'zonas') {
+    if (pZon) pZon.classList.remove('hidden');
+    if (bZon) bZon.className = 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition';
+    cargarZonasFuerzaVentas();
   }
 }
 window.cambiarSubtabFuerzaVentas = cambiarSubtabFuerzaVentas;
 
-function abrirModalNuevoVendedor() {
+async function poblarSelectUsuarioVendedor(selectedUsuarioId = '') {
+  const sel = document.getElementById('vendedorFormUsuarioId');
+  if (!sel) return;
+
+  if (!Array.isArray(AppState.usuarios) || AppState.usuarios.length === 0) {
+    try {
+      const res = await fetch('/api/usuarios');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) AppState.usuarios = data;
+      }
+    } catch (e) {}
+  }
+
+  const usuarios = Array.isArray(AppState.usuarios) ? AppState.usuarios.filter(u => u.activo !== 0) : [];
+  sel.innerHTML = '<option value="">-- Sin usuario de acceso vinculado --</option>' +
+    usuarios.map(u => `<option value="${u.id}">@${escapeHtml(u.username)} — ${escapeHtml(u.nombre_completo || '')} (${escapeHtml(u.rol_nombre || 'Rol')})</option>`).join('');
+  sel.value = selectedUsuarioId ? String(selectedUsuarioId) : '';
+}
+
+async function abrirModalNuevoVendedor() {
   document.getElementById('modalVendedorTitulo').textContent = 'Registrar Nuevo Vendedor Comercial';
   document.getElementById('vendedorFormId').value = '';
   document.getElementById('vendedorFormCodigo').value = `VEN-${String((AppState.vendedores || []).length + 1).padStart(3, '0')}`;
@@ -17818,10 +18015,11 @@ function abrirModalNuevoVendedor() {
   document.getElementById('vendedorFormPct').value = '3.0';
   document.getElementById('vendedorFormMeta').value = '5000';
   document.getElementById('modalVendedorForm').classList.remove('hidden');
+  await poblarSelectUsuarioVendedor('');
 }
 window.abrirModalNuevoVendedor = abrirModalNuevoVendedor;
 
-function editarVendedorModal(vId) {
+async function editarVendedorModal(vId) {
   const v = (AppState.vendedores || []).find(x => x.id === vId);
   if (!v) return;
   document.getElementById('modalVendedorTitulo').textContent = 'Editar Vendedor Comercial';
@@ -17835,6 +18033,7 @@ function editarVendedorModal(vId) {
   document.getElementById('vendedorFormPct').value = v.porcentaje_comision_base || 3.0;
   document.getElementById('vendedorFormMeta').value = v.meta_mensual_usd || 5000;
   document.getElementById('modalVendedorForm').classList.remove('hidden');
+  await poblarSelectUsuarioVendedor(v.usuario_id || '');
 }
 window.editarVendedorModal = editarVendedorModal;
 
@@ -17846,6 +18045,7 @@ window.closeVendedorModal = closeVendedorModal;
 async function guardarVendedorData(event) {
   event.preventDefault();
   const vId = document.getElementById('vendedorFormId').value;
+  const rawUsuarioId = document.getElementById('vendedorFormUsuarioId')?.value || '';
   const payload = {
     codigo: document.getElementById('vendedorFormCodigo').value.trim().toUpperCase(),
     nombre: document.getElementById('vendedorFormNombre').value.trim(),
@@ -17853,7 +18053,8 @@ async function guardarVendedorData(event) {
     telefono: document.getElementById('vendedorFormTel').value.trim(),
     email: document.getElementById('vendedorFormEmail').value.trim(),
     porcentaje_comision_base: parseFloat(document.getElementById('vendedorFormPct').value || 3.0),
-    meta_mensual_usd: parseFloat(document.getElementById('vendedorFormMeta').value || 5000.0)
+    meta_mensual_usd: parseFloat(document.getElementById('vendedorFormMeta').value || 5000.0),
+    usuario_id: rawUsuarioId ? parseInt(rawUsuarioId, 10) : null
   };
 
   try {
@@ -17868,8 +18069,11 @@ async function guardarVendedorData(event) {
     if (res.ok) {
       showToast(vId ? 'Vendedor actualizado con éxito' : 'Vendedor registrado exitosamente', 'success');
       closeVendedorModal();
-      await cargarDirectorioVendedores();
-      await cargarVendedoresEnPos();
+      await Promise.allSettled([
+        cargarDirectorioVendedores(),
+        cargarVendedoresEnPos(),
+        typeof cargarCatalogosComerciales === 'function' ? cargarCatalogosComerciales() : Promise.resolve()
+      ]);
     } else {
       alert('Error: ' + (data.error || 'No se pudo guardar'));
     }
@@ -17932,6 +18136,151 @@ async function confirmarLiquidacionComisiones() {
 }
 window.confirmarLiquidacionComisiones = confirmarLiquidacionComisiones;
 
+// ==============================================================================
+// ZONAS Y TERRITORIOS COMERCIALES (FUERZA DE VENTAS)
+// ==============================================================================
+async function cargarZonasFuerzaVentas() {
+  try {
+    const res = await fetch('/api/zonas?all=1');
+    if (!res.ok) return;
+    const zonas = await res.json();
+    AppState.zonasAll = Array.isArray(zonas) ? zonas : [];
+    AppState.zonas = AppState.zonasAll.filter(z => z.is_active !== 0);
+    renderZonasTable(AppState.zonasAll);
+    if (typeof poblarSelectsClientesComerciales === 'function') {
+      poblarSelectsClientesComerciales();
+    }
+  } catch (err) {
+    console.error('Error cargando zonas comerciales:', err);
+  }
+}
+window.cargarZonasFuerzaVentas = cargarZonasFuerzaVentas;
+
+function renderZonasTable(zonas) {
+  const tbody = document.getElementById('tablaZonasBody');
+  if (!tbody) return;
+
+  if (!zonas || zonas.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-400 font-bold">No hay zonas comerciales registradas. Haga clic en "Nueva Zona".</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = zonas.map(z => {
+    const activa = z.is_active !== 0;
+    const estadoBadge = activa
+      ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">Activa</span>'
+      : '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-100 text-slate-500 border border-slate-200">Inactiva</span>';
+
+    return `
+      <tr class="hover:bg-slate-50 transition border-b border-slate-100 ${activa ? '' : 'opacity-65'}">
+        <td class="py-3 px-4 font-mono font-bold text-slate-500">#${z.id}</td>
+        <td class="py-3 px-4 font-bold text-slate-900">${escapeHtml(z.nombre)}</td>
+        <td class="py-3 px-4 text-slate-600">${escapeHtml(z.descripcion || 'Sin descripción de cobertura')}</td>
+        <td class="py-3 px-4 text-center">${estadoBadge}</td>
+        <td class="py-3 px-4 text-center">
+          <div class="flex items-center justify-center space-x-1.5">
+            <button onclick="editarZonaModal(${z.id})" class="p-1.5 text-blue-700 hover:bg-blue-50 rounded-lg transition" title="Editar Zona">
+              <i class="fa-solid fa-pen-to-square"></i>
+            </button>
+            <button onclick="toggleZonaActiva(${z.id}, ${activa ? 0 : 1})" class="px-2 py-1 ${activa ? 'bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'} rounded-lg text-[10px] font-bold transition" title="${activa ? 'Desactivar zona' : 'Reactivar zona'}">
+              <i class="fa-solid ${activa ? 'fa-ban' : 'fa-rotate-left'} mr-1"></i>${activa ? 'Desactivar' : 'Activar'}
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function abrirModalZona() {
+  document.getElementById('modalZonaTitulo').textContent = 'Nueva Zona Comercial';
+  document.getElementById('zonaFormId').value = '';
+  document.getElementById('zonaFormNombre').value = '';
+  document.getElementById('zonaFormDescripcion').value = '';
+  document.getElementById('modalZonaForm').classList.remove('hidden');
+}
+window.abrirModalZona = abrirModalZona;
+
+function editarZonaModal(zonaId) {
+  const lista = AppState.zonasAll || AppState.zonas || [];
+  const z = lista.find(x => Number(x.id) === Number(zonaId));
+  if (!z) return;
+  document.getElementById('modalZonaTitulo').textContent = 'Editar Zona Comercial';
+  document.getElementById('zonaFormId').value = z.id;
+  document.getElementById('zonaFormNombre').value = z.nombre || '';
+  document.getElementById('zonaFormDescripcion').value = z.descripcion || '';
+  document.getElementById('modalZonaForm').classList.remove('hidden');
+}
+window.editarZonaModal = editarZonaModal;
+
+function closeZonaModal() {
+  document.getElementById('modalZonaForm').classList.add('hidden');
+}
+window.closeZonaModal = closeZonaModal;
+
+async function guardarZonaData(event) {
+  event.preventDefault();
+  const zId = document.getElementById('zonaFormId').value;
+  const payload = {
+    nombre: document.getElementById('zonaFormNombre').value.trim(),
+    descripcion: document.getElementById('zonaFormDescripcion').value.trim()
+  };
+
+  if (!payload.nombre) {
+    alert('Debe ingresar el nombre de la zona comercial.');
+    return;
+  }
+
+  try {
+    const url = zId ? `/api/zonas/${zId}` : '/api/zonas';
+    const method = zId ? 'PUT' : 'POST';
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(zId ? 'Zona comercial actualizada' : 'Zona comercial creada exitosamente', 'success');
+      closeZonaModal();
+      await cargarZonasFuerzaVentas();
+    } else {
+      alert('Error: ' + (data.error || 'No se pudo guardar la zona comercial'));
+    }
+  } catch (err) {
+    alert('Error de conexión: ' + err.message);
+  }
+}
+window.guardarZonaData = guardarZonaData;
+
+async function toggleZonaActiva(zonaId, nuevoEstado) {
+  const lista = AppState.zonasAll || [];
+  const z = lista.find(x => Number(x.id) === Number(zonaId));
+  if (!z) return;
+
+  try {
+    const res = await fetch(`/api/zonas/${zonaId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nombre: z.nombre,
+        descripcion: z.descripcion || '',
+        is_active: nuevoEstado
+      })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(nuevoEstado ? 'Zona comercial reactivada' : 'Zona comercial desactivada', 'info');
+      await cargarZonasFuerzaVentas();
+    } else {
+      alert('Error: ' + (data.error || 'No se pudo cambiar el estado de la zona'));
+    }
+  } catch (err) {
+    alert('Error de conexión: ' + err.message);
+  }
+}
+window.toggleZonaActiva = toggleZonaActiva;
+
 async function cargarVendedoresEnPos() {
   const sel = document.getElementById('posVendedorSelect');
   if (!sel) return;
@@ -17944,9 +18293,16 @@ async function cargarVendedoresEnPos() {
 
     const actualVal = sel.value;
     sel.innerHTML = '<option value="">-- Ventas Mostrador / General (Sin comisión) --</option>' +
-      vendedores.map(v => `<option value="${v.id}" data-pct="${v.porcentaje_comision_base}">${v.codigo} - ${v.nombre} (${parseFloat(v.porcentaje_comision_base).toFixed(1)}%)</option>`).join('');
+      vendedores.map(v => `<option value="${v.id}" data-pct="${v.porcentaje_comision_base}">${escapeHtml(v.codigo)} - ${escapeHtml(v.nombre)} (${parseFloat(v.porcentaje_comision_base).toFixed(1)}%)</option>`).join('');
 
-    if (actualVal) sel.value = actualVal;
+    if (AppState.posClienteSeleccionado && AppState.posClienteSeleccionado.vendedor_id) {
+      sel.value = String(AppState.posClienteSeleccionado.vendedor_id);
+    } else if (actualVal) {
+      sel.value = actualVal;
+    } else if (AppState.usuarioActual) {
+      const propio = vendedores.find(v => Number(v.usuario_id) === Number(AppState.usuarioActual.id));
+      if (propio) sel.value = String(propio.id);
+    }
     actualizarComisionPosBadge();
   } catch (err) {
     console.error('Error cargando vendedores en POS:', err);
@@ -18254,6 +18610,16 @@ window.guardarUsuarioData = guardarUsuarioData;
 
 async function procesarPedidoPreventa() {
   if (!AppState.posClienteSeleccionado) {
+    const hiddenClienteId = document.getElementById('posClienteSelect')?.value;
+    if (hiddenClienteId && Array.isArray(AppState.clientes)) {
+      const encontrado = AppState.clientes.find(cli => Number(cli.id) === Number(hiddenClienteId));
+      if (encontrado) {
+        AppState.posClienteSeleccionado = encontrado;
+      }
+    }
+  }
+
+  if (!AppState.posClienteSeleccionado) {
     alert('Debe seleccionar un cliente antes de registrar el pedido.');
     return;
   }
@@ -18263,19 +18629,42 @@ async function procesarPedidoPreventa() {
   }
 
   const items = AppState.posCart.map(it => ({
-    producto_id: it.id,
+    producto_id: it.producto_id || it.id,
     cantidad: it.cantidad,
-    precio_unitario: it.precio
+    precio_unitario: it.precio_unitario !== undefined ? it.precio_unitario : it.precio
   }));
 
-  const vendedorId = document.getElementById('posVendedorSelect')?.value || null;
+  let vendedorId = document.getElementById('posVendedorSelect')?.value || '';
+  if (!vendedorId && AppState.posClienteSeleccionado.vendedor_id) {
+    vendedorId = String(AppState.posClienteSeleccionado.vendedor_id);
+  }
+  if (!vendedorId && AppState.usuarioActual && Array.isArray(AppState.vendedores)) {
+    const propio = AppState.vendedores.find(v => Number(v.usuario_id) === Number(AppState.usuarioActual.id));
+    if (propio) vendedorId = String(propio.id);
+  }
+
   const condicionPago = AppState.posTipoVenta || 'contado';
-  const diasCredito = condicionPago === 'credito' ? parseInt(document.getElementById('posDiasCredito')?.value || 15) : 0;
-  const notas = document.getElementById('posNotasVenta')?.value || '';
+  let diasCredito = 0;
+  if (condicionPago === 'credito') {
+    const diasEl = document.getElementById('posDiasCredito');
+    const fechaVencEl = document.getElementById('posFechaVencimiento');
+    if (diasEl && diasEl.value) {
+      diasCredito = Math.max(1, parseInt(diasEl.value, 10) || 15);
+    } else if (fechaVencEl && fechaVencEl.value) {
+      const hoy = new Date();
+      hoy.setHours(0, 0, 0, 0);
+      const venc = new Date(fechaVencEl.value + 'T00:00:00');
+      const diffDays = Math.round((venc.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
+      diasCredito = Math.max(1, Number.isFinite(diffDays) ? diffDays : 15);
+    } else {
+      diasCredito = 15;
+    }
+  }
+  const notas = (document.getElementById('posNotasVenta')?.value || '').trim();
 
   const payload = {
     cliente_id: AppState.posClienteSeleccionado.id,
-    vendedor_id: vendedorId ? parseInt(vendedorId) : null,
+    vendedor_id: vendedorId ? parseInt(vendedorId, 10) : null,
     items,
     condicion_pago: condicionPago,
     dias_credito: diasCredito,
@@ -18294,7 +18683,8 @@ async function procesarPedidoPreventa() {
       AppState.posCart = [];
       renderPosCart();
       if (document.getElementById('posNotasVenta')) document.getElementById('posNotasVenta').value = '';
-      if (AppState.currentView === 'fuerza-ventas') cargarPedidosAdmin();
+      if (typeof loadProductos === 'function') await loadProductos();
+      if (typeof cargarPedidosAdmin === 'function') await cargarPedidosAdmin();
     } else {
       alert('Error registrando pedido: ' + (data.error || 'No se pudo crear el pedido'));
     }
@@ -18336,12 +18726,16 @@ async function cargarPedidosAdmin() {
       return;
     }
 
+    const puedeFacturarPedido = AppState.usuarioActual?.permisos?.facturar_directo !== 0;
+
     tbody.innerHTML = pedidos.map(p => {
       let estadoBadge = '';
       if (p.estado === 'PENDIENTE') {
         estadoBadge = '<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300">PENDIENTE</span>';
       } else if (p.estado === 'FACTURADO') {
-        estadoBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">FACTURADO (${p.factura_numero || ''})</span>`;
+        estadoBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">FACTURADO (${escapeHtml(p.factura_numero || '')})</span>`;
+      } else if (p.estado === 'VENCIDO') {
+        estadoBadge = '<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-orange-100 text-orange-800 border border-orange-300">VENCIDO</span>';
       } else {
         estadoBadge = '<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300">RECHAZADO</span>';
       }
@@ -18352,13 +18746,13 @@ async function cargarPedidosAdmin() {
 
       return `
         <tr class="hover:bg-slate-50 transition border-b border-slate-100">
-          <td class="py-3 px-4 font-mono font-bold text-[#0755C9]">${p.numero_pedido}</td>
-          <td class="py-3 px-4 text-slate-500">${p.fecha ? p.fecha.substring(0, 16) : '-'}</td>
+          <td class="py-3 px-4 font-mono font-bold text-[#0755C9]">${escapeHtml(p.numero_pedido)}</td>
+          <td class="py-3 px-4 text-slate-500">${p.fecha ? escapeHtml(p.fecha.substring(0, 16)) : '-'}</td>
           <td class="py-3 px-4">
-            <div class="font-bold text-slate-900">${p.cliente_nombre}</div>
-            <div class="text-[10px] text-slate-400">${p.cliente_cedula || ''}</div>
+            <div class="font-bold text-slate-900">${escapeHtml(p.cliente_nombre)}</div>
+            <div class="text-[10px] text-slate-400">${escapeHtml(p.cliente_cedula || '')}</div>
           </td>
-          <td class="py-3 px-4 font-medium text-slate-700">${p.vendedor_nombre || '<span class="text-slate-400 italic">Sin asesor</span>'}</td>
+          <td class="py-3 px-4 font-medium text-slate-700">${p.vendedor_nombre ? escapeHtml(p.vendedor_nombre) : '<span class="text-slate-400 italic">Sin asesor</span>'}</td>
           <td class="py-3 px-4 text-center">${condBadge}</td>
           <td class="py-3 px-4 text-right font-bold text-slate-900">$${parseFloat(p.total_usd).toFixed(2)}</td>
           <td class="py-3 px-4 text-center">${estadoBadge}</td>
@@ -18366,7 +18760,7 @@ async function cargarPedidosAdmin() {
             <button onclick="abrirModalDetallePedido(${p.id})" class="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold" title="Ver Detalle">
               <i class="fa-solid fa-eye"></i>
             </button>
-            ${p.estado === 'PENDIENTE' ? `
+            ${p.estado === 'PENDIENTE' && puedeFacturarPedido ? `
               <button onclick="autorizarYFacturarPedido(${p.id})" class="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold" title="Autorizar y Facturar">
                 <i class="fa-solid fa-check-double"></i> Facturar
               </button>
@@ -18386,7 +18780,9 @@ async function cargarPedidosAdmin() {
 window.cargarPedidosAdmin = cargarPedidosAdmin;
 
 async function autorizarYFacturarPedido(pedidoId) {
-  const inputs = document.querySelectorAll('.input-cant-aprobada');
+  const modalPed = document.getElementById('modalPedidoDetalle');
+  const modalAbiertoParaPedido = modalPed && !modalPed.classList.contains('hidden') && Number(modalPed.dataset.pedidoId) === Number(pedidoId);
+  const inputs = modalAbiertoParaPedido ? document.querySelectorAll('.input-cant-aprobada') : [];
   const items_aprobados = [];
   let hayAprobacionParcial = false;
 
@@ -18421,9 +18817,13 @@ async function autorizarYFacturarPedido(pedidoId) {
       const partialMsg = data.hubo_aprobacion_parcial ? '\n[Aprobación Parcial: Reserva remanente liberada al inventario disponible]' : '';
       alert(`¡Facturación Exitosa!${partialMsg}\n\nFactura N°: ${data.numero_factura}\nMonto Total: $${parseFloat(data.total_usd).toFixed(2)} USD\nTipo: ${data.tipo_venta.toUpperCase()}\nComisión Vendedor: $${parseFloat(data.comision_monto_usd || 0).toFixed(2)} USD (${data.comision_estado})`);
       closeModalDetallePedido();
-      await cargarPedidosAdmin();
-      await loadDashboard();
-      await loadProductos();
+      await Promise.allSettled([
+        cargarPedidosAdmin(),
+        cargarDirectorioVendedores(),
+        cargarReporteComisiones(),
+        loadDashboard(),
+        loadProductos()
+      ]);
     } else {
       alert('No se pudo facturar el pedido: ' + (data.error || 'Error desconocido'));
     }
@@ -18483,7 +18883,7 @@ async function rechazarPedidoPrompt(pedidoId) {
     if (res.ok) {
       showToast('Pedido rechazado y reserva de stock liberada', 'info');
       closeModalDetallePedido();
-      cargarPedidosAdmin();
+      await Promise.allSettled([cargarPedidosAdmin(), loadProductos()]);
     } else {
       alert('Error: ' + (data.error || 'No se pudo rechazar'));
     }
@@ -18498,6 +18898,9 @@ async function abrirModalDetallePedido(pedidoId) {
     const res = await fetch(`/api/pedidos/${pedidoId}`);
     if (!res.ok) throw new Error('No se pudo obtener el pedido');
     const ped = await res.json();
+    const modalPed = document.getElementById('modalPedidoDetalle');
+    if (modalPed) modalPed.dataset.pedidoId = String(pedidoId);
+    const puedeFacturarPedido = AppState.usuarioActual?.permisos?.facturar_directo !== 0;
 
     document.getElementById('modalPedTitulo').textContent = `Pedido N° ${ped.numero_pedido}`;
     const fechaVencTxt = ped.fecha_vencimiento ? ` | Vigencia hasta: ${ped.fecha_vencimiento.substring(0, 16)}` : '';
@@ -18522,7 +18925,7 @@ async function abrirModalDetallePedido(pedidoId) {
 
     const itemsBody = document.getElementById('modalPedItemsBody');
     if (itemsBody) {
-      const isPendiente = ped.estado === 'PENDIENTE';
+      const isPendiente = ped.estado === 'PENDIENTE' && puedeFacturarPedido;
       itemsBody.innerHTML = (ped.items || []).map(it => {
         const cantOrig = parseFloat(it.cantidad);
         const cantAprob = it.cantidad_aprobada !== undefined && it.cantidad_aprobada !== null ? parseFloat(it.cantidad_aprobada) : cantOrig;
@@ -18564,7 +18967,7 @@ async function abrirModalDetallePedido(pedidoId) {
 
     const acciones = document.getElementById('modalPedAccionesAdmin');
     if (acciones) {
-      if (ped.estado === 'PENDIENTE') {
+      if (ped.estado === 'PENDIENTE' && puedeFacturarPedido) {
         acciones.innerHTML = `
           <button onclick="autorizarYFacturarPedido(${ped.id})" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center">
             <i class="fa-solid fa-check-double mr-1.5"></i>Autorizar y Facturar Pedido
