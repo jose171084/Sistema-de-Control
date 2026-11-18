@@ -7165,10 +7165,9 @@ def crear_zona(nombre, descripcion='', is_active=1, tenant_id=1, conn=None):
             INSERT INTO zonas (tenant_id, nombre, descripcion, is_active)
             VALUES (?, ?, ?, ?)
         """, (tenant_id, nombre.strip(), (descripcion or '').strip(), int(is_active)))
-        if auto_commit and started_tx and conn.in_transaction:
-            conn.commit()
-            schedule_cloud_sync()
-        return {"id": cur.lastrowid, "success": True, "nombre": nombre}
+        conn.commit()
+        schedule_cloud_sync()
+        return {"id": cur.lastrowid, "success": True, "nombre": nombre.strip()}
     finally:
         if close_after:
             conn.close()
@@ -7185,7 +7184,7 @@ def actualizar_zona(zona_id, nombre=None, descripcion=None, is_active=None, conn
         z = cur.fetchone()
         if not z:
             raise ValueError(f"Zona ID {zona_id} no existe")
-        
+
         cur.execute("""
             UPDATE zonas
             SET nombre = COALESCE(?, nombre),
@@ -7193,9 +7192,8 @@ def actualizar_zona(zona_id, nombre=None, descripcion=None, is_active=None, conn
                 is_active = COALESCE(?, is_active)
             WHERE id = ?
         """, (nombre, descripcion, is_active, zona_id))
-        if auto_commit and started_tx and conn.in_transaction:
-            conn.commit()
-            schedule_cloud_sync()
+        conn.commit()
+        schedule_cloud_sync()
         return {"id": zona_id, "success": True}
     finally:
         if close_after:
@@ -7205,7 +7203,7 @@ def actualizar_zona(zona_id, nombre=None, descripcion=None, is_active=None, conn
 # FUNCIONES DE FUERZA DE VENTAS, PEDIDOS Y RESERVA DE STOCK
 # ========================================================
 
-def crear_pedido(cliente_id, vendedor_id=None, items=None, condicion_pago='contado', dias_credito=0, notas='', usuario_id=1, fecha_vencimiento=None, horas_vigencia=48, conn=None):
+def crear_pedido(cliente_id, vendedor_id=None, items=None, condicion_pago='contado', dias_credito=0, notas='', usuario_id=1, fecha_vencimiento=None, horas_vigencia=48, conn=None, auto_commit=True):
     """
     Crea un pedido / preventa con Logica ERP de 'Stock Comprometido':
     - Valida existencia y solvencia de cliente.

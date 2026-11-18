@@ -18,6 +18,7 @@ import security_core as sec
 RBAC_RULES = {
     # 1. Ventas & POS (perm_ventas)
     r"^/api/vendedores": "perm_ventas",
+    r"^/api/zonas": "perm_ventas",
     r"^/api/pedidos": "perm_ventas",
     r"^/api/comisiones": "perm_ventas",
     r"^/api/facturas": "perm_ventas",

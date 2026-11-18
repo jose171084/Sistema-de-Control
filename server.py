@@ -17,9 +17,11 @@ import time
 import re
 import shutil
 import uuid
+import secrets
+import hashlib
 import email.parser
 import email.policy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import security_core
 from security_middleware import SecurityMiddleware
@@ -399,13 +401,18 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 mes_actual = datetime.now().strftime("%Y-%m")
                 cursor.execute("""
                     SELECT v.*,
+                           u.username as usuario_username,
+                           (SELECT COUNT(*) FROM clientes c WHERE c.vendedor_id = v.id) as clientes_asignados,
                            COALESCE(SUM(CASE WHEN f.fecha LIKE ? AND f.estado != 'anulada' THEN f.total_usd ELSE 0 END), 0.0) as ventas_mes_usd,
-                           COALESCE(SUM(CASE WHEN f.fecha LIKE ? AND f.estado != 'anulada' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_mes_usd
+                           COALESCE(SUM(CASE WHEN f.fecha LIKE ? AND f.estado != 'anulada' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_mes_usd,
+                           COALESCE(SUM(CASE WHEN f.fecha LIKE ? AND f.estado != 'anulada' AND f.comision_estado = 'DEVENGADA' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_devengadas_usd,
+                           COALESCE(SUM(CASE WHEN f.fecha LIKE ? AND f.estado != 'anulada' AND f.comision_estado = 'PENDIENTE' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_pendientes_usd
                     FROM vendedores v
+                    LEFT JOIN usuarios u ON v.usuario_id = u.id
                     LEFT JOIN facturas f ON f.vendedor_id = v.id
                     GROUP BY v.id
                     ORDER BY v.id ASC
-                """, (f"{mes_actual}%", f"{mes_actual}%"))
+                """, (f"{mes_actual}%", f"{mes_actual}%", f"{mes_actual}%", f"{mes_actual}%"))
                 vendedores = [dict(r) for r in cursor.fetchall()]
                 self.send_json(vendedores)
                 return
@@ -3040,10 +3047,6 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 rol_nombre = perms.get("rol_nombre", "Usuario")
                 
                 # Generación formal de sesión Fase 1 (OWASP Token + Anti-CSRF + Sesión Activa BD)
-                import secrets
-                import hashlib
-                from datetime import datetime, timezone, timedelta
-                
                 jti = secrets.token_hex(32)
                 csrf_token = secrets.token_hex(32)
                 token = security_core.emitir_jwt(
@@ -3173,8 +3176,10 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 doc = (body.get("documento_identidad") or "").strip()
                 telefono = (body.get("telefono") or "").strip()
                 email = (body.get("email") or "").strip()
-                pct = float(body.get("porcentaje_comision_base") or 3.0)
-                meta = float(body.get("meta_mensual_usd") or 5000.0)
+                pct = float(body.get("porcentaje_comision_base") if body.get("porcentaje_comision_base") not in (None, "") else 3.0)
+                meta = float(body.get("meta_mensual_usd") if body.get("meta_mensual_usd") not in (None, "") else 5000.0)
+                raw_uid = body.get("usuario_id")
+                usuario_id = int(raw_uid) if raw_uid not in (None, "", 0, "0") else None
                 if not codigo or not nombre:
                     self.send_error_json("Código y nombre del vendedor requeridos", 400)
                     return
@@ -3183,9 +3188,9 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json(f"Ya existe un vendedor con el código '{codigo}'", 409)
                     return
                 cursor.execute("""
-                    INSERT INTO vendedores (codigo, nombre, documento_identidad, telefono, email, porcentaje_comision_base, meta_mensual_usd, activo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-                """, (codigo, nombre, doc, telefono, email, pct, meta))
+                    INSERT INTO vendedores (usuario_id, codigo, nombre, documento_identidad, telefono, email, porcentaje_comision_base, meta_mensual_usd, activo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                """, (usuario_id, codigo, nombre, doc, telefono, email, pct, meta))
                 conn.commit()
                 new_v_id = cursor.lastrowid
                 schedule_cloud_sync()
@@ -3404,8 +3409,10 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 telefono = body.get("telefono", "").strip()
                 correo = body.get("correo", "").strip()
                 direccion = body.get("direccion", "").strip()
-                zona_id = body.get("zona_id")
-                vendedor_id = body.get("vendedor_id")
+                raw_zona = body.get("zona_id")
+                raw_vend = body.get("vendedor_id")
+                zona_id = int(raw_zona) if raw_zona not in (None, "", 0, "0") else None
+                vendedor_id = int(raw_vend) if raw_vend not in (None, "", 0, "0") else None
 
                 if not nombre or not cedula or not telefono:
                     self.send_error_json("Nombre, cédula y teléfono son obligatorios", 400)
@@ -3477,10 +3484,12 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json("Se requiere un cliente y al menos un producto o servicio", 400)
                     return
 
-                cursor.execute("SELECT id FROM clientes WHERE id = ?", (cliente_id,))
-                if not cursor.fetchone():
+                cursor.execute("SELECT id, vendedor_id FROM clientes WHERE id = ?", (cliente_id,))
+                cli_row = cursor.fetchone()
+                if not cli_row:
                     self.send_error_json(f"Cliente ID {cliente_id} no encontrado", 404)
                     return
+                cliente_vendedor_default = cli_row["vendedor_id"]
 
                 if tipo_venta == "credito" and not fecha_vencimiento:
                     fecha_vencimiento = (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")
@@ -3613,8 +3622,9 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 if idempotency_key and f"[IDEMPOTENCY:{idempotency_key}]" not in notas_final:
                     notas_final = f"{notas_final} [IDEMPOTENCY:{idempotency_key}]".strip()
 
-                # Vendedor y esquema de comisiones de venta
-                vendedor_id = body.get("vendedor_id")
+                # Vendedor y esquema de comisiones de venta (si no se envía explícito, hereda el vendedor asignado al cliente)
+                raw_v_fac = body.get("vendedor_id")
+                vendedor_id = int(raw_v_fac) if raw_v_fac not in (None, "", 0, "0") else cliente_vendedor_default
                 comision_pct = 0.0
                 comision_monto_usd = 0.0
                 comision_estado = "PENDIENTE"
@@ -3888,11 +3898,19 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
                 # Actualizar factura correspondiente (saldo y estado según saldo restante)
                 nuevo_estado_factura = "pagada" if nuevo_saldo <= 0.001 else "pendiente"
-                cursor.execute("""
-                    UPDATE facturas
-                    SET saldo_pendiente = ?, estado = ?
-                    WHERE id = ?
-                """, (nuevo_saldo, nuevo_estado_factura, cxc_dict["factura_id"]))
+                if nuevo_saldo <= 0.001:
+                    cursor.execute("""
+                        UPDATE facturas
+                        SET saldo_pendiente = ?, estado = ?,
+                            comision_estado = CASE WHEN vendedor_id IS NOT NULL AND comision_estado = 'PENDIENTE' THEN 'DEVENGADA' ELSE comision_estado END
+                        WHERE id = ?
+                    """, (nuevo_saldo, nuevo_estado_factura, cxc_dict["factura_id"]))
+                else:
+                    cursor.execute("""
+                        UPDATE facturas
+                        SET saldo_pendiente = ?, estado = ?
+                        WHERE id = ?
+                    """, (nuevo_saldo, nuevo_estado_factura, cxc_dict["factura_id"]))
 
                 conn.commit()
                 schedule_cloud_sync()
@@ -5460,13 +5478,39 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             # 4. Actualizar Cliente
             elif path.startswith("/api/clientes/"):
                 c_id = int(path.split("/")[-1])
+                cursor.execute("SELECT vendedor_id, zona_id FROM clientes WHERE id = ?", (c_id,))
+                cli_actual = cursor.fetchone()
+                if not cli_actual:
+                    self.send_error_json("Cliente no encontrado", 404)
+                    return
+
+                vendedor_val = cli_actual["vendedor_id"]
+                zona_val = cli_actual["zona_id"]
+                if "vendedor_id" in body:
+                    raw_v = body.get("vendedor_id")
+                    vendedor_val = int(raw_v) if raw_v not in (None, "", 0, "0") else None
+                if "zona_id" in body:
+                    raw_z = body.get("zona_id")
+                    zona_val = int(raw_z) if raw_z not in (None, "", 0, "0") else None
+
+                # Respetar aislamiento de cartera para vendedores comerciales (facturar_directo == 0)
+                user_tok, perms = self.get_current_user_and_perms()
+                if perms and perms.get("facturar_directo", 1) == 0:
+                    usuario_id = user_tok.get("uid") if user_tok else None
+                    if usuario_id:
+                        cursor.execute("SELECT id FROM vendedores WHERE usuario_id = ? AND activo = 1", (usuario_id,))
+                        v_row = cursor.fetchone()
+                        if v_row:
+                            vendedor_val = v_row["id"]
+
                 cursor.execute("""
                     UPDATE clientes 
-                    SET nombre = ?, cedula = ?, telefono = ?, correo = ?, direccion = ?
+                    SET nombre = ?, cedula = ?, telefono = ?, correo = ?, direccion = ?, vendedor_id = ?, zona_id = ?
                     WHERE id = ?
-                """, (body.get("nombre"), body.get("cedula"), body.get("telefono"), body.get("correo"), body.get("direccion"), c_id))
+                """, (body.get("nombre"), body.get("cedula"), body.get("telefono"), body.get("correo"), body.get("direccion"), vendedor_val, zona_val, c_id))
                 conn.commit()
-                self.send_json({"success": True})
+                schedule_cloud_sync()
+                self.send_json({"success": True, "vendedor_id": vendedor_val, "zona_id": zona_val})
 
             # 5. Actualizar Proveedor
             elif path.startswith("/api/usuarios/"):
@@ -5569,6 +5613,16 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             elif path.startswith("/api/vendedores/"):
                 v_id = int(path.split("/")[-1])
+                cursor.execute("SELECT usuario_id FROM vendedores WHERE id = ?", (v_id,))
+                v_curr = cursor.fetchone()
+                if not v_curr:
+                    self.send_error_json("Vendedor no encontrado", 404)
+                    return
+                usuario_id_val = v_curr["usuario_id"]
+                if "usuario_id" in body:
+                    raw_uid = body.get("usuario_id")
+                    usuario_id_val = int(raw_uid) if raw_uid not in (None, "", 0, "0") else None
+
                 cursor.execute("""
                     UPDATE vendedores
                     SET nombre = COALESCE(?, nombre),
@@ -5577,7 +5631,8 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         email = COALESCE(?, email),
                         porcentaje_comision_base = COALESCE(?, porcentaje_comision_base),
                         meta_mensual_usd = COALESCE(?, meta_mensual_usd),
-                        activo = COALESCE(?, activo)
+                        activo = COALESCE(?, activo),
+                        usuario_id = ?
                     WHERE id = ?
                 """, (
                     body.get("nombre"),
@@ -5587,6 +5642,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     body.get("porcentaje_comision_base"),
                     body.get("meta_mensual_usd"),
                     body.get("activo"),
+                    usuario_id_val,
                     v_id
                 ))
                 conn.commit()
