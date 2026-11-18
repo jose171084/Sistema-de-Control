@@ -933,7 +933,10 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     add_col_if_missing("devolucion_detalles", "factura_detalle_id", "INTEGER")
     add_col_if_missing("devolucion_detalles", "costo_unitario", "REAL")
     add_col_if_missing("devolucion_detalles", "costo_total", "REAL")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_dev_det_factura_det ON devolucion_detalles(factura_detalle_id)")
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_dev_det_factura_det ON devolucion_detalles(factura_detalle_id)")
+    except Exception:
+        pass
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajustes_idemp ON inventario_ajustes(idempotency_key)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_ajustes_estado ON inventario_ajustes(estado)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_inv_mov_subtipo ON inventario_movimientos(subtipo_movimiento)")
@@ -1317,6 +1320,78 @@ def auditar_y_migrar_db(conn=None, cursor=None):
             VALUES (?, ?, ?, ?, ?, ?, ?, 1)
         """, ("admin", pwd_hash, salt_inicial, "Administrador Principal", "admin@tavocloud.com", "+58 412 0000000", rol_id))
         print("[MIGRACIÓN AUTO] Usuario maestro inicial 'admin' creado exitosamente (clave inicial: admin123).")
+
+    # ==============================================================================
+    # 12.1 INFRAESTRUCTURA DE SEGURIDAD FASE 1 (SESIONES, IDEMPOTENCIA Y OUTBOX)
+    # ==============================================================================
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS sesiones_activas (
+        jti TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL,
+        parent_jti TEXT NULL,
+        reemplazado_por_jti TEXT NULL UNIQUE,
+        usuario_id INTEGER NOT NULL,
+        instance_id INTEGER NOT NULL DEFAULT 1,
+        csrf_token TEXT NOT NULL,
+        ip_origen TEXT NULL,
+        user_agent TEXT NULL,
+        creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expira_en TIMESTAMP NOT NULL,
+        rotada_en TIMESTAMP NULL,
+        estado TEXT NOT NULL CHECK(estado IN ('ACTIVA', 'ROTADA', 'EXPIRADA', 'REVOCADA')),
+        encrypted_jwt TEXT NULL,
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+        FOREIGN KEY (parent_jti) REFERENCES sesiones_activas(jti) ON DELETE SET NULL,
+        FOREIGN KEY (reemplazado_por_jti) REFERENCES sesiones_activas(jti) ON DELETE SET NULL,
+        CHECK (reemplazado_por_jti <> jti),
+        CHECK (parent_jti <> jti)
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sesiones_hash ON sesiones_activas(token_hash)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sesiones_usuario ON sesiones_activas(usuario_id, estado)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sesiones_parent ON sesiones_activas(parent_jti)")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS idempotencia_transaccional (
+        idempotency_key TEXT PRIMARY KEY,
+        request_hash TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        usuario_id INTEGER NOT NULL,
+        instance_id INTEGER NOT NULL DEFAULT 1,
+        estado TEXT NOT NULL CHECK(estado IN ('EN_PROCESO', 'COMPLETADO', 'FALLIDO')),
+        response_code INTEGER NULL,
+        response_body TEXT NULL,
+        creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expira_en TIMESTAMP NOT NULL,
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_idempotencia_expira ON idempotencia_transaccional(expira_en)")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS outbox_eventos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo_evento TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        estado TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK(estado IN ('PENDIENTE', 'PROCESADO', 'FALLIDO')),
+        reintentos INTEGER NOT NULL DEFAULT 0,
+        creado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        procesado_en TIMESTAMP NULL
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_outbox_pendientes ON outbox_eventos(estado, creado_en)")
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+        version TEXT PRIMARY KEY,
+        descripcion TEXT NOT NULL,
+        aplicado_en TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cursor.execute("""
+        INSERT OR IGNORE INTO schema_migrations (version, descripcion)
+        VALUES ('FASE1_SEGURIDAD_REV7', 'Migracion formal DDL Fase 1: Sesiones, Idempotencia y Outbox')
+    """)
 
     # ==============================================================================
     # 13. FUERZA DE VENTAS, VENDEDORES Y COMISIONES COMERCIALES
@@ -2408,6 +2483,7 @@ def restablecer_fabrica_db(confirmacion=""):
 
     from crear_base_datos_limpia import crear_base_limpia
     crear_base_limpia(DB_PATH)
+    auditar_y_migrar_db()
     sync_to_supabase_storage()
     return True
 

@@ -162,7 +162,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         if token:
             payload = security_core.decodificar_y_verificar_jwt(token)
             if payload:
-                user_id = payload.get("sub")
+                user_id = payload.get("uid") or payload.get("sub")
                 if user_id:
                     try:
                         conn = get_connection()
@@ -2958,7 +2958,8 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 
                 with open(DB_PATH, "wb") as f:
                     f.write(db_bytes)
-                
+
+                auditar_y_migrar_db()
                 schedule_cloud_sync()
                 self.send_json({
                     "success": True,
