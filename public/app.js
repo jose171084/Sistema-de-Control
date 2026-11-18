@@ -4,21 +4,44 @@
 const originalFetch = window.fetch;
 window.fetch = function(url, options = {}) {
   const token = localStorage.getItem('tavo_auth_token');
-  if (token) {
-    options.headers = options.headers || {};
-    if (options.headers instanceof Headers) {
-      if (!options.headers.has('Authorization')) {
-        options.headers.set('Authorization', `Bearer ${token}`);
-      }
-    } else if (Array.isArray(options.headers)) {
-      options.headers.push(['Authorization', `Bearer ${token}`]);
-    } else {
-      if (!options.headers['Authorization']) {
-        options.headers['Authorization'] = `Bearer ${token}`;
-      }
+  const csrf = localStorage.getItem('tavo_csrf_token');
+  options.headers = options.headers || {};
+  const method = (options.method || 'GET').toUpperCase();
+
+  if (options.headers instanceof Headers) {
+    if (token && !options.headers.has('Authorization')) {
+      options.headers.set('Authorization', `Bearer ${token}`);
+    }
+    if (csrf && ['POST', 'PUT', 'DELETE'].includes(method) && !options.headers.has('X-CSRF-Token')) {
+      options.headers.set('X-CSRF-Token', csrf);
+    }
+  } else if (Array.isArray(options.headers)) {
+    if (token) options.headers.push(['Authorization', `Bearer ${token}`]);
+    if (csrf && ['POST', 'PUT', 'DELETE'].includes(method)) options.headers.push(['X-CSRF-Token', csrf]);
+  } else {
+    if (token && !options.headers['Authorization']) {
+      options.headers['Authorization'] = `Bearer ${token}`;
+    }
+    if (csrf && ['POST', 'PUT', 'DELETE'].includes(method) && !options.headers['X-CSRF-Token']) {
+      options.headers['X-CSRF-Token'] = csrf;
     }
   }
-  return originalFetch.call(this, url, options);
+
+  return originalFetch.call(this, url, options).then(response => {
+    const newToken = response.headers.get('X-New-Session-Token');
+    if (newToken) {
+      localStorage.setItem('tavo_auth_token', newToken);
+    }
+    if (response.status === 401 && typeof url === 'string' && !url.includes('/api/auth/login')) {
+      localStorage.removeItem('tavo_auth_token');
+      localStorage.removeItem('tavo_csrf_token');
+      AppState.usuarioActual = null;
+      if (typeof openLoginModal === 'function') {
+        openLoginModal();
+      }
+    }
+    return response;
+  });
 };
 
 /**
@@ -17289,24 +17312,6 @@ window.verPdfEnPantalla = verPdfEnPantalla;
 // ==============================================================================
 async function initAuth() {
   let token = localStorage.getItem('tavo_auth_token');
-  if (!token) {
-    try {
-      const resp = await originalFetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'admin', password: 'admin123' })
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        token = data.token;
-        localStorage.setItem('tavo_auth_token', token);
-        AppState.usuarioActual = data.usuario;
-      }
-    } catch (e) {
-      console.warn('Auto-login fallback:', e);
-    }
-  }
-
   if (token) {
     try {
       const resp = await originalFetch('/api/auth/me', {
@@ -17317,10 +17322,16 @@ async function initAuth() {
         AppState.usuarioActual = data.usuario;
       } else {
         localStorage.removeItem('tavo_auth_token');
+        localStorage.removeItem('tavo_csrf_token');
+        AppState.usuarioActual = null;
+        if (typeof openLoginModal === 'function') openLoginModal();
       }
     } catch (e) {
       console.error('Error verificando sesión activa:', e);
+      if (typeof openLoginModal === 'function') openLoginModal();
     }
+  } else {
+    if (typeof openLoginModal === 'function') openLoginModal();
   }
 
   actualizarUIUsuarioYPermisos();
@@ -17418,6 +17429,9 @@ async function ejecutarLogin(event) {
     const data = await res.json();
     if (res.ok && data.success) {
       localStorage.setItem('tavo_auth_token', data.token);
+      if (data.csrf_token) {
+        localStorage.setItem('tavo_csrf_token', data.csrf_token);
+      }
       AppState.usuarioActual = data.usuario;
       actualizarUIUsuarioYPermisos();
       closeLoginModal();
@@ -17439,6 +17453,7 @@ async function cerrarSesionActual() {
     await fetch('/api/auth/logout', { method: 'POST' });
   } catch (e) {}
   localStorage.removeItem('tavo_auth_token');
+  localStorage.removeItem('tavo_csrf_token');
   AppState.usuarioActual = null;
   showToast('Sesión cerrada correctamente', 'info');
   closeLoginModal();
