@@ -79,6 +79,12 @@ const AppState = {
   posTipoVenta: 'contado',
   posFilterCategory: 'todos',
   ultimaFacturaEmitida: null,
+  // Estado del Módulo Dedicado de Pedidos (Vendedores)
+  pedCart: [],
+  pedTipoVenta: 'contado',
+  pedFilterCategory: 'todos',
+  pedClienteSeleccionado: null,
+  pedidosModuloLista: [],
   // Estado del Módulo de Compras
   compraItems: [],
   compraFotoBase64: '',
@@ -322,6 +328,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const devCliResults = document.getElementById('devClienteSearchResults');
     if (devCliResults && !devCliResults.contains(e.target) && e.target !== devCliInput) {
       devCliResults.classList.add('hidden');
+    }
+
+    const pedCliInput = document.getElementById('pedClienteSearchInput');
+    const pedCliResults = document.getElementById('pedClienteSearchResults');
+    if (pedCliResults && !pedCliResults.contains(e.target) && e.target !== pedCliInput) {
+      pedCliResults.classList.add('hidden');
     }
   });
 });
@@ -826,7 +838,32 @@ function handleDevolucionComprasNav() {
 }
 window.handleDevolucionComprasNav = handleDevolucionComprasNav;
 
+function getDefaultLandingView() {
+  const u = AppState.usuarioActual;
+  if (!u || !u.permisos) return 'dashboard';
+  const p = u.permisos;
+  if (u.rol_nombre === 'SuperAdmin') return 'dashboard';
+  if (p.facturar_directo === 0 && (p.perm_ventas || p.perm_pos || p.perm_fuerza_ventas)) return 'pedidos';
+  if (p.perm_dashboard !== 0) return 'dashboard';
+  if (p.perm_pos || p.perm_ventas) return 'facturacion';
+  if (p.perm_inventario) return 'productos';
+  if (p.perm_compras) return 'compras';
+  if (p.perm_clientes) return 'clientes';
+  return 'pedidos';
+}
+window.getDefaultLandingView = getDefaultLandingView;
+
 function navigate(viewName) {
+  const u = AppState.usuarioActual;
+  const perms = u?.permisos;
+  const isSuper = u?.rol_nombre === 'SuperAdmin';
+  if (perms && !isSuper) {
+    if (viewName === 'facturacion' && perms.facturar_directo === 0) {
+      viewName = 'pedidos';
+    } else if (viewName === 'dashboard' && perms.perm_dashboard === 0) {
+      viewName = getDefaultLandingView();
+    }
+  }
   AppState.currentView = viewName;
 
   // En móviles, cerrar el sidebar si está abierto
@@ -838,7 +875,7 @@ function navigate(viewName) {
     if (backdrop) backdrop.classList.add('hidden');
   }
 
-  const views = ['dashboard', 'categorias', 'productos', 'clientes', 'facturacion', 'devoluciones', 'compras', 'devolucion-compras', 'proveedores', 'cxc', 'cxp', 'reportes', 'tesoreria', 'fuerza-ventas', 'usuarios'];
+  const views = ['dashboard', 'categorias', 'productos', 'clientes', 'pedidos', 'facturacion', 'devoluciones', 'compras', 'devolucion-compras', 'proveedores', 'cxc', 'cxp', 'reportes', 'tesoreria', 'fuerza-ventas', 'usuarios'];
   views.forEach(v => {
     const el = document.getElementById(`view-${v}`);
     const navBtn = document.getElementById(`nav-${v}`);
@@ -859,7 +896,7 @@ function navigate(viewName) {
   });
 
   // Sincronizar indicador de la Barra Inferior Móvil (Bottom Nav)
-  const mobItems = ['dashboard', 'facturacion', 'compras', 'cxc', 'productos', 'reportes'];
+  const mobItems = ['dashboard', 'pedidos', 'facturacion', 'compras', 'cxc', 'productos', 'reportes'];
   mobItems.forEach(m => {
     const mobBtn = document.getElementById(`mob-nav-${m}`);
     if (mobBtn) {
@@ -885,6 +922,7 @@ function navigate(viewName) {
   }
   if (viewName === 'clientes') loadClientes();
   if (viewName === 'proveedores') loadProveedores();
+  if (viewName === 'pedidos' && typeof loadPedidosModulo === 'function') loadPedidosModulo();
   if (viewName === 'facturacion') {
     populatePosSelectors();
     renderPosCatalog();
@@ -2016,6 +2054,9 @@ async function loadProductos() {
     if (!res.ok) return;
     AppState.productos = await res.json();
     renderProductosTable();
+    if (typeof renderPedCatalog === 'function' && AppState.currentView === 'pedidos') {
+      renderPedCatalog();
+    }
   } catch (err) {
     console.error("Error al cargar productos:", err);
   }
@@ -2443,6 +2484,18 @@ async function openClienteModal(isEdit = false, origen = 'clientes') {
     if (selV) selV.value = '';
     if (selZ) selZ.value = '';
   }
+  const selVWrap = document.getElementById('clienteVendedorId');
+  if (selVWrap) {
+    const u = AppState.usuarioActual;
+    const isVendRestringido = u && u.permisos && u.permisos.facturar_directo === 0 && u.rol_nombre !== 'SuperAdmin';
+    const propio = isVendRestringido ? (AppState.vendedores || []).find(v => Number(v.usuario_id) === Number(u.id)) : null;
+    if (isVendRestringido && propio) {
+      if (!isEdit) selVWrap.value = String(propio.id);
+      selVWrap.disabled = true;
+    } else {
+      selVWrap.disabled = false;
+    }
+  }
   document.getElementById('modalCliente').classList.remove('hidden');
 }
 
@@ -2496,7 +2549,11 @@ async function saveCliente(e) {
 
       const nuevoId = (resData && resData.id) || (id ? parseInt(id) : null) || (AppState.clientes.find(cli => cli.cedula === payload.cedula)?.id);
 
-      if (AppState.clienteModalOrigen === 'facturacion' || AppState.currentView === 'facturacion') {
+      if (AppState.clienteModalOrigen === 'pedidos' || AppState.currentView === 'pedidos') {
+        if (nuevoId && typeof seleccionarClientePedido === 'function') {
+          seleccionarClientePedido(nuevoId);
+        }
+      } else if (AppState.clienteModalOrigen === 'facturacion' || AppState.currentView === 'facturacion') {
         populatePosSelectors();
         if (nuevoId) {
           seleccionarClientePOS(nuevoId);
@@ -13919,6 +13976,10 @@ function initRolUsuario() {
 window.initRolUsuario = initRolUsuario;
 
 function toggleRolUsuario() {
+  const u = AppState.usuarioActual;
+  if (u && u.rol_nombre !== 'SuperAdmin' && !(u.permisos && u.permisos.perm_configuracion)) {
+    return;
+  }
   const actual = localStorage.getItem('sistema_perfil_rol') || 'admin';
   const nuevo = actual === 'admin' ? 'cajero' : 'admin';
   localStorage.setItem('sistema_perfil_rol', nuevo);
@@ -17455,21 +17516,46 @@ async function bootAuthenticatedWorkspace() {
     initPersonalizacion();
     initRolUsuario();
     actualizarUIUsuarioYPermisos();
-    await Promise.allSettled([
-      loadCategorias(),
-      loadProductos(),
-      loadClientes(),
-      loadProveedores(),
-      loadDashboard(),
-      loadDatabaseStatus(),
-      cargarVendedoresEnPos(),
-      typeof actualizarEstadoCajaPOS === 'function' ? actualizarEstadoCajaPOS() : Promise.resolve()
-    ]);
 
-    // Sincronizar tasas oficiales sólo tras autenticar si el modo automático está activo
+    const u = AppState.usuarioActual || {};
+    const p = u.permisos || {};
+    const isSuper = u.rol_nombre === 'SuperAdmin';
+
+    const tasks = [loadCategorias(), loadProductos()];
+    if (p.perm_clientes || p.perm_ventas || p.perm_cxc || isSuper) {
+      tasks.push(loadClientes());
+    }
+    if (p.perm_compras || isSuper) {
+      tasks.push(loadProveedores());
+    }
+    if (p.perm_dashboard || isSuper) {
+      tasks.push(loadDashboard());
+    }
+    if (p.perm_configuracion || isSuper) {
+      tasks.push(loadDatabaseStatus());
+    }
+    if (p.perm_ventas || p.perm_pos || p.perm_fuerza_ventas || isSuper) {
+      tasks.push(cargarVendedoresEnPos());
+      if (typeof cargarListaPedidosModulo === 'function') tasks.push(cargarListaPedidosModulo());
+    }
+    if ((p.facturar_directo !== 0 || isSuper) && (p.perm_pos || p.perm_ventas || isSuper) && typeof actualizarEstadoCajaPOS === 'function') {
+      tasks.push(actualizarEstadoCajaPOS());
+    }
+
+    await Promise.allSettled(tasks);
+
+    // Dirigir automáticamente a su módulo operativo según su perfil RBAC
+    const landing = getDefaultLandingView();
+    if (landing !== 'dashboard') {
+      navigate(landing);
+    } else if (AppState.currentView === 'pedidos' && typeof loadPedidosModulo === 'function') {
+      loadPedidosModulo();
+    }
+
+    // Sincronizar tasas oficiales sólo tras autenticar si el modo automático está activo y tiene permiso
     try {
       const modoAuto = !AppState.config || AppState.config.sincronizacion_tasas_auto !== 0;
-      if (modoAuto) {
+      if (modoAuto && (p.perm_configuracion || isSuper)) {
         const hoyStr = new Date().toISOString().split('T')[0];
         const fechaActualizacion = (AppState.config && AppState.config.fecha_tasas_actualizacion) || '';
         if (!fechaActualizacion.startsWith(hoyStr)) {
@@ -17576,16 +17662,80 @@ function actualizarUIUsuarioYPermisos() {
       if (btnPedidoTxt) btnPedidoTxt.textContent = 'Guardar como Pedido / Preventa';
     }
 
-    // Control de módulos visibles en barra lateral
-    const navUsuarios = document.getElementById('nav-usuarios');
-    if (navUsuarios) {
-      navUsuarios.style.display = (p.perm_configuracion || u.rol_nombre === 'SuperAdmin') ? 'flex' : 'none';
+    // Control de módulos visibles en barra lateral, cabecera y barra móvil según RBAC
+    const isSuper = u.rol_nombre === 'SuperAdmin';
+    const setDisplay = (id, show, mode = 'flex') => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = show ? mode : 'none';
+    };
+
+    const showDash = isSuper || p.perm_dashboard !== 0;
+    const showInv = isSuper || p.perm_inventario !== 0;
+    const showCli = isSuper || p.perm_clientes !== 0 || p.perm_ventas !== 0 || p.perm_cxc !== 0;
+    const showPed = isSuper || p.perm_ventas !== 0 || p.perm_pos !== 0 || p.perm_fuerza_ventas !== 0;
+    const showFact = isSuper || ((p.perm_pos !== 0 || p.perm_ventas !== 0) && p.facturar_directo !== 0);
+    const showFv = isSuper || p.perm_fuerza_ventas !== 0 || p.perm_ventas !== 0;
+    const showDev = isSuper || (p.perm_ventas !== 0 && p.facturar_directo !== 0);
+    const showCxc = isSuper || p.perm_cxc !== 0;
+    const showComp = isSuper || p.perm_compras !== 0;
+    const showCxp = isSuper || p.perm_cxp !== 0;
+    const showTes = isSuper || (p.facturar_directo !== 0 && (p.perm_pos !== 0 || p.perm_configuracion !== 0));
+    const showRep = isSuper || p.perm_reportes !== 0;
+    const showUsr = isSuper || p.perm_configuracion !== 0;
+
+    setDisplay('nav-dashboard', showDash);
+    setDisplay('nav-categorias', showInv);
+    setDisplay('nav-productos', showInv);
+    setDisplay('sidebar-group-inventario', showInv, 'block');
+
+    setDisplay('nav-clientes', showCli);
+    setDisplay('nav-pedidos', showPed);
+    setDisplay('nav-facturacion', showFact);
+    setDisplay('nav-fuerza-ventas', showFv);
+    setDisplay('nav-devoluciones', showDev);
+    setDisplay('nav-cxc', showCxc);
+
+    setDisplay('nav-proveedores', showComp);
+    setDisplay('nav-compras', showComp);
+    setDisplay('nav-devolucion-compras', showComp);
+    setDisplay('nav-cxp', showCxp);
+    setDisplay('sidebar-group-compras', showComp || showCxp, 'block');
+
+    setDisplay('nav-tesoreria', showTes);
+    setDisplay('sidebar-group-finanzas', showTes, 'block');
+
+    setDisplay('nav-reportes', showRep);
+    setDisplay('sidebar-group-informes', showRep, 'block');
+
+    setDisplay('nav-usuarios', showUsr);
+    setDisplay('nav-cfo-copilot', showRep);
+
+    if (!isSuper && !p.perm_configuracion) {
+      document.body.classList.add('rol-cajero');
+    } else {
+      document.body.classList.remove('rol-cajero');
     }
-    const navFuerzaVentas = document.getElementById('nav-fuerza-ventas');
-    if (navFuerzaVentas) {
-      const puedeVerFv = (p.perm_fuerza_ventas !== undefined ? p.perm_fuerza_ventas : 1) || p.perm_ventas || u.rol_nombre === 'SuperAdmin';
-      navFuerzaVentas.style.display = puedeVerFv ? 'flex' : 'none';
-    }
+
+    // Cabecera: accesos rápidos diferenciados para Vendedor (Pedido) vs Caja (Nueva Venta)
+    const btnHeadPed = document.getElementById('btnHeaderNuevoPedido');
+    const btnHeadVenta = document.getElementById('btnHeaderNuevaVenta');
+    const btnHeadCompra = document.getElementById('btnHeaderCargarCompra');
+    const btnHeadCfo = document.getElementById('btnHeaderCfoCopilot');
+    if (btnHeadPed) btnHeadPed.classList.toggle('hidden', !(p.facturar_directo === 0 && showPed && !isSuper));
+    if (btnHeadVenta) btnHeadVenta.classList.toggle('hidden', !showFact);
+    if (btnHeadCompra) btnHeadCompra.classList.toggle('hidden', !showComp);
+    if (btnHeadCfo) btnHeadCfo.classList.toggle('hidden', !showRep);
+
+    // Barra inferior móvil según permisos
+    const usarPedMovil = p.facturar_directo === 0 && showPed && !isSuper;
+    setDisplay('mob-nav-dashboard', showDash);
+    setDisplay('mob-nav-pedidos', usarPedMovil);
+    setDisplay('mob-nav-facturacion', showFact && !usarPedMovil);
+    setDisplay('mob-nav-compras', showComp);
+    setDisplay('mob-nav-cxc', showCxc || showCxp);
+    setDisplay('mob-nav-productos', showInv);
+    const mobPed = document.getElementById('mob-nav-pedidos');
+    if (mobPed) mobPed.classList.toggle('hidden', !usarPedMovil);
   }
 }
 window.actualizarUIUsuarioYPermisos = actualizarUIUsuarioYPermisos;
@@ -17731,7 +17881,7 @@ async function ejecutarLogin(event) {
       closeLoginModal();
       showToast(`Bienvenido/a, ${data.usuario.nombre_completo} (${data.usuario.rol_nombre})`, 'success');
       await bootAuthenticatedWorkspace();
-      navigate('dashboard');
+      navigate(getDefaultLandingView());
     } else {
       let friendlyMsg = data.error || 'Credenciales inválidas';
       if (res.status === 401) {
@@ -18709,16 +18859,17 @@ async function cargarPedidosAdmin() {
     const pedidos = await res.json();
     AppState.pedidosLista = pedidos;
 
-    // Actualizar badge de pendientes
+    // Actualizar badges de pendientes en Fuerza de Ventas y Sidebar
     const pendientesCount = pedidos.filter(p => p.estado === 'PENDIENTE').length;
-    if (badgePend) {
+    [badgePend, document.getElementById('badgeSidebarPedidosPendientes')].forEach(b => {
+      if (!b) return;
       if (pendientesCount > 0) {
-        badgePend.textContent = pendientesCount;
-        badgePend.classList.remove('hidden');
+        b.textContent = pendientesCount;
+        b.classList.remove('hidden');
       } else {
-        badgePend.classList.add('hidden');
+        b.classList.add('hidden');
       }
-    }
+    });
 
     if (!tbody) return;
     if (!pedidos || pedidos.length === 0) {
@@ -18817,13 +18968,18 @@ async function autorizarYFacturarPedido(pedidoId) {
       const partialMsg = data.hubo_aprobacion_parcial ? '\n[Aprobación Parcial: Reserva remanente liberada al inventario disponible]' : '';
       alert(`¡Facturación Exitosa!${partialMsg}\n\nFactura N°: ${data.numero_factura}\nMonto Total: $${parseFloat(data.total_usd).toFixed(2)} USD\nTipo: ${data.tipo_venta.toUpperCase()}\nComisión Vendedor: $${parseFloat(data.comision_monto_usd || 0).toFixed(2)} USD (${data.comision_estado})`);
       closeModalDetallePedido();
-      await Promise.allSettled([
+      const postF = [
         cargarPedidosAdmin(),
-        cargarDirectorioVendedores(),
-        cargarReporteComisiones(),
-        loadDashboard(),
         loadProductos()
-      ]);
+      ];
+      if (typeof cargarListaPedidosModulo === 'function') postF.push(cargarListaPedidosModulo());
+      if (typeof cargarDirectorioVendedores === 'function') postF.push(cargarDirectorioVendedores());
+      if (typeof cargarReporteComisiones === 'function') postF.push(cargarReporteComisiones());
+      const pUsr = AppState.usuarioActual?.permisos;
+      if (!pUsr || pUsr.perm_dashboard !== 0 || AppState.usuarioActual?.rol_nombre === 'SuperAdmin') {
+        postF.push(loadDashboard());
+      }
+      await Promise.allSettled(postF);
     } else {
       alert('No se pudo facturar el pedido: ' + (data.error || 'Error desconocido'));
     }
@@ -18883,7 +19039,9 @@ async function rechazarPedidoPrompt(pedidoId) {
     if (res.ok) {
       showToast('Pedido rechazado y reserva de stock liberada', 'info');
       closeModalDetallePedido();
-      await Promise.allSettled([cargarPedidosAdmin(), loadProductos()]);
+      const postR = [cargarPedidosAdmin(), loadProductos()];
+      if (typeof cargarListaPedidosModulo === 'function') postR.push(cargarListaPedidosModulo());
+      await Promise.allSettled(postR);
     } else {
       alert('Error: ' + (data.error || 'No se pudo rechazar'));
     }
@@ -19140,6 +19298,729 @@ function previewFormatoImpresionDirecto() {
     });
   }
 }
+
+// ==============================================================================
+// MÓDULO DEDICADO: PEDIDOS & PREVENTAS PARA VENDEDORES (INDEPENDIENTE DE FACTURACIÓN)
+// ==============================================================================
+async function loadPedidosModulo() {
+  if (!Array.isArray(AppState.productos) || AppState.productos.length === 0) {
+    await loadProductos();
+  }
+  if (!Array.isArray(AppState.clientes) || AppState.clientes.length === 0) {
+    await loadClientes();
+  }
+  await Promise.allSettled([
+    cargarVendedoresEnPedidos(),
+    cargarListaPedidosModulo()
+  ]);
+  renderPedCatalog();
+  renderPedCart();
+}
+window.loadPedidosModulo = loadPedidosModulo;
+
+function cambiarSubtabPedidos(tab) {
+  const pNuevo = document.getElementById('panelPedNuevo');
+  const pLista = document.getElementById('panelPedLista');
+  const bNuevo = document.getElementById('subtabPedNuevo');
+  const bLista = document.getElementById('subtabPedLista');
+
+  if (pNuevo) pNuevo.classList.toggle('hidden', tab !== 'nuevo');
+  if (pLista) pLista.classList.toggle('hidden', tab !== 'lista');
+
+  if (bNuevo) {
+    bNuevo.className = tab === 'nuevo'
+      ? 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition flex items-center'
+      : 'px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition flex items-center';
+  }
+  if (bLista) {
+    bLista.className = tab === 'lista'
+      ? 'px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition flex items-center space-x-1.5'
+      : 'px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition flex items-center space-x-1.5';
+  }
+
+  if (tab === 'lista') {
+    cargarListaPedidosModulo();
+  } else {
+    renderPedCatalog();
+  }
+}
+window.cambiarSubtabPedidos = cambiarSubtabPedidos;
+
+async function cargarVendedoresEnPedidos() {
+  const sel = document.getElementById('pedVendedorSelect');
+  const selFiltro = document.getElementById('pedFiltroVendedor');
+  const kpiVend = document.getElementById('kpiPedVendedorActivo');
+  const kpiCom = document.getElementById('kpiPedComisionInfo');
+
+  try {
+    if (!Array.isArray(AppState.vendedores) || AppState.vendedores.length === 0) {
+      const res = await fetch('/api/vendedores');
+      if (res.ok) AppState.vendedores = await res.json();
+    }
+  } catch (e) {}
+
+  const vendedores = AppState.vendedores || [];
+  const u = AppState.usuarioActual || {};
+  const isVendedorRestringido = u.permisos && u.permisos.facturar_directo === 0 && u.rol_nombre !== 'SuperAdmin';
+  const propio = vendedores.find(v => Number(v.usuario_id) === Number(u.id));
+
+  if (sel) {
+    const valPrev = sel.value;
+    sel.innerHTML = '<option value="">-- Seleccionar Vendedor --</option>' +
+      vendedores.map(v => `<option value="${v.id}" data-pct="${v.porcentaje_comision_base}">${escapeHtml(v.codigo)} - ${escapeHtml(v.nombre)} (${parseFloat(v.porcentaje_comision_base || 0).toFixed(1)}%)</option>`).join('');
+
+    if (isVendedorRestringido && propio) {
+      sel.value = String(propio.id);
+      sel.disabled = true;
+    } else {
+      sel.disabled = false;
+      if (AppState.pedClienteSeleccionado && AppState.pedClienteSeleccionado.vendedor_id) {
+        sel.value = String(AppState.pedClienteSeleccionado.vendedor_id);
+      } else if (valPrev) {
+        sel.value = valPrev;
+      } else if (propio) {
+        sel.value = String(propio.id);
+      }
+    }
+  }
+
+  if (selFiltro) {
+    if (isVendedorRestringido) {
+      selFiltro.classList.add('hidden');
+    } else {
+      selFiltro.classList.remove('hidden');
+      const prevF = selFiltro.value;
+      selFiltro.innerHTML = '<option value="">Todos los vendedores</option>' +
+        vendedores.map(v => `<option value="${v.id}">${escapeHtml(v.codigo)} - ${escapeHtml(v.nombre)}</option>`).join('');
+      if (prevF) selFiltro.value = prevF;
+    }
+  }
+
+  if (kpiVend && kpiCom) {
+    if (propio) {
+      kpiVend.textContent = `${propio.nombre} (${propio.codigo})`;
+      kpiCom.textContent = `${parseFloat(propio.porcentaje_comision_base || 0).toFixed(1)}% comisión base · ${propio.clientes_asignados || 0} clientes`;
+    } else if (isVendedorRestringido) {
+      kpiVend.textContent = u.nombre_completo || u.username || 'Asesor';
+      kpiCom.textContent = 'Perfil vendedor sin ficha vinculada';
+    } else {
+      kpiVend.textContent = 'Modo Supervisión / Admin';
+      kpiCom.textContent = `${vendedores.length} asesores comerciales activos`;
+    }
+  }
+
+  actualizarComisionPedidoBadge();
+}
+window.cargarVendedoresEnPedidos = cargarVendedoresEnPedidos;
+
+function actualizarComisionPedidoBadge() {
+  const sel = document.getElementById('pedVendedorSelect');
+  const badge = document.getElementById('pedVendedorComisionBadge');
+  if (sel && badge) {
+    const opt = sel.options[sel.selectedIndex];
+    if (opt && opt.dataset && opt.dataset.pct !== undefined && opt.value) {
+      badge.textContent = `${parseFloat(opt.dataset.pct || 0).toFixed(1)}% Comisión`;
+      badge.className = 'text-[10px] text-emerald-700 font-bold bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300';
+    } else {
+      badge.textContent = 'Sin Comisión';
+      badge.className = 'text-[10px] text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200';
+    }
+  }
+  renderPedCart();
+}
+window.actualizarComisionPedidoBadge = actualizarComisionPedidoBadge;
+
+function buscarClientePedido(query = '') {
+  const resultsDiv = document.getElementById('pedClienteSearchResults');
+  if (!resultsDiv) return;
+
+  const q = (query || '').toLowerCase().trim();
+  let matches = AppState.clientes || [];
+  if (q) {
+    matches = matches.filter(c =>
+      (c.nombre && c.nombre.toLowerCase().includes(q)) ||
+      (c.cedula && c.cedula.toLowerCase().includes(q)) ||
+      (c.telefono && c.telefono.includes(q))
+    );
+  }
+
+  if (matches.length === 0) {
+    resultsDiv.innerHTML = `
+      <div class="p-3 text-xs text-slate-400 text-center">
+        No se encontró ningún cliente coincidente.
+        <button type="button" onclick="openClienteModal(false, 'pedidos')" class="text-[#0755C9] font-bold hover:underline block mx-auto mt-1">+ Registrar Nuevo Cliente</button>
+      </div>
+    `;
+    resultsDiv.classList.remove('hidden');
+    return;
+  }
+
+  resultsDiv.innerHTML = matches.slice(0, 10).map(c => {
+    const metaVend = c.vendedor_id && c.vendedor_nombre ? ` · Asesor: ${escapeHtml(c.vendedor_nombre)}` : '';
+    const metaZona = c.zona_id && c.zona_nombre ? ` (${escapeHtml(c.zona_nombre)})` : '';
+    return `
+      <div onclick="seleccionarClientePedido(${c.id})" class="p-2.5 hover:bg-blue-50 cursor-pointer flex items-center justify-between text-xs transition">
+        <div>
+          <p class="font-bold text-slate-800">${escapeHtml(c.nombre)}</p>
+          <p class="text-slate-500 font-mono text-[11px]">${escapeHtml(c.cedula)} · Tel: ${escapeHtml(c.telefono)}${metaVend}${metaZona}</p>
+        </div>
+        <span class="text-[#0755C9] text-xs font-bold">Seleccionar &rarr;</span>
+      </div>
+    `;
+  }).join('');
+  resultsDiv.classList.remove('hidden');
+}
+window.buscarClientePedido = buscarClientePedido;
+
+function seleccionarClientePedido(clienteId) {
+  const c = (AppState.clientes || []).find(cli => Number(cli.id) === Number(clienteId));
+  if (!c) return;
+
+  AppState.pedClienteSeleccionado = c;
+  const hiddenInput = document.getElementById('pedClienteId');
+  if (hiddenInput) hiddenInput.value = c.id;
+  document.getElementById('pedSelectedClienteNombre').textContent = c.nombre;
+  document.getElementById('pedSelectedClienteCedula').textContent = c.cedula;
+  document.getElementById('pedSelectedClienteTelefono').textContent = c.telefono;
+
+  const badgeVend = document.getElementById('pedSelectedClienteVendedorBadge');
+  if (badgeVend) {
+    const partes = [];
+    if (c.vendedor_id && c.vendedor_nombre) partes.push(`Asesor: ${c.vendedor_nombre}`);
+    if (c.zona_id && c.zona_nombre) partes.push(`Zona: ${c.zona_nombre}`);
+    if (partes.length > 0) {
+      badgeVend.textContent = partes.join(' · ');
+      badgeVend.classList.remove('hidden');
+    } else {
+      badgeVend.textContent = '';
+      badgeVend.classList.add('hidden');
+    }
+  }
+
+  const selVend = document.getElementById('pedVendedorSelect');
+  if (selVend && !selVend.disabled) {
+    if (c.vendedor_id) {
+      selVend.value = String(c.vendedor_id);
+      actualizarComisionPedidoBadge();
+    }
+  }
+
+  document.getElementById('pedClienteSearchResults')?.classList.add('hidden');
+  document.getElementById('pedClienteSearchInput')?.classList.add('hidden');
+  document.getElementById('pedClienteSelectedCard')?.classList.remove('hidden');
+  document.getElementById('btnClearClientePed')?.classList.remove('hidden');
+}
+window.seleccionarClientePedido = seleccionarClientePedido;
+
+function limpiarClientePedido() {
+  AppState.pedClienteSeleccionado = null;
+  const hiddenInput = document.getElementById('pedClienteId');
+  if (hiddenInput) hiddenInput.value = '';
+  const searchInp = document.getElementById('pedClienteSearchInput');
+  if (searchInp) {
+    searchInp.value = '';
+    searchInp.classList.remove('hidden');
+    searchInp.focus();
+  }
+  const badgeVend = document.getElementById('pedSelectedClienteVendedorBadge');
+  if (badgeVend) {
+    badgeVend.textContent = '';
+    badgeVend.classList.add('hidden');
+  }
+  document.getElementById('pedClienteSelectedCard')?.classList.add('hidden');
+  document.getElementById('btnClearClientePed')?.classList.add('hidden');
+  buscarClientePedido('');
+}
+window.limpiarClientePedido = limpiarClientePedido;
+
+function setPedFilterCategory(cat) {
+  AppState.pedFilterCategory = cat;
+  ['todos', 'producto', 'servicio'].forEach(c => {
+    const btn = document.getElementById(`pedCat-${c}`);
+    if (!btn) return;
+    btn.className = c === cat
+      ? 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-white'
+      : 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200';
+  });
+  renderPedCatalog();
+}
+window.setPedFilterCategory = setPedFilterCategory;
+
+function renderPedCatalog() {
+  const grid = document.getElementById('pedCatalogGrid');
+  if (!grid) return;
+
+  const search = document.getElementById('pedSearchProduct')?.value.toLowerCase().trim() || '';
+  let filtrados = AppState.productos || [];
+
+  if (AppState.pedFilterCategory && AppState.pedFilterCategory !== 'todos') {
+    filtrados = filtrados.filter(p => p.tipo === AppState.pedFilterCategory);
+  }
+  if (search) {
+    filtrados = filtrados.filter(p =>
+      (p.nombre && p.nombre.toLowerCase().includes(search)) ||
+      (p.codigo && p.codigo.toLowerCase().includes(search))
+    );
+  }
+
+  if (filtrados.length === 0) {
+    grid.innerHTML = '<div class="col-span-full py-8 text-center text-slate-400 text-xs">No hay ítems para mostrar en el catálogo de pedidos.</div>';
+    return;
+  }
+
+  const canNeg = AppState.usuarioActual?.permisos?.facturar_negativo === 1;
+  const tasaVes = parseFloat(AppState.config?.tasa_ves || 45.0);
+
+  grid.innerHTML = filtrados.map(p => {
+    const esProducto = p.tipo === 'producto';
+    const stkFis = parseFloat(p.stock || 0);
+    const stkComp = parseFloat(p.stock_comprometido || 0);
+    const stkDisp = Math.max(0, stkFis - stkComp);
+    const agotado = esProducto && !canNeg && stkDisp <= 0;
+
+    const imgTag = p.imagen
+      ? `<img src="${p.imagen}" alt="${escapeHtml(p.nombre)}" class="w-12 h-12 object-cover rounded-xl shadow-xs">`
+      : `<div class="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 text-lg"><i class="fa-solid ${esProducto ? 'fa-box' : 'fa-wrench'}"></i></div>`;
+
+    const badgeStock = esProducto
+      ? `<span class="text-[10px] font-bold ${agotado ? 'text-rose-600' : 'text-emerald-600'}">Disp: ${stkDisp}${stkComp > 0 ? ` <span class="text-amber-600">(Res: ${stkComp})</span>` : ''}</span>`
+      : '<span class="text-[10px] font-medium text-purple-600">Servicio</span>';
+
+    const badgeImpuesto = p.impuesto_tipo === 'gravado'
+      ? '<span class="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-medium">+IVA</span>'
+      : '<span class="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">Exento</span>';
+
+    return `
+      <div onclick="addPedItem(${p.id})"
+           class="bg-slate-50 hover:bg-blue-50/70 border border-slate-200 hover:border-blue-300 p-3 rounded-xl transition cursor-pointer flex flex-col justify-between space-y-2 select-none group ${agotado ? 'opacity-55 pointer-events-none' : ''}">
+        <div class="flex items-start space-x-2.5">
+          ${imgTag}
+          <div class="flex-1 min-w-0">
+            <p class="font-bold text-xs text-slate-800 truncate group-hover:text-[#0755C9]">${escapeHtml(p.nombre)}</p>
+            <p class="text-[11px] text-slate-400 font-mono">${escapeHtml(p.codigo)}</p>
+            <div class="flex items-center space-x-1 mt-1">
+              ${badgeStock}
+              ${badgeImpuesto}
+            </div>
+          </div>
+        </div>
+        <div class="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+          <div>
+            <span class="text-xs font-extrabold text-[#0755C9] block">$${parseFloat(p.precio_total || p.precio_base || 0).toFixed(2)}</span>
+            <span class="text-[10px] text-slate-400">${(parseFloat(p.precio_total || p.precio_base || 0) * tasaVes).toFixed(2)} Bs.</span>
+          </div>
+          <button type="button" class="w-6 h-6 rounded-lg bg-[#0755C9] text-white flex items-center justify-center text-xs group-hover:scale-110 transition">
+            <i class="fa-solid fa-plus"></i>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+window.renderPedCatalog = renderPedCatalog;
+
+function handlePedCatalogKeydown(event) {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  const q = event.target.value.trim().toLowerCase();
+  if (!q) return;
+  const prod = (AppState.productos || []).find(p =>
+    (p.codigo && p.codigo.toLowerCase() === q) ||
+    (p.codigo_barras && p.codigo_barras.toLowerCase() === q)
+  );
+  if (prod) {
+    addPedItem(prod.id);
+    event.target.value = '';
+    renderPedCatalog();
+  }
+}
+window.handlePedCatalogKeydown = handlePedCatalogKeydown;
+
+function addPedItem(productoId) {
+  const prod = (AppState.productos || []).find(p => Number(p.id) === Number(productoId));
+  if (!prod) return;
+
+  const canNeg = AppState.usuarioActual?.permisos?.facturar_negativo === 1;
+  const stockDisponible = prod.tipo === 'producto'
+    ? Math.max(0, parseFloat(prod.stock || 0) - parseFloat(prod.stock_comprometido || 0))
+    : parseFloat(prod.stock || 0);
+  const existing = (AppState.pedCart || []).find(i => Number(i.producto_id) === Number(productoId));
+
+  if (prod.tipo === 'producto' && !canNeg) {
+    const currentCant = existing ? existing.cantidad : 0;
+    if (currentCant + 1 > stockDisponible) {
+      const msg = `Existencias disponibles insuficientes para '${prod.nombre}'. Disponible: ${stockDisponible} (Físico: ${prod.stock}, Reservado: ${prod.stock_comprometido || 0})`;
+      if (typeof showToast === 'function') showToast(msg, 'warning'); else alert(msg);
+      return;
+    }
+  }
+
+  const ivaPct = (parseFloat(AppState.config?.iva_porcentaje) || 16.0) / 100.0;
+  const precioBase = parseFloat(prod.precio_base || 0);
+  const ivaUnitario = prod.impuesto_tipo === 'gravado' ? (precioBase * ivaPct) : 0;
+
+  if (existing) {
+    existing.cantidad += 1;
+    existing.stock_disponible = stockDisponible;
+    existing.subtotal = existing.precio_unitario * existing.cantidad;
+    existing.iva_total = existing.iva_unitario * existing.cantidad;
+    existing.total = existing.subtotal + existing.iva_total;
+  } else {
+    AppState.pedCart.push({
+      producto_id: prod.id,
+      nombre: prod.nombre,
+      codigo: prod.codigo,
+      tipo: prod.tipo,
+      impuesto_tipo: prod.impuesto_tipo,
+      precio_unitario: precioBase,
+      iva_unitario: ivaUnitario,
+      cantidad: 1,
+      stock_disponible: stockDisponible,
+      subtotal: precioBase,
+      iva_total: ivaUnitario,
+      total: precioBase + ivaUnitario
+    });
+  }
+  renderPedCart();
+}
+window.addPedItem = addPedItem;
+
+function updatePedCartItemCant(productoId, delta) {
+  const item = (AppState.pedCart || []).find(i => Number(i.producto_id) === Number(productoId));
+  if (!item) return;
+  const newCant = item.cantidad + delta;
+  if (newCant <= 0) {
+    removePedCartItem(productoId);
+    return;
+  }
+  const canNeg = AppState.usuarioActual?.permisos?.facturar_negativo === 1;
+  if (item.tipo === 'producto' && !canNeg && newCant > item.stock_disponible) {
+    alert(`No puedes solicitar más de ${item.stock_disponible} unidades disponibles para '${item.nombre}'.`);
+    return;
+  }
+  item.cantidad = newCant;
+  item.subtotal = item.precio_unitario * item.cantidad;
+  item.iva_total = item.iva_unitario * item.cantidad;
+  item.total = item.subtotal + item.iva_total;
+  renderPedCart();
+}
+window.updatePedCartItemCant = updatePedCartItemCant;
+
+function setPedCartItemCant(productoId, valor) {
+  const item = (AppState.pedCart || []).find(i => Number(i.producto_id) === Number(productoId));
+  if (!item) return;
+  const parsed = parseFloat(valor);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    removePedCartItem(productoId);
+    return;
+  }
+  const canNeg = AppState.usuarioActual?.permisos?.facturar_negativo === 1;
+  if (item.tipo === 'producto' && !canNeg && parsed > item.stock_disponible) {
+    alert(`Cantidad ajustada al máximo disponible (${item.stock_disponible} unidades).`);
+    item.cantidad = item.stock_disponible;
+  } else {
+    item.cantidad = parsed;
+  }
+  item.subtotal = item.precio_unitario * item.cantidad;
+  item.iva_total = item.iva_unitario * item.cantidad;
+  item.total = item.subtotal + item.iva_total;
+  renderPedCart();
+}
+window.setPedCartItemCant = setPedCartItemCant;
+
+function removePedCartItem(productoId) {
+  AppState.pedCart = (AppState.pedCart || []).filter(i => Number(i.producto_id) !== Number(productoId));
+  renderPedCart();
+}
+window.removePedCartItem = removePedCartItem;
+
+function renderPedCart() {
+  const container = document.getElementById('pedCartItemsList');
+  if (!container) return;
+
+  const cart = AppState.pedCart || [];
+  const countBadge = document.getElementById('pedItemsCountBadge');
+  if (countBadge) countBadge.textContent = `${cart.length} ${cart.length === 1 ? 'ítem' : 'ítems'}`;
+
+  if (cart.length === 0) {
+    container.innerHTML = '<p class="text-sm text-slate-400 text-center py-8">El pedido está vacío. Selecciona productos del catálogo de la izquierda.</p>';
+  } else {
+    container.innerHTML = cart.map(it => `
+      <div class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center justify-between gap-2 text-xs">
+        <div class="min-w-0 flex-1">
+          <p class="font-bold text-slate-800 truncate">${escapeHtml(it.nombre)}</p>
+          <p class="text-[11px] text-slate-500 font-mono">$${parseFloat(it.precio_unitario).toFixed(2)} c/u ${it.impuesto_tipo === 'gravado' ? '<span class="text-blue-600">+IVA</span>' : ''}</p>
+        </div>
+        <div class="flex items-center space-x-1 shrink-0">
+          <button type="button" onclick="updatePedCartItemCant(${it.producto_id}, -1)" class="w-6 h-6 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 font-bold text-slate-700">-</button>
+          <input type="number" step="any" min="0.01" value="${it.cantidad}" onchange="setPedCartItemCant(${it.producto_id}, this.value)" class="w-12 text-center py-1 rounded-lg bg-white border border-slate-200 font-bold text-slate-900">
+          <button type="button" onclick="updatePedCartItemCant(${it.producto_id}, 1)" class="w-6 h-6 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 font-bold text-slate-700">+</button>
+        </div>
+        <div class="text-right shrink-0 w-16">
+          <p class="font-extrabold text-slate-900">$${parseFloat(it.total).toFixed(2)}</p>
+        </div>
+        <button type="button" onclick="removePedCartItem(${it.producto_id})" class="text-rose-500 hover:text-rose-700 p-1" title="Quitar ítem">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+    `).join('');
+  }
+
+  const subtotal = cart.reduce((acc, i) => acc + parseFloat(i.subtotal || 0), 0);
+  const iva = cart.reduce((acc, i) => acc + parseFloat(i.iva_total || 0), 0);
+  const total = subtotal + iva;
+  const tasaVes = parseFloat(AppState.config?.tasa_ves || 45.0);
+  const tasaCop = parseFloat(AppState.config?.tasa_cop || 4100.0);
+
+  const elSub = document.getElementById('pedSubtotalUsd');
+  const elIva = document.getElementById('pedIvaUsd');
+  const elTot = document.getElementById('pedTotalUsd');
+  const elVes = document.getElementById('pedTotalVes');
+  const elCop = document.getElementById('pedTotalCop');
+  const elCom = document.getElementById('pedComisionEstimadaUsd');
+
+  if (elSub) elSub.textContent = `$${subtotal.toFixed(2)}`;
+  if (elIva) elIva.textContent = `$${iva.toFixed(2)}`;
+  if (elTot) elTot.textContent = `$${total.toFixed(2)}`;
+  if (elVes) elVes.textContent = `${(total * tasaVes).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs.`;
+  if (elCop) elCop.textContent = `${Math.round(total * tasaCop).toLocaleString('en-US')} COP`;
+
+  if (elCom) {
+    const selVend = document.getElementById('pedVendedorSelect');
+    const opt = selVend ? selVend.options[selVend.selectedIndex] : null;
+    const pct = (opt && opt.value && opt.dataset && opt.dataset.pct) ? parseFloat(opt.dataset.pct) : 0;
+    const comUsd = (total * pct) / 100.0;
+    elCom.textContent = pct > 0 ? `$${comUsd.toFixed(2)} USD (${pct.toFixed(1)}%)` : '$0.00 USD';
+  }
+}
+window.renderPedCart = renderPedCart;
+
+function setPedTipoVenta(tipo) {
+  AppState.pedTipoVenta = tipo === 'credito' ? 'credito' : 'contado';
+  const btnCont = document.getElementById('btnPedTipoContado');
+  const btnCred = document.getElementById('btnPedTipoCredito');
+  const panelCred = document.getElementById('pedCreditoPanel');
+  if (btnCont) {
+    btnCont.className = AppState.pedTipoVenta === 'contado'
+      ? 'px-3 py-1 rounded-md text-xs font-bold bg-white text-slate-900 shadow-xs transition'
+      : 'px-3 py-1 rounded-md text-xs font-bold text-slate-600 hover:text-slate-900 transition';
+  }
+  if (btnCred) {
+    btnCred.className = AppState.pedTipoVenta === 'credito'
+      ? 'px-3 py-1 rounded-md text-xs font-bold bg-white text-amber-800 shadow-xs transition'
+      : 'px-3 py-1 rounded-md text-xs font-bold text-slate-600 hover:text-slate-900 transition';
+  }
+  if (panelCred) panelCred.classList.toggle('hidden', AppState.pedTipoVenta !== 'credito');
+}
+window.setPedTipoVenta = setPedTipoVenta;
+
+function setPedDiasCredito(dias) {
+  const inp = document.getElementById('pedDiasCredito');
+  if (inp) inp.value = String(dias);
+}
+window.setPedDiasCredito = setPedDiasCredito;
+
+function limpiarFormularioPedido() {
+  AppState.pedCart = [];
+  renderPedCart();
+  const notasInp = document.getElementById('pedNotasInput');
+  if (notasInp) notasInp.value = '';
+  setPedTipoVenta('contado');
+  limpiarClientePedido();
+}
+window.limpiarFormularioPedido = limpiarFormularioPedido;
+
+async function guardarPedidoModulo() {
+  if (!AppState.pedClienteSeleccionado) {
+    const hiddenId = document.getElementById('pedClienteId')?.value;
+    if (hiddenId && Array.isArray(AppState.clientes)) {
+      const cli = AppState.clientes.find(c => Number(c.id) === Number(hiddenId));
+      if (cli) AppState.pedClienteSeleccionado = cli;
+    }
+  }
+  if (!AppState.pedClienteSeleccionado) {
+    alert('Debe seleccionar un cliente antes de registrar el pedido.');
+    return;
+  }
+  if (!AppState.pedCart || AppState.pedCart.length === 0) {
+    alert('El pedido está vacío. Agregue al menos un producto o servicio.');
+    return;
+  }
+
+  let vendedorId = document.getElementById('pedVendedorSelect')?.value || '';
+  if (!vendedorId && AppState.pedClienteSeleccionado.vendedor_id) {
+    vendedorId = String(AppState.pedClienteSeleccionado.vendedor_id);
+  }
+  if (!vendedorId && AppState.usuarioActual && Array.isArray(AppState.vendedores)) {
+    const propio = AppState.vendedores.find(v => Number(v.usuario_id) === Number(AppState.usuarioActual.id));
+    if (propio) vendedorId = String(propio.id);
+  }
+
+  const condicionPago = AppState.pedTipoVenta || 'contado';
+  const diasCredito = condicionPago === 'credito' ? Math.max(1, parseInt(document.getElementById('pedDiasCredito')?.value || '15', 10) || 15) : 0;
+  const notas = (document.getElementById('pedNotasInput')?.value || '').trim();
+
+  const payload = {
+    cliente_id: AppState.pedClienteSeleccionado.id,
+    vendedor_id: vendedorId ? parseInt(vendedorId, 10) : null,
+    items: AppState.pedCart.map(it => ({
+      producto_id: it.producto_id,
+      cantidad: it.cantidad,
+      precio_unitario: it.precio_unitario
+    })),
+    condicion_pago: condicionPago,
+    dias_credito: diasCredito,
+    notas
+  };
+
+  try {
+    const res = await fetch('/api/pedidos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (res.ok) {
+      alert(`¡Pedido ${data.numero_pedido} registrado exitosamente!\n\nCliente: ${AppState.pedClienteSeleccionado.nombre}\nMonto Total: $${parseFloat(data.total_usd).toFixed(2)} USD\n\nEl stock disponible ha quedado reservado y el pedido está listo en bandeja para su facturación.`);
+      AppState.pedCart = [];
+      renderPedCart();
+      const notasInp = document.getElementById('pedNotasInput');
+      if (notasInp) notasInp.value = '';
+      setPedTipoVenta('contado');
+      await Promise.allSettled([
+        loadProductos(),
+        cargarListaPedidosModulo(),
+        typeof cargarPedidosAdmin === 'function' ? cargarPedidosAdmin() : Promise.resolve()
+      ]);
+      renderPedCatalog();
+    } else {
+      alert('Error registrando pedido: ' + (data.error || 'No se pudo crear el pedido'));
+    }
+  } catch (err) {
+    alert('Error de conexión al registrar pedido: ' + err.message);
+  }
+}
+window.guardarPedidoModulo = guardarPedidoModulo;
+
+async function cargarListaPedidosModulo() {
+  const tbody = document.getElementById('tablaModuloPedidosBody');
+  const vendFilter = document.getElementById('pedFiltroVendedor')?.value || '';
+
+  try {
+    let url = '/api/pedidos';
+    if (vendFilter) url += `?vendedor_id=${encodeURIComponent(vendFilter)}`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const pedidos = await res.json();
+    AppState.pedidosModuloLista = Array.isArray(pedidos) ? pedidos : [];
+
+    // Actualizar KPIs globales de Pedidos y Badges
+    const pendientes = AppState.pedidosModuloLista.filter(p => p.estado === 'PENDIENTE');
+    const facturados = AppState.pedidosModuloLista.filter(p => p.estado === 'FACTURADO');
+    const montoPend = pendientes.reduce((acc, p) => acc + parseFloat(p.total_usd || 0), 0);
+
+    const elPend = document.getElementById('kpiPedPendientes');
+    const elMonto = document.getElementById('kpiPedMontoPendiente');
+    const elFact = document.getElementById('kpiPedFacturados');
+    if (elPend) elPend.textContent = String(pendientes.length);
+    if (elMonto) elMonto.textContent = `$${montoPend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+    if (elFact) elFact.textContent = String(facturados.length);
+
+    ['badgeTabPedidosPendientes', 'badgeSidebarPedidosPendientes', 'badgeFvPedidosPendientes'].forEach(bid => {
+      const b = document.getElementById(bid);
+      if (!b) return;
+      if (pendientes.length > 0) {
+        b.textContent = pendientes.length;
+        b.classList.remove('hidden');
+      } else {
+        b.classList.add('hidden');
+      }
+    });
+
+    if (tbody) renderModuloPedidosTable(AppState.pedidosModuloLista);
+  } catch (err) {
+    console.error('Error cargando pedidos del módulo:', err);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-rose-500 font-bold">Error: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.cargarListaPedidosModulo = cargarListaPedidosModulo;
+
+function renderModuloPedidosTable(pedidos) {
+  const tbody = document.getElementById('tablaModuloPedidosBody');
+  if (!tbody) return;
+
+  const estadoFiltro = document.getElementById('pedFiltroEstado')?.value || 'PENDIENTE';
+  const txtFiltro = (document.getElementById('pedFiltroTexto')?.value || '').toLowerCase().trim();
+
+  let lista = Array.isArray(pedidos) ? pedidos : [];
+  if (estadoFiltro && estadoFiltro !== 'TODOS') {
+    lista = lista.filter(p => p.estado === estadoFiltro);
+  }
+  if (txtFiltro) {
+    lista = lista.filter(p =>
+      (p.numero_pedido && p.numero_pedido.toLowerCase().includes(txtFiltro)) ||
+      (p.cliente_nombre && p.cliente_nombre.toLowerCase().includes(txtFiltro)) ||
+      (p.cliente_cedula && p.cliente_cedula.toLowerCase().includes(txtFiltro)) ||
+      (p.vendedor_nombre && p.vendedor_nombre.toLowerCase().includes(txtFiltro))
+    );
+  }
+
+  if (lista.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8 text-slate-400 font-bold">No hay pedidos registrados con el filtro seleccionado.</td></tr>';
+    return;
+  }
+
+  const puedeFacturarPedido = AppState.usuarioActual?.permisos?.facturar_directo !== 0;
+
+  tbody.innerHTML = lista.map(p => {
+    let estadoBadge = '';
+    if (p.estado === 'PENDIENTE') {
+      estadoBadge = '<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300">PENDIENTE</span>';
+    } else if (p.estado === 'FACTURADO') {
+      estadoBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">FACTURADO (${escapeHtml(p.factura_numero || '')})</span>`;
+    } else if (p.estado === 'VENCIDO') {
+      estadoBadge = '<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-orange-100 text-orange-800 border border-orange-300">VENCIDO</span>';
+    } else {
+      estadoBadge = '<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300">RECHAZADO</span>';
+    }
+
+    const condBadge = p.condicion_pago === 'credito'
+      ? `<span class="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">Crédito ${p.dias_credito ? `(${p.dias_credito}d)` : ''}</span>`
+      : '<span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">Contado</span>';
+
+    return `
+      <tr class="hover:bg-slate-50 transition border-b border-slate-100">
+        <td class="py-3 px-4 font-mono font-bold text-[#0755C9]">${escapeHtml(p.numero_pedido)}</td>
+        <td class="py-3 px-4 text-slate-500">
+          <div>${p.fecha ? escapeHtml(p.fecha.substring(0, 16)) : '-'}</div>
+          ${p.estado === 'PENDIENTE' && p.fecha_vencimiento ? `<div class="text-[10px] text-amber-600">Vence: ${escapeHtml(p.fecha_vencimiento.substring(0, 16))}</div>` : ''}
+        </td>
+        <td class="py-3 px-4">
+          <div class="font-bold text-slate-900">${escapeHtml(p.cliente_nombre)}</div>
+          <div class="text-[10px] text-slate-400">${escapeHtml(p.cliente_cedula || '')}${p.zona_nombre ? ` · ${escapeHtml(p.zona_nombre)}` : ''}</div>
+        </td>
+        <td class="py-3 px-4 font-medium text-slate-700">${p.vendedor_nombre ? escapeHtml(p.vendedor_nombre) : '<span class="text-slate-400 italic">Sin asesor</span>'}</td>
+        <td class="py-3 px-4 text-center">${condBadge}</td>
+        <td class="py-3 px-4 text-right font-bold text-slate-900">$${parseFloat(p.total_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4 text-center">${estadoBadge}</td>
+        <td class="py-3 px-4 text-center space-x-1">
+          <button type="button" onclick="abrirModalDetallePedido(${p.id})" class="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold" title="Ver Detalle del Pedido">
+            <i class="fa-solid fa-eye"></i>
+          </button>
+          ${p.estado === 'PENDIENTE' && puedeFacturarPedido ? `
+            <button type="button" onclick="autorizarYFacturarPedido(${p.id})" class="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold" title="Autorizar y Facturar">
+              <i class="fa-solid fa-check-double"></i> Facturar
+            </button>
+            <button type="button" onclick="rechazarPedidoPrompt(${p.id})" class="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold" title="Rechazar Pedido">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          ` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+window.renderModuloPedidosTable = renderModuloPedidosTable;
 
 window.openFormatosImpresionModal = openFormatosImpresionModal;
 window.closeFormatosImpresionModal = closeFormatosImpresionModal;

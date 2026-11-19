@@ -108,7 +108,7 @@
       </button>
 
       <!-- PRIMER GRUPO: INVENTARIO -->
-      <div class="pt-3 pb-1 px-2.5">
+      <div id="sidebar-group-inventario" class="pt-3 pb-1 px-2.5">
         <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Inventario</span>
       </div>
       <button onclick="navigate('categorias')" id="nav-categorias" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
@@ -121,12 +121,17 @@
       </button>
 
       <!-- SEGUNDO GRUPO: CLIENTES Y VENTAS -->
-      <div class="pt-3 pb-1 px-2.5">
+      <div id="sidebar-group-ventas" class="pt-3 pb-1 px-2.5">
         <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Clientes y Ventas</span>
       </div>
       <button onclick="navigate('clientes')" id="nav-clientes" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
         <i class="fa-solid fa-users mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span data-label-key="tab_clientes">Clientes</span>
+      </button>
+      <button onclick="navigate('pedidos')" id="nav-pedidos" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10" title="Toma y seguimiento de Pedidos / Preventas">
+        <i class="fa-solid fa-clipboard-list mr-2.5 text-[#00C6E8] group-hover:text-white transition-colors text-sm w-4 text-center"></i>
+        <span class="flex-1 text-left">Pedidos</span>
+        <span id="badgeSidebarPedidosPendientes" class="hidden ml-auto px-1.5 py-0.5 text-[10px] font-extrabold rounded-full bg-amber-400 text-slate-900">0</span>
       </button>
       <button onclick="navigate('facturacion')" id="nav-facturacion" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
         <i class="fa-solid fa-file-invoice-dollar mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
@@ -146,7 +151,7 @@
       </button>
 
       <!-- TERCER GRUPO: PROVEEDORES Y COMPRAS -->
-      <div class="pt-3 pb-1 px-2.5">
+      <div id="sidebar-group-compras" class="pt-3 pb-1 px-2.5">
         <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Proveedores y Compras</span>
       </div>
       <button onclick="navigate('proveedores')" id="nav-proveedores" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
@@ -167,7 +172,7 @@
       </button>
 
       <!-- CUARTO GRUPO: FINANZAS Y TESORERÍA -->
-      <div class="pt-3 pb-1 px-2.5">
+      <div id="sidebar-group-finanzas" class="pt-3 pb-1 px-2.5">
         <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Finanzas y Tesorería</span>
       </div>
       <button onclick="navigate('tesoreria')" id="nav-tesoreria" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
@@ -176,7 +181,7 @@
       </button>
 
       <!-- QUINTO GRUPO: INFORMES -->
-      <div class="pt-3 pb-1 px-2.5">
+      <div id="sidebar-group-informes" class="pt-3 pb-1 px-2.5">
         <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Informes</span>
       </div>
       <button onclick="navigate('reportes')" id="nav-reportes" class="sidebar-nav-btn group role-admin-only text-slate-100 hover:bg-white/10">
@@ -185,7 +190,7 @@
       </button>
 
       <!-- Botón CFO Copilot IA (Fase 3B) -->
-      <div class="pt-2 px-1">
+      <div id="sidebar-group-seguridad" class="pt-2 px-1">
         <div class="pt-3 pb-1 px-2.5">
         <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Seguridad & Sistema</span>
       </div>
@@ -364,11 +369,15 @@
         </div>
 
         <!-- Botones de Acción Rápida (Personalizables en Tiempo Real) -->
-        <button onclick="navigate('facturacion')" class="btn-theme-factura text-white px-2.5 sm:px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-xs flex items-center justify-center transition-all duration-200 active:scale-95" title="Nueva Venta">
+        <button onclick="navigate('pedidos'); if(typeof cambiarSubtabPedidos==='function') cambiarSubtabPedidos('nuevo');" id="btnHeaderNuevoPedido" class="hidden bg-gradient-to-r from-[#0755C9] to-[#087FE8] hover:from-[#0648AD] hover:to-[#076FD0] text-white px-2.5 sm:px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-xs flex items-center justify-center transition-all duration-200 active:scale-95" title="Nuevo Pedido / Preventa">
+          <i class="fa-solid fa-clipboard-list sm:mr-1.5"></i>
+          <span class="hidden sm:inline">Nuevo Pedido</span>
+        </button>
+        <button onclick="navigate('facturacion')" id="btnHeaderNuevaVenta" class="btn-theme-factura text-white px-2.5 sm:px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-xs flex items-center justify-center transition-all duration-200 active:scale-95" title="Nueva Venta">
           <i class="fa-solid fa-cash-register sm:mr-1.5"></i>
           <span class="hidden sm:inline" data-label-key="btn_nueva_venta">Nueva Venta</span>
         </button>
-        <button onclick="navigate('compras')" class="btn-theme-compra text-white px-2.5 sm:px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-xs flex items-center justify-center transition-all duration-200 active:scale-95" title="Cargar Compra">
+        <button onclick="navigate('compras')" id="btnHeaderCargarCompra" class="btn-theme-compra text-white px-2.5 sm:px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-xs flex items-center justify-center transition-all duration-200 active:scale-95" title="Cargar Compra">
           <i class="fa-solid fa-cart-shopping sm:mr-1.5"></i>
           <span class="hidden sm:inline" data-label-key="btn_cargar_compra">Cargar Compra</span>
         </button>
@@ -4341,6 +4350,294 @@
 
   
     <!-- ========================================================
+         VISTA 13B: MÓDULO DEDICADO DE PEDIDOS & PREVENTAS (VENDEDORES)
+         ======================================================== -->
+    <section id="view-pedidos" class="hidden space-y-5">
+      <!-- Encabezado del Módulo -->
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-200/80">
+        <div class="flex items-center space-x-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#071B49] to-[#0755C9] text-white flex items-center justify-center shadow-lg shadow-blue-900/20 shrink-0">
+            <i class="fa-solid fa-clipboard-list text-cyan-300 text-xl"></i>
+          </div>
+          <div>
+            <h2 class="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">Módulo de Pedidos &amp; Preventas</h2>
+            <p class="text-xs sm:text-sm text-slate-500 mt-0.5">Toma de pedidos para vendedores con reserva automática de stock (48h) y seguimiento hasta facturación.</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-2 shrink-0">
+          <button type="button" onclick="cambiarSubtabPedidos('nuevo')" class="px-3.5 py-2 bg-[#0755C9] hover:bg-blue-600 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center">
+            <i class="fa-solid fa-plus mr-1.5"></i>Tomar Pedido
+          </button>
+          <button type="button" onclick="cambiarSubtabPedidos('lista')" class="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold shadow-2xs transition flex items-center">
+            <i class="fa-solid fa-list-check mr-1.5 text-[#0755C9]"></i>Ver Pedidos
+          </button>
+        </div>
+      </div>
+
+      <!-- KPIs Rápidos de Pedidos -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold text-slate-500 uppercase">Pendientes por Facturar</span>
+            <div class="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-sm"><i class="fa-solid fa-clock"></i></div>
+          </div>
+          <div id="kpiPedPendientes" class="text-xl font-extrabold text-amber-600 mt-2">0</div>
+          <div class="text-[11px] text-slate-400 mt-0.5">Con stock reservado (48h)</div>
+        </div>
+        <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold text-slate-500 uppercase">Monto en Pedidos</span>
+            <div class="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-sm"><i class="fa-solid fa-dollar-sign"></i></div>
+          </div>
+          <div id="kpiPedMontoPendiente" class="text-xl font-extrabold text-slate-900 mt-2">$0.00 USD</div>
+          <div class="text-[11px] text-slate-400 mt-0.5">En espera de aprobación</div>
+        </div>
+        <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold text-slate-500 uppercase">Pedidos Facturados</span>
+            <div class="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-sm"><i class="fa-solid fa-circle-check"></i></div>
+          </div>
+          <div id="kpiPedFacturados" class="text-xl font-extrabold text-emerald-600 mt-2">0</div>
+          <div class="text-[11px] text-slate-400 mt-0.5">Convertidos a factura oficial</div>
+        </div>
+        <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold text-slate-500 uppercase">Perfil / Asesor</span>
+            <div class="w-8 h-8 rounded-xl bg-indigo-50 text-[#0755C9] flex items-center justify-center text-sm"><i class="fa-solid fa-user-tie"></i></div>
+          </div>
+          <div id="kpiPedVendedorActivo" class="text-sm font-extrabold text-[#0755C9] mt-2 truncate">Cargando...</div>
+          <div id="kpiPedComisionInfo" class="text-[11px] text-slate-400 mt-0.5 truncate">Cartera comercial asignada</div>
+        </div>
+      </div>
+
+      <!-- Pestañas del Módulo de Pedidos -->
+      <div class="flex items-center space-x-2 border-b border-slate-200">
+        <button type="button" onclick="cambiarSubtabPedidos('nuevo')" id="subtabPedNuevo" class="px-4 py-2.5 text-xs font-extrabold border-b-2 border-[#0755C9] text-[#0755C9] transition flex items-center">
+          <i class="fa-solid fa-cart-plus mr-1.5"></i>Nuevo Pedido / Preventa
+        </button>
+        <button type="button" onclick="cambiarSubtabPedidos('lista')" id="subtabPedLista" class="px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition flex items-center space-x-1.5">
+          <i class="fa-solid fa-list-check mr-1.5 text-cyan-600"></i><span>Mis Pedidos &amp; Seguimiento</span>
+          <span id="badgeTabPedidosPendientes" class="hidden text-[10px] font-extrabold px-1.5 py-0.5 rounded-full bg-amber-500 text-white">0</span>
+        </button>
+      </div>
+
+      <!-- Subtab 1: Toma de Nuevo Pedido -->
+      <div id="panelPedNuevo" class="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
+        <!-- Columna Izquierda: Cliente, Asesor y Catálogo (7 Cols) -->
+        <div class="lg:col-span-7 space-y-4">
+          <!-- Tarjeta Cliente y Asesor Comercial -->
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center">
+                <i class="fa-solid fa-user-tag mr-1.5 text-[#0755C9]"></i>Cliente del Pedido *
+              </label>
+              <button type="button" onclick="openClienteModal(false, 'pedidos')" class="text-xs font-semibold text-[#0755C9] hover:text-blue-800 hover:underline">
+                + Registrar Nuevo Cliente
+              </button>
+            </div>
+
+            <!-- Buscador de Clientes para Pedidos -->
+            <div class="relative">
+              <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-sm"></i>
+              <input type="text" id="pedClienteSearchInput" oninput="buscarClientePedido(this.value)" onfocus="buscarClientePedido(this.value)" placeholder="Buscar cliente asignado por Nombre, Cédula o Teléfono..." autocomplete="off"
+                     class="w-full pl-10 pr-24 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0755C9] focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition">
+              <button type="button" id="btnClearClientePed" onclick="limpiarClientePedido()" class="hidden absolute right-2.5 top-2 text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1 rounded-lg font-medium">
+                Cambiar
+              </button>
+              <div id="pedClienteSearchResults" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-56 overflow-y-auto z-30 divide-y divide-slate-100"></div>
+            </div>
+
+            <!-- Cliente Seleccionado en Pedidos -->
+            <div id="pedClienteSelectedCard" class="hidden bg-blue-50/70 border border-blue-200 p-3 rounded-xl flex items-center justify-between gap-2 text-xs">
+              <div class="flex items-center space-x-3 min-w-0">
+                <div class="w-8 h-8 rounded-full bg-[#0755C9] text-white flex items-center justify-center font-bold shrink-0">
+                  <i class="fa-solid fa-user"></i>
+                </div>
+                <div class="min-w-0">
+                  <p class="font-bold text-slate-900 text-sm truncate" id="pedSelectedClienteNombre">-</p>
+                  <p class="text-slate-600"><span id="pedSelectedClienteCedula">-</span> &bull; <span id="pedSelectedClienteTelefono">-</span></p>
+                  <p id="pedSelectedClienteVendedorBadge" class="hidden text-[11px] font-semibold text-[#0755C9] mt-0.5 truncate"></p>
+                </div>
+              </div>
+              <span class="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full text-[11px] flex items-center shrink-0">
+                <i class="fa-solid fa-check mr-1"></i>Asignado
+              </span>
+            </div>
+            <input type="hidden" id="pedClienteId" value="">
+
+            <!-- Asesor y Observaciones del Pedido -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <label for="pedVendedorSelect" class="text-[11px] font-bold uppercase text-slate-500 tracking-wider flex items-center">
+                    <i class="fa-solid fa-user-tie mr-1 text-[#0755C9]"></i>Asesor Comercial
+                  </label>
+                  <span id="pedVendedorComisionBadge" class="text-[10px] text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">Sin Comisión</span>
+                </div>
+                <select id="pedVendedorSelect" onchange="actualizarComisionPedidoBadge()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500">
+                  <option value="">-- Seleccionar Vendedor --</option>
+                </select>
+              </div>
+              <div>
+                <label for="pedNotasInput" class="block text-[11px] font-bold uppercase text-slate-500 tracking-wider mb-1">
+                  <i class="fa-regular fa-note-sticky mr-1 text-slate-400"></i>Observaciones / Ruta / Entrega
+                </label>
+                <input type="text" id="pedNotasInput" placeholder="Ej: Despacho ruta norte, pago contra entrega..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-500">
+              </div>
+            </div>
+          </div>
+
+          <!-- Buscador y Catálogo para Pedidos -->
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+            <div class="flex flex-col sm:flex-row gap-2 justify-between items-center">
+              <div class="relative w-full">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400 text-sm"></i>
+                <input type="text" id="pedSearchProduct" oninput="renderPedCatalog()" onkeydown="handlePedCatalogKeydown(event)" placeholder="Buscar producto o código para agregar al pedido..."
+                       class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0755C9] focus:ring-2 focus:ring-blue-500/20">
+              </div>
+              <div class="flex space-x-1 shrink-0">
+                <button type="button" onclick="setPedFilterCategory('todos')" id="pedCat-todos" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-white">Todos</button>
+                <button type="button" onclick="setPedFilterCategory('producto')" id="pedCat-producto" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Productos</button>
+                <button type="button" onclick="setPedFilterCategory('servicio')" id="pedCat-servicio" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Servicios</button>
+              </div>
+            </div>
+
+            <div id="pedCatalogGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-96 overflow-y-auto pr-1">
+              <!-- Tarjetas de productos cargadas dinámicamente -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Columna Derecha: Resumen y Envío del Pedido (5 Cols) -->
+        <div class="lg:col-span-5 space-y-4">
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col space-y-4">
+            <div class="border-b border-slate-200 pb-3 flex items-center justify-between">
+              <h3 class="font-bold text-slate-800 flex items-center">
+                <i class="fa-solid fa-basket-shopping text-[#0755C9] mr-2"></i>Detalle del Pedido
+              </h3>
+              <div class="flex items-center space-x-2">
+                <span id="pedItemsCountBadge" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-semibold">0 ítems</span>
+                <button type="button" onclick="limpiarFormularioPedido()" class="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-0.5 rounded hover:bg-rose-50 transition" title="Limpiar pedido">
+                  <i class="fa-solid fa-trash-can mr-1"></i>Limpiar
+                </button>
+              </div>
+            </div>
+
+            <div id="pedCartItemsList" class="space-y-2 overflow-y-auto max-h-72 pr-1 min-h-[150px]">
+              <p class="text-sm text-slate-400 text-center py-8">El pedido está vacío. Selecciona productos del catálogo de la izquierda.</p>
+            </div>
+
+            <!-- Resumen Monetario del Pedido -->
+            <div class="border-t border-slate-200 pt-3 space-y-1.5 text-sm">
+              <div class="flex justify-between text-slate-500">
+                <span>Subtotal:</span>
+                <span class="font-medium text-slate-700" id="pedSubtotalUsd">$0.00</span>
+              </div>
+              <div class="flex justify-between text-slate-500">
+                <span>IVA Estimado:</span>
+                <span class="font-medium text-slate-700" id="pedIvaUsd">$0.00</span>
+              </div>
+              <div class="flex justify-between items-baseline pt-2 border-t border-slate-200">
+                <span class="text-base font-bold text-slate-900">Total Pedido (USD):</span>
+                <span class="text-2xl font-extrabold text-[#0755C9]" id="pedTotalUsd">$0.00</span>
+              </div>
+              <div class="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
+                <div>
+                  <span class="text-slate-400 block">Ref. Bolívares:</span>
+                  <span class="font-bold text-slate-800 text-sm" id="pedTotalVes">0.00 Bs.</span>
+                </div>
+                <div>
+                  <span class="text-slate-400 block">Ref. Pesos:</span>
+                  <span class="font-bold text-slate-800 text-sm" id="pedTotalCop">0 COP</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between text-xs bg-emerald-50 border border-emerald-200/80 px-3 py-2 rounded-xl">
+                <span class="font-semibold text-emerald-800"><i class="fa-solid fa-coins mr-1.5"></i>Comisión estimada del asesor:</span>
+                <strong id="pedComisionEstimadaUsd" class="font-mono text-emerald-700">$0.00 USD</strong>
+              </div>
+            </div>
+
+            <!-- Condición de Pago Propuesta -->
+            <div class="border-t border-slate-200 pt-3 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold uppercase text-slate-600 tracking-wider">Condición Propuesta:</span>
+                <div class="inline-flex rounded-lg border border-slate-300 p-0.5 bg-slate-200">
+                  <button type="button" onclick="setPedTipoVenta('contado')" id="btnPedTipoContado" class="px-3 py-1 rounded-md text-xs font-bold bg-white text-slate-900 shadow-xs transition">Al Contado</button>
+                  <button type="button" onclick="setPedTipoVenta('credito')" id="btnPedTipoCredito" class="px-3 py-1 rounded-md text-xs font-bold text-slate-600 hover:text-slate-900 transition">A Crédito</button>
+                </div>
+              </div>
+              <div id="pedCreditoPanel" class="hidden bg-amber-50/80 border border-amber-200 p-3 rounded-xl space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <label for="pedDiasCredito" class="text-xs font-bold text-amber-900">Plazo de Crédito (días):</label>
+                  <div class="flex items-center gap-1">
+                    <button type="button" onclick="setPedDiasCredito(7)" class="text-[10px] font-bold bg-amber-200/70 hover:bg-amber-200 text-amber-900 px-2 py-0.5 rounded">7d</button>
+                    <button type="button" onclick="setPedDiasCredito(15)" class="text-[10px] font-bold bg-amber-200/70 hover:bg-amber-200 text-amber-900 px-2 py-0.5 rounded">15d</button>
+                    <button type="button" onclick="setPedDiasCredito(30)" class="text-[10px] font-bold bg-amber-200/70 hover:bg-amber-200 text-amber-900 px-2 py-0.5 rounded">30d</button>
+                  </div>
+                </div>
+                <input type="number" id="pedDiasCredito" min="1" max="180" value="15" class="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 text-xs font-bold text-amber-950">
+              </div>
+            </div>
+
+            <div class="bg-blue-50/70 border border-blue-200/80 rounded-xl p-2.5 text-[11px] text-blue-900 flex items-start space-x-2">
+              <i class="fa-solid fa-shield-halved text-[#0755C9] mt-0.5 shrink-0"></i>
+              <span>Este pedido reserva el stock disponible por <strong>48 horas</strong> y queda pendiente para que Administración o Caja emita la factura oficial.</span>
+            </div>
+
+            <button type="button" onclick="guardarPedidoModulo()" id="btnRegistrarPedidoModulo" class="w-full py-3.5 px-4 bg-gradient-to-r from-[#0755C9] to-[#00C6E8] hover:from-[#0648AD] hover:to-[#0799B5] text-white font-extrabold rounded-xl shadow-lg hover:shadow-xl transition flex items-center justify-center space-x-2 text-sm active:scale-98">
+              <i class="fa-solid fa-paper-plane"></i>
+              <span>Registrar Pedido &amp; Reservar Stock</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Subtab 2: Bandeja / Historial del Módulo de Pedidos -->
+      <div id="panelPedLista" class="hidden bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden p-4 space-y-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div class="relative flex-1 max-w-sm">
+            <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+            <input type="text" id="pedFiltroTexto" oninput="renderModuloPedidosTable(AppState.pedidosModuloLista || [])" placeholder="Filtrar por N° pedido, cliente o vendedor..." class="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium">
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <select id="pedFiltroVendedor" onchange="cargarListaPedidosModulo()" class="text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+              <option value="">Todos los vendedores</option>
+            </select>
+            <select id="pedFiltroEstado" onchange="cargarListaPedidosModulo()" class="text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+              <option value="TODOS">Todos los Estados</option>
+              <option value="PENDIENTE" selected>Pendientes</option>
+              <option value="FACTURADO">Facturados</option>
+              <option value="RECHAZADO">Rechazados</option>
+              <option value="VENCIDO">Vencidos (+48h)</option>
+            </select>
+            <button type="button" onclick="cargarListaPedidosModulo()" class="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition" title="Refrescar lista">
+              <i class="fa-solid fa-rotate-right"></i>
+            </button>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-600 font-bold uppercase text-[11px] border-b border-slate-200">
+              <tr>
+                <th class="py-3 px-4">N° Pedido</th>
+                <th class="py-3 px-4">Fecha / Vigencia</th>
+                <th class="py-3 px-4">Cliente &amp; Zona</th>
+                <th class="py-3 px-4">Asesor</th>
+                <th class="py-3 px-4 text-center">Condición</th>
+                <th class="py-3 px-4 text-right">Total USD</th>
+                <th class="py-3 px-4 text-center">Estado</th>
+                <th class="py-3 px-4 text-center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tablaModuloPedidosBody" class="divide-y divide-slate-100">
+              <tr><td colspan="8" class="text-center py-8 text-slate-400">Cargando pedidos registrados...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================
          VISTA 14: FUERZA DE VENTAS, VENDEDORES Y COMISIONES (ERP)
          ======================================================== -->
     <section id="view-fuerza-ventas" class="hidden space-y-6">
@@ -4487,7 +4784,7 @@
         <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
           <div>
             <h3 class="font-extrabold text-sm text-slate-800">Bandeja de Pedidos y Preventas Comerciales</h3>
-            <p class="text-xs text-slate-500">Pedidos registrados desde Facturación pendientes de autorización y facturación oficial.</p>
+            <p class="text-xs text-slate-500">Pedidos registrados desde el módulo de Pedidos o Facturación pendientes de autorización y facturación oficial.</p>
           </div>
           <div class="flex items-center space-x-2">
             <label class="text-xs font-bold text-slate-600">Filtrar Estado:</label>
@@ -4698,6 +4995,10 @@
     <button onclick="navigate('dashboard')" class="mobile-nav-item active" id="mob-nav-dashboard" title="Panel Principal">
       <i class="fa-solid fa-chart-pie"></i>
       <span>Inicio</span>
+    </button>
+    <button onclick="navigate('pedidos')" class="hidden mobile-nav-item" id="mob-nav-pedidos" title="Módulo de Pedidos">
+      <i class="fa-solid fa-clipboard-list"></i>
+      <span>Pedidos</span>
     </button>
     <button onclick="navigate('facturacion')" class="mobile-nav-item" id="mob-nav-facturacion" title="Punto de Venta">
       <i class="fa-solid fa-file-invoice-dollar"></i>
@@ -7608,7 +7909,7 @@
 
   <!-- Scripts -->
   <script src="master-report-layout.js?v=1.0.0"></script>
-  <script src="app.js?v=3.0.0&rev=32"></script>
+  <script src="app.js?v=3.0.0&rev=34"></script>
 
     <!-- MODAL: DETALLE Y VOUCHER IMPRIMIBLE DE NOTA DE DÉBITO A PROVEEDOR -->
     <div id="modalNotaDebitoCompra" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 hidden">
