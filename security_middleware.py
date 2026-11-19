@@ -81,9 +81,11 @@ class SecurityMiddleware:
 
     @staticmethod
     def resolver_permiso_requerido(method: str, path: str) -> Optional[str]:
-        # Rutas con "Autenticado General"
+        # Rutas con "Autenticado General" (configuración de tasas/impresión de solo lectura necesaria al iniciar sesión)
         if path in ("/api/auth/me", "/api/auth/logout"):
             return None  # Cualquier usuario autenticado tiene acceso
+        if method == "GET" and path in ("/api/config", "/api/configuracion/impresion"):
+            return None
 
         # Tratamiento específico para notas de ajuste
         if path == "/api/notas-ajuste":
@@ -195,6 +197,20 @@ class SecurityMiddleware:
             if user_rol != "SuperAdmin" and user_perms.get(permiso_requerido, 0) != 1:
                 # Excepción para notas de ajuste (perm_cxc o perm_cxp)
                 if path == "/api/notas-ajuste" and (user_perms.get("perm_cxc", 0) == 1 or user_perms.get("perm_cxp", 0) == 1):
+                    pass
+                # Gestión/selección de clientes: autorizada para cartera clientes, ventas o CxC
+                elif re.search(r"^/api/clientes", path) and (
+                    user_perms.get("perm_clientes", 0) == 1
+                    or user_perms.get("perm_ventas", 0) == 1
+                    or user_perms.get("perm_cxc", 0) == 1
+                ):
+                    pass
+                # Consulta de catálogo (solo lectura GET) para módulos comerciales de POS, Pedidos o Compras
+                elif method == "GET" and (re.search(r"^/api/productos", path) or re.search(r"^/api/categorias", path)) and (
+                    user_perms.get("perm_ventas", 0) == 1
+                    or user_perms.get("perm_pos", 0) == 1
+                    or user_perms.get("perm_compras", 0) == 1
+                ):
                     pass
                 else:
                     handler.send_error_json(f"Acceso Denegado: Su rol no posee la autorización requerida ({permiso_requerido}).", 403)

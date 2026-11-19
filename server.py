@@ -448,9 +448,25 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             elif path.startswith("/api/pedidos/") and not path.endswith("/facturar") and not path.endswith("/rechazar"):
                 try:
                     p_id = int(path.split("/")[3])
+                    user_tok, perms = self.get_current_user_and_perms()
                     pedido = database.obtener_pedido_detalle(p_id)
                     if not pedido:
                         self.send_error_json("Pedido no encontrado", 404)
+                    elif perms and perms.get("facturar_directo", 1) == 0:
+                        usuario_id = user_tok.get("uid") if user_tok else None
+                        own_vendedor_id = None
+                        if usuario_id:
+                            cursor.execute("SELECT id FROM vendedores WHERE usuario_id = ? AND activo = 1", (usuario_id,))
+                            v_row = cursor.fetchone()
+                            if v_row:
+                                own_vendedor_id = v_row["id"]
+                        es_propio = (usuario_id and pedido.get("usuario_id") == usuario_id) or (
+                            own_vendedor_id and pedido.get("vendedor_id") == own_vendedor_id
+                        )
+                        if not es_propio:
+                            self.send_error_json("Acceso denegado: este pedido pertenece a la cartera de otro asesor.", 403)
+                            return
+                        self.send_json(pedido)
                     else:
                         self.send_json(pedido)
                 except Exception as e:
@@ -3209,8 +3225,27 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json("Se requiere seleccionar un cliente y al menos un producto", 400)
                     return
 
-                user_tok, _ = self.get_current_user_and_perms()
+                user_tok, perms = self.get_current_user_and_perms()
                 usuario_id = user_tok.get("uid", 1) if user_tok else 1
+
+                # Aislamiento de cartera y atribución para roles sin facturación directa (Vendedores)
+                if perms and perms.get("facturar_directo", 1) == 0:
+                    cursor.execute("SELECT id FROM vendedores WHERE usuario_id = ? AND activo = 1", (usuario_id,))
+                    v_row = cursor.fetchone()
+                    own_vendedor_id = v_row["id"] if v_row else None
+
+                    cursor.execute("SELECT id, cedula, vendedor_id FROM clientes WHERE id = ?", (cliente_id,))
+                    cli_chk = cursor.fetchone()
+                    if not cli_chk:
+                        self.send_error_json(f"Cliente ID {cliente_id} no existe", 404)
+                        return
+                    cli_vend = cli_chk["vendedor_id"]
+                    es_cliente_mostrador = (cli_chk["id"] == 1 or cli_chk["cedula"] == "V-00000000")
+                    if cli_vend is not None and not es_cliente_mostrador and cli_vend != own_vendedor_id:
+                        self.send_error_json("Acceso denegado: este cliente pertenece a la cartera de otro asesor comercial.", 403)
+                        return
+                    if own_vendedor_id:
+                        vendedor_id = own_vendedor_id
 
                 try:
                     res = database.crear_pedido(
@@ -3278,8 +3313,21 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             elif path.startswith("/api/pedidos/") and path.endswith("/rechazar"):
                 try:
                     p_id = int(path.split("/")[3])
-                    user_tok, _ = self.get_current_user_and_perms()
+                    user_tok, perms = self.get_current_user_and_perms()
                     usuario_id = user_tok.get("uid", 1) if user_tok else 1
+                    if perms and perms.get("facturar_directo", 1) == 0:
+                        cursor.execute("SELECT id FROM vendedores WHERE usuario_id = ? AND activo = 1", (usuario_id,))
+                        v_row = cursor.fetchone()
+                        own_v_id = v_row["id"] if v_row else None
+                        cursor.execute("SELECT usuario_id, vendedor_id FROM pedidos WHERE id = ?", (p_id,))
+                        p_chk = cursor.fetchone()
+                        if not p_chk:
+                            self.send_error_json("Pedido no encontrado", 404)
+                            return
+                        es_propio = (p_chk["usuario_id"] == usuario_id) or (own_v_id and p_chk["vendedor_id"] == own_v_id)
+                        if not es_propio:
+                            self.send_error_json("ACCESO DENEGADO: Su rol no tiene autorización para rechazar pedidos de otros asesores.", 403)
+                            return
                     motivo = body.get("motivo", "Rechazado por Administración")
 
                     res = database.rechazar_pedido(pedido_id=p_id, usuario_id=usuario_id, motivo=motivo)
@@ -5478,7 +5526,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             # 4. Actualizar Cliente
             elif path.startswith("/api/clientes/"):
                 c_id = int(path.split("/")[-1])
-                cursor.execute("SELECT vendedor_id, zona_id FROM clientes WHERE id = ?", (c_id,))
+                cursor.execute("SELECT id, cedula, vendedor_id, zona_id FROM clientes WHERE id = ?", (c_id,))
                 cli_actual = cursor.fetchone()
                 if not cli_actual:
                     self.send_error_json("Cliente no encontrado", 404)
@@ -5493,15 +5541,24 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     raw_z = body.get("zona_id")
                     zona_val = int(raw_z) if raw_z not in (None, "", 0, "0") else None
 
-                # Respetar aislamiento de cartera para vendedores comerciales (facturar_directo == 0)
+                # Respetar aislamiento estricto de cartera para vendedores comerciales (facturar_directo == 0)
                 user_tok, perms = self.get_current_user_and_perms()
                 if perms and perms.get("facturar_directo", 1) == 0:
                     usuario_id = user_tok.get("uid") if user_tok else None
+                    own_vend_id = None
                     if usuario_id:
                         cursor.execute("SELECT id FROM vendedores WHERE usuario_id = ? AND activo = 1", (usuario_id,))
                         v_row = cursor.fetchone()
                         if v_row:
-                            vendedor_val = v_row["id"]
+                            own_vend_id = v_row["id"]
+                    es_mostrador_generico = (cli_actual["id"] == 1 or cli_actual["cedula"] == "V-00000000")
+                    if cli_actual["vendedor_id"] is not None and not es_mostrador_generico and cli_actual["vendedor_id"] != own_vend_id:
+                        self.send_error_json("Acceso denegado: este cliente pertenece a la cartera de otro asesor comercial.", 403)
+                        return
+                    if es_mostrador_generico:
+                        vendedor_val = cli_actual["vendedor_id"]
+                    elif own_vend_id is not None:
+                        vendedor_val = own_vend_id
 
                 cursor.execute("""
                     UPDATE clientes 
@@ -5705,6 +5762,10 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             elif path.startswith("/api/clientes/"):
                 c_id = int(path.split("/")[-1])
+                user_tok, perms = self.get_current_user_and_perms()
+                if perms and perms.get("facturar_directo", 1) == 0:
+                    self.send_error_json("Acceso denegado: solo Administración puede eliminar fichas de clientes.", 403)
+                    return
                 cursor.execute("DELETE FROM clientes WHERE id = ?", (c_id,))
                 conn.commit()
                 self.send_json({"success": True})
