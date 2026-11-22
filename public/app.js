@@ -55,6 +55,9 @@ try {
 // Estado global de la aplicación
 const AppState = {
   currentView: 'dashboard',
+  dashboardPeriodo: 'mes',
+  dashboardOpTab: 'stock',
+  dashboardCharts: { flujo: null, pagos: null },
   config: {
     nombre_negocio: 'Mi Negocio Comercial',
     documento_fiscal: 'J-12345678-9',
@@ -661,7 +664,29 @@ function setPersonalizacionTab(tab) {
   });
 }
 
+function _isSuperAdminUser(showWarning = false) {
+  const isSuper = Boolean(AppState.usuarioActual && AppState.usuarioActual.rol_nombre === 'SuperAdmin');
+  if (!isSuper && showWarning && typeof showToast === 'function') {
+    showToast('Acceso restringido exclusivamente al usuario SuperAdmin.', 'error');
+  }
+  return isSuper;
+}
+
+function openConfigHubModal() {
+  if (!_isSuperAdminUser(true)) return;
+  const modal = document.getElementById('modalHubConfiguracion');
+  if (modal) modal.classList.remove('hidden');
+}
+window.openConfigHubModal = openConfigHubModal;
+
+function closeConfigHubModal() {
+  const modal = document.getElementById('modalHubConfiguracion');
+  if (modal) modal.classList.add('hidden');
+}
+window.closeConfigHubModal = closeConfigHubModal;
+
 function openPersonalizacionModal() {
+  if (!_isSuperAdminUser(true)) return;
   const tema = AppState.temaActual || DEFAULT_THEME;
   const labels = AppState.labelsActuales || DEFAULT_LABELS;
 
@@ -1344,6 +1369,7 @@ function quitarLogoConfig() {
 }
 
 function openConfigModal() {
+  if (!_isSuperAdminUser(true)) return;
   const cfg = AppState.config || {};
   document.getElementById('cfgTasaVes').value = cfg.tasa_ves || 45.0;
   document.getElementById('cfgTasaCop').value = cfg.tasa_cop || 4100.0;
@@ -1452,6 +1478,7 @@ async function saveConfig(e) {
 // GESTIÓN DE BASE DE DATOS & BETA TESTER
 // ========================================================
 async function openDatabaseModal() {
+  if (!_isSuperAdminUser(true)) return;
   const modal = document.getElementById('modalBaseDatos');
   if (modal) {
     modal.classList.remove('hidden');
@@ -1725,172 +1752,662 @@ async function handleRestoreFile(input) {
 }
 
 // ========================================================
-// DASHBOARD
+// DASHBOARD BI EN TIEMPO REAL
 // ========================================================
-async function loadDashboard() {
+function setDashboardPeriodo(periodo) {
+  const validos = ['hoy', 'semana', 'mes', 'anio'];
+  const p = validos.includes(periodo) ? periodo : 'mes';
+  AppState.dashboardPeriodo = p;
+
+  document.querySelectorAll('.dash-periodo-btn').forEach(btn => {
+    const activo = btn.dataset.dashPeriodo === p;
+    btn.className = activo
+      ? 'dash-periodo-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-white text-teal-700 shadow-xs'
+      : 'dash-periodo-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-600 hover:text-slate-900';
+  });
+
+  loadDashboard(p);
+}
+
+function switchDashboardOpTab(tab) {
+  AppState.dashboardOpTab = tab === 'pedidos' ? 'pedidos' : 'stock';
+  const isStock = AppState.dashboardOpTab === 'stock';
+
+  const btnStock = document.getElementById('dashTabStockBtn');
+  const btnPedidos = document.getElementById('dashTabPedidosBtn');
+  const listStock = document.getElementById('dashStockList');
+  const listPedidos = document.getElementById('dashPedidosList');
+  const headerAction = document.getElementById('dashOpHeaderActionBtn');
+
+  if (btnStock) {
+    btnStock.className = isStock
+      ? 'px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-800 shadow-xs transition flex items-center gap-1.5'
+      : 'px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition flex items-center gap-1.5';
+  }
+  if (btnPedidos) {
+    btnPedidos.className = !isStock
+      ? 'px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-800 shadow-xs transition flex items-center gap-1.5'
+      : 'px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition flex items-center gap-1.5';
+  }
+  if (listStock) listStock.classList.toggle('hidden', !isStock);
+  if (listPedidos) listPedidos.classList.toggle('hidden', isStock);
+
+  if (headerAction) {
+    if (isStock) {
+      headerAction.innerHTML = `Cargar Compra <i class="fa-solid fa-arrow-right ml-1.5 text-[10px]"></i>`;
+      headerAction.onclick = () => navigate('compras');
+    } else {
+      headerAction.innerHTML = `Bandeja de Aprobación <i class="fa-solid fa-arrow-right ml-1.5 text-[10px]"></i>`;
+      headerAction.onclick = () => irABandejaPedidosDesdeDashboard();
+    }
+  }
+}
+
+function irABandejaPedidosDesdeDashboard() {
+  navigate('pedidos');
+  setTimeout(() => {
+    if (typeof cambiarSubtabPedidos === 'function') {
+      cambiarSubtabPedidos('bandeja');
+    }
+  }, 120);
+}
+
+function reponerProductoDesdeDashboard(productoId) {
+  navigate('compras');
+  setTimeout(() => {
+    if (typeof populateComprasSelectors === 'function') {
+      populateComprasSelectors();
+    }
+    const sel = document.getElementById('compraItemSelect');
+    if (sel) {
+      sel.value = String(productoId);
+      if (typeof sel.onchange === 'function') sel.onchange();
+      const cantEl = document.getElementById('compraItemCant') || document.getElementById('compraItemCantidad');
+      if (cantEl) cantEl.focus();
+    }
+  }, 160);
+}
+
+function formatBsCompacto(montoUsd, tasaVes) {
+  const val = (parseFloat(montoUsd || 0) * parseFloat(tasaVes || 1));
+  return `${val.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs.`;
+}
+
+function buildDashboardEmptyState(iconClass, title, subtitle, actionLabel = '', actionOnClick = '') {
+  const btnHtml = (actionLabel && actionOnClick)
+    ? `<button type="button" onclick="${actionOnClick}" class="mt-3 px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs transition inline-flex items-center gap-1.5">
+         <i class="fa-solid fa-plus text-[10px]"></i>${escapeHtml(actionLabel)}
+       </button>`
+    : '';
+  return `
+    <div class="flex flex-col items-center justify-center text-center py-8 px-4 bg-slate-50/70 rounded-xl border border-dashed border-slate-200">
+      <div class="w-11 h-11 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center text-lg mb-2.5">
+        <i class="${escapeHtml(iconClass)}"></i>
+      </div>
+      <p class="text-xs sm:text-sm font-bold text-slate-700">${escapeHtml(title)}</p>
+      <p class="text-[11px] sm:text-xs text-slate-500 mt-1 max-w-xs">${escapeHtml(subtitle)}</p>
+      ${btnHtml}
+    </div>
+  `;
+}
+
+function setDashboardSkeleton(isLoading) {
+  document.querySelectorAll('#dashKpiGrid .dash-kpi-content').forEach(el => el.classList.toggle('hidden', isLoading));
+  document.querySelectorAll('#dashKpiGrid .dash-kpi-skeleton').forEach(el => el.classList.toggle('hidden', !isLoading));
+
+  const flujoSk = document.getElementById('dashChartFlujoSkeleton');
+  const pagosSk = document.getElementById('dashChartPagosSkeleton');
+  if (flujoSk) flujoSk.classList.toggle('hidden', !isLoading);
+  if (pagosSk) pagosSk.classList.toggle('hidden', !isLoading);
+
+  const refreshIcon = document.getElementById('dashRefreshIcon');
+  if (refreshIcon) refreshIcon.classList.toggle('fa-spin', isLoading);
+
+  if (isLoading) {
+    const skList = `
+      <div class="animate-pulse space-y-2.5">
+        <div class="h-14 bg-slate-100 rounded-xl"></div>
+        <div class="h-14 bg-slate-100 rounded-xl"></div>
+        <div class="h-14 bg-slate-100 rounded-xl"></div>
+      </div>
+    `;
+    ['dashStockList', 'dashPedidosList', 'dashFacturasList', 'dashTopProductosList', 'dashTopClientesList'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = skList;
+    });
+  }
+}
+
+function destroyDashboardChart(key) {
+  if (AppState.dashboardCharts && AppState.dashboardCharts[key]) {
+    try {
+      AppState.dashboardCharts[key].destroy();
+    } catch (e) {}
+    AppState.dashboardCharts[key] = null;
+  }
+}
+
+function renderDashboardFlujoChart(serieTemporal, tasaVes) {
+  destroyDashboardChart('flujo');
+
+  const canvas = document.getElementById('dashChartFlujo');
+  const emptyEl = document.getElementById('dashChartFlujoEmpty');
+  if (!canvas) return;
+
+  const serie = Array.isArray(serieTemporal) ? serieTemporal : [];
+  const tieneActividad = serie.some(d => parseFloat(d.ingresos_usd || 0) > 0 || parseFloat(d.egresos_usd || 0) > 0);
+
+  if (!tieneActividad) {
+    canvas.classList.add('hidden');
+    if (emptyEl) emptyEl.classList.remove('hidden');
+    return;
+  }
+
+  if (emptyEl) emptyEl.classList.add('hidden');
+  canvas.classList.remove('hidden');
+
+  if (typeof Chart === 'undefined') return;
+
+  const ctx = canvas.getContext('2d');
+  const gradIng = ctx.createLinearGradient(0, 0, 0, 260);
+  gradIng.addColorStop(0, 'rgba(13, 148, 136, 0.28)');
+  gradIng.addColorStop(1, 'rgba(13, 148, 136, 0.01)');
+
+  const gradEgr = ctx.createLinearGradient(0, 0, 0, 260);
+  gradEgr.addColorStop(0, 'rgba(225, 29, 72, 0.18)');
+  gradEgr.addColorStop(1, 'rgba(225, 29, 72, 0.01)');
+
+  AppState.dashboardCharts.flujo = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: serie.map(d => d.etiqueta || d.fecha),
+      datasets: [
+        {
+          label: 'Ingresos (Ventas)',
+          data: serie.map(d => parseFloat(d.ingresos_usd || 0)),
+          borderColor: '#0d9488',
+          backgroundColor: gradIng,
+          borderWidth: 2.5,
+          tension: 0.35,
+          fill: true,
+          pointRadius: serie.length <= 15 ? 3.5 : 2,
+          pointHoverRadius: 5.5,
+          pointBackgroundColor: '#0d9488'
+        },
+        {
+          label: 'Compras / Egresos',
+          data: serie.map(d => parseFloat(d.egresos_usd || 0)),
+          borderColor: '#e11d48',
+          backgroundColor: gradEgr,
+          borderWidth: 2,
+          borderDash: [5, 4],
+          tension: 0.35,
+          fill: true,
+          pointRadius: serie.length <= 15 ? 3 : 1.5,
+          pointHoverRadius: 5,
+          pointBackgroundColor: '#e11d48'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#0f172a',
+          padding: 10,
+          cornerRadius: 10,
+          callbacks: {
+            label: function(context) {
+              const usd = parseFloat(context.parsed.y || 0);
+              return `${context.dataset.label}: $${usd.toFixed(2)} (≈ ${formatBsCompacto(usd, tasaVes)})`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: '#64748b', font: { size: 11 }, maxTicksLimit: 10 }
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(148, 163, 184, 0.16)' },
+          ticks: {
+            color: '#64748b',
+            font: { size: 11 },
+            callback: value => `$${Number(value).toLocaleString('en-US')}`
+          }
+        }
+      }
+    }
+  });
+}
+
+function renderDashboardPagosChart(distribucionPagos, tasaVes) {
+  destroyDashboardChart('pagos');
+
+  const canvas = document.getElementById('dashChartPagos');
+  const wrapper = document.getElementById('dashChartPagosWrapper');
+  const emptyEl = document.getElementById('dashChartPagosEmpty');
+  const legendEl = document.getElementById('dashPagosLegend');
+  if (!canvas) return;
+
+  const pagos = (Array.isArray(distribucionPagos) ? distribucionPagos : [])
+    .filter(item => parseFloat(item.total_usd || 0) > 0);
+
+  if (pagos.length === 0) {
+    if (wrapper) wrapper.classList.add('hidden');
+    if (legendEl) {
+      legendEl.classList.add('hidden');
+      legendEl.innerHTML = '';
+    }
+    if (emptyEl) emptyEl.classList.remove('hidden');
+    return;
+  }
+
+  if (emptyEl) emptyEl.classList.add('hidden');
+  if (wrapper) wrapper.classList.remove('hidden');
+  if (legendEl) legendEl.classList.remove('hidden');
+
+  const palette = ['#0d9488', '#0284c7', '#f59e0b', '#8b5cf6', '#ec4899', '#10b981', '#64748b'];
+  const totalPagos = pagos.reduce((acc, p) => acc + parseFloat(p.total_usd || 0), 0);
+
+  if (legendEl) {
+    legendEl.innerHTML = pagos.map((item, idx) => {
+      const color = palette[idx % palette.length];
+      const val = parseFloat(item.total_usd || 0);
+      const pct = totalPagos > 0 ? ((val / totalPagos) * 100).toFixed(1) : '0.0';
+      return `
+        <div class="flex items-center justify-between gap-2 py-1 border-b border-slate-100 last:border-b-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color:${color}"></span>
+            <span class="font-medium text-slate-700 truncate">${escapeHtml(item.metodo_pago)}</span>
+          </div>
+          <div class="text-right shrink-0">
+            <span class="font-bold text-slate-800">$${val.toFixed(2)}</span>
+            <span class="text-slate-400 ml-1">(${pct}%)</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  if (typeof Chart === 'undefined') return;
+
+  AppState.dashboardCharts.pagos = new Chart(canvas.getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: pagos.map(p => p.metodo_pago),
+      datasets: [{
+        data: pagos.map(p => parseFloat(p.total_usd || 0)),
+        backgroundColor: pagos.map((_, idx) => palette[idx % palette.length]),
+        borderWidth: 2,
+        borderColor: '#ffffff',
+        hoverOffset: 6
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '66%',
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#0f172a',
+          padding: 10,
+          cornerRadius: 10,
+          callbacks: {
+            label: function(context) {
+              const usd = parseFloat(context.parsed || 0);
+              const pct = totalPagos > 0 ? ((usd / totalPagos) * 100).toFixed(1) : '0.0';
+              return `${context.label}: $${usd.toFixed(2)} (${pct}%) • ${formatBsCompacto(usd, tasaVes)}`;
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+async function loadDashboard(periodoOverride = null) {
+  const periodo = periodoOverride || AppState.dashboardPeriodo || 'mes';
+  AppState.dashboardPeriodo = periodo;
+  setDashboardSkeleton(true);
+
   try {
-    const res = await fetch('/api/dashboard');
+    const res = await fetch(`/api/dashboard/resumen?periodo=${encodeURIComponent(periodo)}`);
     if (!res.ok) return;
     const data = await res.json();
 
-    document.getElementById('dashTotalProductos').textContent = data.total_productos;
-    document.getElementById('dashTotalServicios').textContent = data.total_servicios;
-    document.getElementById('dashAlertasStock').textContent = data.alertas_stock;
+    const tasaVes = parseFloat((data.tasas && data.tasas.tasa_ves) || AppState.config.tasa_ves || 1);
+    const kpis = data.kpis || {};
+    const op = data.operativo || {};
+    const rango = data.rango || {};
 
-    const totalVentas = parseFloat(data.ventas_total_usd || 0);
-    document.getElementById('dashTotalVentas').textContent = `$${totalVentas.toFixed(2)}`;
-    const equivBs = (totalVentas * AppState.config.tasa_ves).toFixed(2);
-    document.getElementById('dashTotalVentasBs').textContent = `≈ ${parseFloat(equivBs).toLocaleString('es-VE')} Bs.`;
-
-    // Cuentas por Cobrar Total
-    const cxcTotalUsd = parseFloat(data.cxc_total_usd || 0);
-    const cxcPendientes = data.cxc_pendientes || 0;
-    const elDashCxc = document.getElementById('dashTotalCxc');
-    if (elDashCxc) elDashCxc.textContent = `$${cxcTotalUsd.toFixed(2)}`;
-    const elDashCxcBs = document.getElementById('dashTotalCxcBs');
-    if (elDashCxcBs) {
-      const cxcBs = (cxcTotalUsd * AppState.config.tasa_ves).toFixed(2);
-      elDashCxcBs.textContent = `≈ ${parseFloat(cxcBs).toLocaleString('es-VE')} Bs. (${cxcPendientes} pendientes)`;
+    // Pill de rango activo
+    const rangoLabels = { hoy: 'Hoy', semana: 'Últimos 7 días', mes: 'Este Mes', anio: 'Este Año' };
+    const rangoEl = document.getElementById('dashPeriodoRango');
+    if (rangoEl) {
+      const textoPeriodo = rangoLabels[data.periodo] || 'Este Mes';
+      const fechas = (rango.desde && rango.hasta) ? ` (${rango.desde} al ${rango.hasta})` : '';
+      rangoEl.innerHTML = `<i class="fa-regular fa-calendar text-[10px] text-teal-600"></i> ${escapeHtml(textoPeriodo + fechas)}`;
     }
 
-    // Cuentas por Pagar Total (CXP)
-    const cxpTotalUsd = parseFloat(data.cxp_total_usd || 0);
-    const cxpPendientes = data.cxp_pendientes || 0;
-    const elDashCxp = document.getElementById('dashTotalCxp');
-    if (elDashCxp) elDashCxp.textContent = `$${cxpTotalUsd.toFixed(2)}`;
-    const elDashCxpBs = document.getElementById('dashTotalCxpBs');
-    if (elDashCxpBs) {
-      const cxpBs = (cxpTotalUsd * AppState.config.tasa_ves).toFixed(2);
-      elDashCxpBs.textContent = `≈ ${parseFloat(cxpBs).toLocaleString('es-VE')} Bs. (${cxpPendientes} activas)`;
-    }
+    // KPI 1: Facturación del Período + Variación %
+    const totalVentas = parseFloat(kpis.ventas_total_usd || 0);
+    const elVentas = document.getElementById('dashTotalVentas');
+    if (elVentas) elVentas.textContent = `$${totalVentas.toFixed(2)}`;
+    const elVentasBs = document.getElementById('dashTotalVentasBs');
+    if (elVentasBs) elVentasBs.textContent = `≈ ${formatBsCompacto(totalVentas, tasaVes)}`;
+    const elFactCount = document.getElementById('dashFacturasCountLabel');
+    if (elFactCount) elFactCount.textContent = `${kpis.facturas_count || 0} factura(s)`;
 
-    // Lista de productos con bajo stock
-    const stockListEl = document.getElementById('dashStockList');
-    if (data.productos_bajo_stock && data.productos_bajo_stock.length > 0) {
-      stockListEl.innerHTML = data.productos_bajo_stock.map(p => `
-        <div class="flex items-center justify-between p-3 bg-rose-50/60 border border-rose-100 rounded-xl text-sm">
-          <div>
-            <p class="font-semibold text-slate-800">${escapeHtml(p.nombre)}</p>
-            <p class="text-xs text-slate-500">${escapeHtml(p.categoria_nombre)} &bull; Cód: ${escapeHtml(p.codigo)}</p>
-          </div>
-          <div class="text-right">
-            <span class="inline-block px-2.5 py-1 rounded-lg text-xs font-bold ${p.stock <= 0 ? 'bg-rose-600 text-white' : 'bg-amber-100 text-amber-800'}">
-              ${p.stock <= 0 ? 'AGOTADO' : `Stock: ${p.stock}`}
-            </span>
-            <p class="text-[11px] text-slate-400 mt-0.5">Mín: ${p.stock_minimo}</p>
-          </div>
-        </div>
-      `).join('');
-    } else {
-      stockListEl.innerHTML = `
-        <div class="text-center py-6 text-slate-400 text-sm">
-          <i class="fa-solid fa-check-circle text-emerald-500 text-2xl mb-1 block"></i>
-          ¡Excelente! Todos los productos tienen existencias suficientes.
-        </div>
-      `;
-    }
-
-    // Lista de últimas facturas
-    const facturasListEl = document.getElementById('dashFacturasList');
-    if (data.ultimas_facturas && data.ultimas_facturas.length > 0) {
-      facturasListEl.innerHTML = data.ultimas_facturas.map(f => `
-        <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm hover:bg-slate-100 transition cursor-pointer" onclick="verFacturaEmitida(${f.id})">
-          <div>
-            <p class="font-bold text-slate-800">${escapeHtml(f.numero_factura)}</p>
-            <p class="text-xs text-slate-500">${escapeHtml(f.cliente_nombre)} &bull; ${formatFecha(f.fecha)}</p>
-          </div>
-          <div class="text-right">
-            <p class="font-bold text-indigo-700">$${parseFloat(f.total_usd).toFixed(2)}</p>
-            <p class="text-xs text-slate-500">${parseFloat(f.total_ves).toFixed(2)} Bs.</p>
-          </div>
-        </div>
-      `).join('');
-    } else {
-      facturasListEl.innerHTML = `
-        <div class="text-center py-6 text-slate-400 text-sm">
-          Aún no se han emitido facturas.
-        </div>
-      `;
-    }
-
-    // Top 5 Productos Más Vendidos
-    const topProdEl = document.getElementById('dashTopProductosList');
-    if (topProdEl) {
-      if (data.top_productos && data.top_productos.length > 0) {
-        topProdEl.innerHTML = data.top_productos.map((p, idx) => {
-          const medalColors = [
-            'bg-amber-100 text-amber-800 border-amber-300 font-black',
-            'bg-slate-200 text-slate-800 border-slate-300 font-bold',
-            'bg-amber-700/10 text-amber-900 border-amber-600/30 font-bold',
-            'bg-slate-100 text-slate-600 font-medium',
-            'bg-slate-100 text-slate-600 font-medium'
-          ];
-          const badgeClass = medalColors[idx] || 'bg-slate-100 text-slate-600';
-          return `
-            <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm">
-              <div class="flex items-center space-x-3">
-                <span class="w-7 h-7 rounded-full flex items-center justify-center text-xs border ${badgeClass}">
-                  #${idx + 1}
-                </span>
-                <div>
-                  <p class="font-bold text-slate-800">${escapeHtml(p.nombre_producto)}</p>
-                  <p class="text-xs text-slate-400">${p.tipo === 'producto' ? `Stock actual: ${p.stock_actual}` : 'Servicio'}</p>
-                </div>
-              </div>
-              <div class="text-right">
-                <span class="inline-block px-2.5 py-0.5 rounded-lg text-xs font-extrabold bg-indigo-100 text-indigo-800">
-                  ${p.total_vendido} vendidos
-                </span>
-                <p class="text-xs font-bold text-slate-700 mt-0.5">$${parseFloat(p.total_usd).toFixed(2)}</p>
-              </div>
-            </div>
-          `;
-        }).join('');
+    const elVar = document.getElementById('dashVentasVariacionBadge');
+    if (elVar) {
+      const varPct = parseFloat(kpis.variacion_ventas_pct || 0);
+      const prevVentas = parseFloat(kpis.ventas_periodo_anterior_usd || 0);
+      if (prevVentas <= 0 && totalVentas <= 0) {
+        elVar.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-500';
+        elVar.innerHTML = '0.0% vs ant.';
+      } else if (varPct >= 0) {
+        elVar.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200';
+        elVar.innerHTML = `<i class="fa-solid fa-arrow-trend-up text-[10px]"></i>+${varPct.toFixed(1)}% vs ant.`;
       } else {
-        topProdEl.innerHTML = `<div class="text-center py-6 text-slate-400 text-xs">No hay datos de ventas aún.</div>`;
+        elVar.className = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200';
+        elVar.innerHTML = `<i class="fa-solid fa-arrow-trend-down text-[10px]"></i>${varPct.toFixed(1)}% vs ant.`;
       }
     }
 
-    // Top 5 Mejores Clientes
-    const topCliEl = document.getElementById('dashTopClientesList');
-    if (topCliEl) {
-      if (data.top_clientes && data.top_clientes.length > 0) {
-        topCliEl.innerHTML = data.top_clientes.map((c, idx) => {
-          const medalColors = [
-            'bg-amber-100 text-amber-800 border-amber-300 font-black',
-            'bg-slate-200 text-slate-800 border-slate-300 font-bold',
-            'bg-amber-700/10 text-amber-900 border-amber-600/30 font-bold',
-            'bg-slate-100 text-slate-600 font-medium',
-            'bg-slate-100 text-slate-600 font-medium'
-          ];
+    // KPI 2: Utilidad Estimada (CPP)
+    const utilidadUsd = parseFloat(kpis.utilidad_bruta_usd || 0);
+    const margenPct = parseFloat(kpis.margen_promedio_pct || 0);
+    const elUtil = document.getElementById('dashUtilidadUsd');
+    if (elUtil) {
+      elUtil.textContent = `${utilidadUsd < 0 ? '-' : ''}$${Math.abs(utilidadUsd).toFixed(2)}`;
+      elUtil.className = `text-2xl sm:text-3xl font-extrabold tracking-tight ${utilidadUsd < 0 ? 'text-rose-600' : 'text-emerald-700'}`;
+    }
+    const elUtilBs = document.getElementById('dashUtilidadBs');
+    if (elUtilBs) elUtilBs.textContent = `≈ ${formatBsCompacto(utilidadUsd, tasaVes)}`;
+    const elMargen = document.getElementById('dashMargenPct');
+    if (elMargen) {
+      elMargen.textContent = `Margen ${margenPct.toFixed(1)}%`;
+      elMargen.className = margenPct < 0
+        ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200/70'
+        : 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70';
+    }
+
+    // KPI 3: Caja & Tesorería
+    const cajaAbierta = op.caja_estado === 'ABIERTO';
+    const saldoCajaUsd = parseFloat(op.caja_saldo_consolidado_usd || 0);
+    const elCajaBadge = document.getElementById('dashCajaEstadoBadge');
+    if (elCajaBadge) {
+      elCajaBadge.className = cajaAbierta
+        ? 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0'
+        : 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200 shrink-0';
+      elCajaBadge.innerHTML = cajaAbierta
+        ? '<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>ABIERTA'
+        : '<span class="w-2 h-2 rounded-full bg-rose-500"></span>CERRADA';
+    }
+    const elCajaSaldo = document.getElementById('dashCajaSaldoUsd');
+    if (elCajaSaldo) elCajaSaldo.textContent = `$${saldoCajaUsd.toFixed(2)}`;
+    const elCajaSaldoBs = document.getElementById('dashCajaSaldoBs');
+    if (elCajaSaldoBs) {
+      const vesDirecto = parseFloat(op.caja_saldo_ves || 0);
+      elCajaSaldoBs.textContent = cajaAbierta
+        ? `Bs. en caja: ${vesDirecto.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : 'Sin turno operativo activo';
+    }
+    const elCajaTurno = document.getElementById('dashCajaTurnoLabel');
+    if (elCajaTurno) elCajaTurno.textContent = op.caja_turno_id ? `Turno #${op.caja_turno_id}` : 'Cerrada';
+    const elCajaBtn = document.getElementById('dashCajaQuickBtn');
+    if (elCajaBtn) {
+      if (cajaAbierta) {
+        elCajaBtn.textContent = 'Ir a Caja';
+        elCajaBtn.onclick = () => navigate('tesoreria');
+      } else {
+        elCajaBtn.textContent = 'Abrir Caja';
+        elCajaBtn.onclick = () => {
+          navigate('tesoreria');
+          setTimeout(() => {
+            if (typeof openModalAperturaCaja === 'function') openModalAperturaCaja();
+          }, 150);
+        };
+      }
+    }
+
+    // KPI 4: Salud Financiera (CxC vs CxP)
+    const cxcTotal = parseFloat(kpis.cxc_pendiente_usd || 0);
+    const cxpTotal = parseFloat(kpis.cxp_pendiente_usd || 0);
+    const netoSalud = cxcTotal - cxpTotal;
+    const elCxc = document.getElementById('dashTotalCxc');
+    if (elCxc) elCxc.textContent = `$${cxcTotal.toFixed(2)}`;
+    const elCxcCnt = document.getElementById('dashCxcCount');
+    if (elCxcCnt) elCxcCnt.textContent = `${kpis.cxc_pendientes_count || 0} por cobrar`;
+    const elCxp = document.getElementById('dashTotalCxp');
+    if (elCxp) elCxp.textContent = `$${cxpTotal.toFixed(2)}`;
+    const elCxpCnt = document.getElementById('dashCxpCount');
+    if (elCxpCnt) elCxpCnt.textContent = `${kpis.cxp_pendientes_count || 0} por pagar`;
+    const elSaludNet = document.getElementById('dashSaludNeta');
+    if (elSaludNet) {
+      const signo = netoSalud >= 0 ? '+' : '-';
+      elSaludNet.textContent = `Neto ${signo}$${Math.abs(netoSalud).toFixed(2)}`;
+      elSaludNet.className = netoSalud >= 0
+        ? 'inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70 shrink-0'
+        : 'inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200/70 shrink-0';
+    }
+
+    // Fila 2: Gráficos Chart.js
+    renderDashboardFlujoChart(data.serie_temporal, tasaVes);
+    renderDashboardPagosChart(data.distribucion_pagos, tasaVes);
+
+    // Badges del Centro Operativo
+    const stockBadgeEl = document.getElementById('dashBadgeStockCount');
+    if (stockBadgeEl) stockBadgeEl.textContent = String(op.stock_critico_count || 0);
+    const pedBadgeEl = document.getElementById('dashBadgePedidosCount');
+    if (pedBadgeEl) pedBadgeEl.textContent = String(op.pedidos_pendientes_count || 0);
+
+    // Stock Crítico con botón directo de Reponer por ítem
+    const stockListEl = document.getElementById('dashStockList');
+    const stockItems = Array.isArray(data.productos_stock_critico) ? data.productos_stock_critico : [];
+    if (stockListEl) {
+      if (stockItems.length > 0) {
+        stockListEl.innerHTML = stockItems.map(p => `
+          <div class="flex items-center justify-between gap-2 p-3 bg-rose-50/50 border border-rose-100 rounded-xl text-sm">
+            <div class="min-w-0">
+              <p class="font-semibold text-slate-800 truncate">${escapeHtml(p.nombre)}</p>
+              <p class="text-xs text-slate-500 truncate">${escapeHtml(p.categoria_nombre)} &bull; Cód: ${escapeHtml(p.codigo)}</p>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <div class="text-right">
+                <span class="inline-block px-2 py-0.5 rounded-lg text-[11px] font-bold ${p.stock <= 0 ? 'bg-rose-600 text-white' : 'bg-amber-100 text-amber-800'}">
+                  ${p.stock <= 0 ? 'AGOTADO' : `Stock: ${p.stock}`}
+                </span>
+                <p class="text-[10px] text-slate-400 mt-0.5">Mín: ${p.stock_minimo}</p>
+              </div>
+              <button type="button" onclick="reponerProductoDesdeDashboard(${Number(p.id)})" class="px-2.5 py-1.5 rounded-lg bg-white hover:bg-teal-600 text-teal-700 hover:text-white border border-teal-200 text-xs font-bold transition shadow-2xs" title="Cargar compra de reposición">
+                Reponer
+              </button>
+            </div>
+          </div>
+        `).join('');
+      } else {
+        stockListEl.innerHTML = buildDashboardEmptyState(
+          'fa-solid fa-check-double',
+          'Inventario en niveles saludables',
+          'Ningún producto se encuentra por debajo de su stock mínimo configurado.',
+          'Ver Catálogo',
+          "navigate('productos')"
+        );
+      }
+    }
+
+    // Pedidos de Preventa Pendientes
+    const pedListEl = document.getElementById('dashPedidosList');
+    const pedItems = Array.isArray(data.pedidos_pendientes) ? data.pedidos_pendientes : [];
+    if (pedListEl) {
+      if (pedItems.length > 0) {
+        pedListEl.innerHTML = pedItems.map(ped => `
+          <div class="flex items-center justify-between gap-2 p-3 bg-amber-50/50 border border-amber-200/70 rounded-xl text-sm hover:bg-amber-50 transition">
+            <div class="min-w-0">
+              <p class="font-bold text-slate-800 truncate">${escapeHtml(ped.numero_pedido)} &bull; ${escapeHtml(ped.cliente_nombre)}</p>
+              <p class="text-xs text-slate-500 truncate">Vend: ${escapeHtml(ped.vendedor_nombre || 'Sistema')} &bull; ${formatFecha(ped.fecha)}</p>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <div class="text-right">
+                <p class="font-extrabold text-amber-700">$${parseFloat(ped.total_usd || 0).toFixed(2)}</p>
+                <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 uppercase">${escapeHtml(ped.condicion_pago || 'contado')}</span>
+              </div>
+              <button type="button" onclick="abrirModalDetallePedido(${Number(ped.id)})" class="px-2.5 py-1.5 rounded-lg bg-white hover:bg-sky-600 text-sky-700 hover:text-white border border-sky-200 text-xs font-bold transition">
+                Revisar
+              </button>
+            </div>
+          </div>
+        `).join('');
+      } else {
+        pedListEl.innerHTML = buildDashboardEmptyState(
+          'fa-solid fa-clipboard-check',
+          'Sin pedidos pendientes por aprobar',
+          'Todas las preventas enviadas por el equipo comercial ya fueron procesadas.',
+          'Ir a Pedidos',
+          "navigate('pedidos')"
+        );
+      }
+    }
+
+    // Mantener estado de pestaña operativa
+    switchDashboardOpTab(AppState.dashboardOpTab || 'stock');
+
+    // Últimas Facturas Registradas
+    const facturasListEl = document.getElementById('dashFacturasList');
+    const ultFacturas = Array.isArray(data.ultimas_facturas) ? data.ultimas_facturas : [];
+    if (facturasListEl) {
+      if (ultFacturas.length > 0) {
+        facturasListEl.innerHTML = ultFacturas.map(f => `
+          <div class="flex items-center justify-between gap-2 p-3 bg-slate-50/90 border border-slate-200/80 rounded-xl text-sm hover:bg-slate-100/80 transition cursor-pointer" onclick="verFacturaEmitida(${Number(f.id)})">
+            <div class="min-w-0">
+              <p class="font-bold text-slate-800 truncate">${escapeHtml(f.numero_factura)} <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${f.tipo_venta === 'credito' ? 'bg-amber-100 text-amber-800' : 'bg-teal-50 text-teal-700'}">${escapeHtml((f.tipo_venta || 'contado').toUpperCase())}</span></p>
+              <p class="text-xs text-slate-500 truncate">${escapeHtml(f.cliente_nombre)} &bull; ${formatFecha(f.fecha)}</p>
+            </div>
+            <div class="text-right shrink-0">
+              <p class="font-extrabold text-teal-700">$${parseFloat(f.total_usd || 0).toFixed(2)}</p>
+              <p class="text-[11px] text-slate-500">${formatBsCompacto(f.total_usd, tasaVes)}</p>
+            </div>
+          </div>
+        `).join('');
+      } else {
+        facturasListEl.innerHTML = buildDashboardEmptyState(
+          'fa-solid fa-file-invoice-dollar',
+          'Aún no registras ventas en este período',
+          'Emite tu primera factura para comenzar a ver métricas de ingresos, márgenes y ranking en tiempo real.',
+          'Emitir Primera Venta',
+          "navigate('facturacion')"
+        );
+      }
+    }
+
+    // Fila 4: Top 5 Productos Más Vendidos con barra de progreso proporcional
+    const topProdEl = document.getElementById('dashTopProductosList');
+    const topProds = Array.isArray(data.top_productos) ? data.top_productos : [];
+    if (topProdEl) {
+      if (topProds.length > 0) {
+        const maxProdUsd = Math.max(...topProds.map(x => parseFloat(x.total_usd || 0)), 1);
+        const medalColors = [
+          'bg-amber-100 text-amber-800 border-amber-300 font-black',
+          'bg-slate-200 text-slate-800 border-slate-300 font-bold',
+          'bg-amber-700/10 text-amber-900 border-amber-600/30 font-bold',
+          'bg-slate-100 text-slate-600 font-medium',
+          'bg-slate-100 text-slate-600 font-medium'
+        ];
+        topProdEl.innerHTML = topProds.map((p, idx) => {
+          const val = parseFloat(p.total_usd || 0);
+          const pct = Math.max(6, Math.min(100, (val / maxProdUsd) * 100)).toFixed(0);
           const badgeClass = medalColors[idx] || 'bg-slate-100 text-slate-600';
           return `
-            <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm">
-              <div class="flex items-center space-x-3">
-                <span class="w-7 h-7 rounded-full flex items-center justify-center text-xs border ${badgeClass}">
-                  #${idx + 1}
-                </span>
-                <div>
-                  <p class="font-bold text-slate-800">${escapeHtml(c.nombre)}</p>
-                  <p class="text-xs text-slate-400">${escapeHtml(c.cedula)} &bull; ${escapeHtml(c.telefono || '')}</p>
+            <div class="p-3 bg-slate-50/80 border border-slate-200/80 rounded-xl text-sm">
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <span class="w-7 h-7 rounded-full flex items-center justify-center text-xs border shrink-0 ${badgeClass}">#${idx + 1}</span>
+                  <div class="min-w-0">
+                    <p class="font-bold text-slate-800 truncate">${escapeHtml(p.nombre_producto)}</p>
+                    <p class="text-[11px] text-slate-400 truncate">${p.tipo === 'producto' ? `Stock actual: ${p.stock_actual}` : 'Servicio'} &bull; ${Number(p.total_vendido || 0)} uds.</p>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <p class="font-extrabold text-slate-800">$${val.toFixed(2)}</p>
                 </div>
               </div>
-              <div class="text-right">
-                <span class="inline-block px-2 py-0.5 rounded-md text-xs font-bold bg-emerald-100 text-emerald-800">
-                  ${c.total_facturas} facturas
-                </span>
-                <p class="text-xs font-extrabold text-indigo-700 mt-0.5">$${parseFloat(c.total_comprado_usd).toFixed(2)}</p>
+              <div class="mt-2 h-1.5 w-full bg-slate-200/80 rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-teal-500 to-sky-500 rounded-full transition-all duration-500" style="width:${pct}%"></div>
               </div>
             </div>
           `;
         }).join('');
       } else {
-        topCliEl.innerHTML = `<div class="text-center py-6 text-slate-400 text-xs">No hay clientes con compras aún.</div>`;
+        topProdEl.innerHTML = buildDashboardEmptyState(
+          'fa-solid fa-boxes-stacked',
+          'Sin productos vendidos en este período',
+          'Cuando registres ventas aparecerá el ranking de artículos más rentables.',
+          'Ir a Facturación',
+          "navigate('facturacion')"
+        );
+      }
+    }
+
+    // Fila 4: Top 5 Mejores Clientes con barra de progreso proporcional
+    const topCliEl = document.getElementById('dashTopClientesList');
+    const topClis = Array.isArray(data.top_clientes) ? data.top_clientes : [];
+    if (topCliEl) {
+      if (topClis.length > 0) {
+        const maxCliUsd = Math.max(...topClis.map(x => parseFloat(x.total_comprado_usd || 0)), 1);
+        const medalColors = [
+          'bg-amber-100 text-amber-800 border-amber-300 font-black',
+          'bg-slate-200 text-slate-800 border-slate-300 font-bold',
+          'bg-amber-700/10 text-amber-900 border-amber-600/30 font-bold',
+          'bg-slate-100 text-slate-600 font-medium',
+          'bg-slate-100 text-slate-600 font-medium'
+        ];
+        topCliEl.innerHTML = topClis.map((c, idx) => {
+          const val = parseFloat(c.total_comprado_usd || 0);
+          const pct = Math.max(6, Math.min(100, (val / maxCliUsd) * 100)).toFixed(0);
+          const badgeClass = medalColors[idx] || 'bg-slate-100 text-slate-600';
+          return `
+            <div class="p-3 bg-slate-50/80 border border-slate-200/80 rounded-xl text-sm">
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <span class="w-7 h-7 rounded-full flex items-center justify-center text-xs border shrink-0 ${badgeClass}">#${idx + 1}</span>
+                  <div class="min-w-0">
+                    <p class="font-bold text-slate-800 truncate">${escapeHtml(c.nombre)}</p>
+                    <p class="text-[11px] text-slate-400 truncate">${escapeHtml(c.cedula)} &bull; ${Number(c.total_facturas || 0)} factura(s)</p>
+                  </div>
+                </div>
+                <div class="text-right shrink-0">
+                  <p class="font-extrabold text-teal-700">$${val.toFixed(2)}</p>
+                </div>
+              </div>
+              <div class="mt-2 h-1.5 w-full bg-slate-200/80 rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-amber-500 to-teal-500 rounded-full transition-all duration-500" style="width:${pct}%"></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } else {
+        topCliEl.innerHTML = buildDashboardEmptyState(
+          'fa-solid fa-users',
+          'Sin compras de clientes en este período',
+          'Aquí verás tus clientes principales ordenados por volumen de facturación.',
+          'Emitir Primera Venta',
+          "navigate('facturacion')"
+        );
       }
     }
 
   } catch (err) {
-    console.error("Error al cargar dashboard:", err);
+    console.error("Error al cargar dashboard BI:", err);
+  } finally {
+    setDashboardSkeleton(false);
   }
 }
 
@@ -17724,6 +18241,10 @@ function actualizarUIUsuarioYPermisos() {
 
     setDisplay('nav-usuarios', showUsr);
     setDisplay('nav-cfo-copilot', showRep);
+    setDisplay('sidebar-group-seguridad', showUsr || showRep, 'block');
+    setDisplay('btnSidebarConfiguracion', isSuper, 'flex');
+    const btnCloudCfg = document.getElementById('btnCloudAlertConfig');
+    if (btnCloudCfg) btnCloudCfg.classList.toggle('hidden', !isSuper);
 
     if (!isSuper && !p.perm_configuracion) {
       document.body.classList.add('rol-cajero');
@@ -19175,6 +19696,7 @@ window.closeModalDetallePedido = closeModalDetallePedido;
 // CONTROLADOR DE FORMATOS DE IMPRESIÓN PARAMETRIZADOS (FASE 3C)
 // ==============================================================================
 async function openFormatosImpresionModal() {
+  if (!_isSuperAdminUser(true)) return;
   if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.cargarConfigImpresion === 'function') {
     await MasterReportLayout.cargarConfigImpresion();
   }

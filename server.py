@@ -795,7 +795,16 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(ajuste_dict)
                 return
 
-            # 2. Resumen del Dashboard
+            # 2. Resumen BI Real-Time del Dashboard
+            elif path == "/api/dashboard/resumen":
+                periodo = (query.get("periodo", ["mes"])[0] or "mes").strip().lower()
+                sesion = getattr(self, "current_session", None) or {}
+                tenant_id = int(sesion.get("instance_id", 1) or 1)
+                res = database.obtener_resumen_dashboard_bi(periodo=periodo, tenant_id=tenant_id, conn=conn)
+                self.send_json(res)
+                return
+
+            # 2b. Resumen clásico del Dashboard
             elif path == "/api/dashboard":
                 cursor.execute("SELECT COUNT(*) FROM productos WHERE tipo = 'producto' AND COALESCE(activo, 1) = 1")
                 total_productos = cursor.fetchone()[0]

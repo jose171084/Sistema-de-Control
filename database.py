@@ -8758,3 +8758,527 @@ def obtener_reporte_cierre_z(turno_id, conn=None):
     finally:
         if close_after:
             conn.close()
+
+
+def _tabla_tiene_columna(cursor, tabla: str, columna: str) -> bool:
+    """Verifica de forma segura si una tabla contiene una columna (ej. tenant_id)."""
+    try:
+        cols = [r[1] for r in cursor.execute(f"PRAGMA table_info({tabla})").fetchall()]
+        return columna in cols
+    except Exception:
+        return False
+
+
+def obtener_resumen_dashboard_bi(periodo: str = "mes", tenant_id: int = 1, conn=None):
+    """
+    Motor BI Real-Time para GET /api/dashboard/resumen?periodo=hoy|semana|mes|anio.
+    Calcula KPIs financieros, estado operativo en vivo, serie temporal, distribución de pagos
+    y listas accionables exclusivamente desde SQLite sin datos simulados ni divisiones por cero.
+    """
+    close_after = False
+    if conn is None:
+        conn = get_connection()
+        close_after = True
+
+    try:
+        cur = conn.cursor()
+        periodo_norm = (periodo or "mes").strip().lower()
+        if periodo_norm not in ("hoy", "semana", "mes", "anio"):
+            periodo_norm = "mes"
+
+        hoy_dt = datetime.now().date()
+        if periodo_norm == "hoy":
+            desde_dt = hoy_dt
+            hasta_dt = hoy_dt
+            prev_desde_dt = hoy_dt - timedelta(days=1)
+            prev_hasta_dt = prev_desde_dt
+        elif periodo_norm == "semana":
+            desde_dt = hoy_dt - timedelta(days=6)
+            hasta_dt = hoy_dt
+            prev_desde_dt = hoy_dt - timedelta(days=13)
+            prev_hasta_dt = hoy_dt - timedelta(days=7)
+        elif periodo_norm == "anio":
+            desde_dt = hoy_dt.replace(month=1, day=1)
+            hasta_dt = hoy_dt
+            prev_desde_dt = desde_dt.replace(year=hoy_dt.year - 1, month=1, day=1)
+            prev_hasta_dt = desde_dt.replace(year=hoy_dt.year - 1, month=12, day=31)
+        else:  # mes
+            desde_dt = hoy_dt.replace(day=1)
+            hasta_dt = hoy_dt
+            prev_hasta_dt = desde_dt - timedelta(days=1)
+            prev_desde_dt = prev_hasta_dt.replace(day=1)
+
+        desde_str = desde_dt.isoformat()
+        hasta_str = hasta_dt.isoformat()
+        prev_desde_str = prev_desde_dt.isoformat()
+        prev_hasta_str = prev_hasta_dt.isoformat()
+
+        t_id = int(tenant_id or 1)
+
+        def _t_clause(tabla: str, alias: str = ""):
+            if _tabla_tiene_columna(cur, tabla, "tenant_id"):
+                pref = f"{alias}." if alias else ""
+                return f" AND {pref}tenant_id = ? ", [t_id]
+            return "", []
+
+        # Tasas vigentes
+        cfg_row = cur.execute("SELECT tasa_ves, tasa_cop FROM configuracion WHERE id = 1").fetchone()
+        tasa_ves = float(cfg_row[0]) if cfg_row and cfg_row[0] and float(cfg_row[0]) > 0 else 45.0
+        tasa_cop = float(cfg_row[1]) if cfg_row and cfg_row[1] and float(cfg_row[1]) > 0 else 4100.0
+        tasa_ves_dec = to_decimal(tasa_ves, "45")
+        tasa_cop_dec = to_decimal(tasa_cop, "4100")
+
+        # 1. KPIs Financieros: Ventas actuales y período anterior
+        f_ten_sql, f_ten_args = _t_clause("facturas", "f")
+        row_v_act = cur.execute(
+            f"""
+            SELECT COUNT(*), COALESCE(SUM(f.total_usd), 0), COALESCE(SUM(f.subtotal), 0)
+            FROM facturas f
+            WHERE COALESCE(f.estado, 'pagada') != 'anulada'
+              AND substr(COALESCE(f.fecha, ''), 1, 10) BETWEEN ? AND ?
+              {f_ten_sql}
+            """,
+            [desde_str, hasta_str] + f_ten_args,
+        ).fetchone()
+        facturas_count = int(row_v_act[0] or 0)
+        ventas_total_dec = to_decimal(row_v_act[1], "0")
+        ventas_subtotal_dec = to_decimal(row_v_act[2], "0")
+
+        row_v_prev = cur.execute(
+            f"""
+            SELECT COALESCE(SUM(f.total_usd), 0)
+            FROM facturas f
+            WHERE COALESCE(f.estado, 'pagada') != 'anulada'
+              AND substr(COALESCE(f.fecha, ''), 1, 10) BETWEEN ? AND ?
+              {f_ten_sql}
+            """,
+            [prev_desde_str, prev_hasta_str] + f_ten_args,
+        ).fetchone()
+        ventas_prev_dec = to_decimal(row_v_prev[0], "0")
+
+        if ventas_prev_dec > Decimal("0"):
+            var_pct = float(
+                (((ventas_total_dec - ventas_prev_dec) / ventas_prev_dec) * Decimal("100")).quantize(
+                    Decimal("0.1"), rounding=ROUND_HALF_UP
+                )
+            )
+        elif ventas_total_dec > Decimal("0"):
+            var_pct = 100.0
+        else:
+            var_pct = 0.0
+
+        # Utilidad Bruta real (Ventas sin IVA menos Costo CPP real de factura_detalles)
+        row_costo = cur.execute(
+            f"""
+            SELECT
+                COALESCE(SUM(fd.subtotal), 0) as base_ventas,
+                COALESCE(SUM(
+                    CASE
+                        WHEN fd.tipo = 'servicio' THEN 0
+                        ELSE COALESCE(fd.costo_total, COALESCE(fd.costo_unitario, p.costo_cpp, p.costo, 0) * COALESCE(fd.cantidad, 0))
+                    END
+                ), 0) as costo_real
+            FROM factura_detalles fd
+            JOIN facturas f ON fd.factura_id = f.id
+            LEFT JOIN productos p ON fd.producto_id = p.id
+            WHERE COALESCE(f.estado, 'pagada') != 'anulada'
+              AND substr(COALESCE(f.fecha, ''), 1, 10) BETWEEN ? AND ?
+              {f_ten_sql}
+            """,
+            [desde_str, hasta_str] + f_ten_args,
+        ).fetchone()
+        base_ventas_dec = to_decimal(row_costo[0], "0")
+        if base_ventas_dec <= Decimal("0") and ventas_subtotal_dec > Decimal("0"):
+            base_ventas_dec = ventas_subtotal_dec
+        costo_real_dec = to_decimal(row_costo[1], "0")
+        utilidad_bruta_dec = base_ventas_dec - costo_real_dec
+        margen_pct = (
+            float(((utilidad_bruta_dec / base_ventas_dec) * Decimal("100")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+            if base_ventas_dec > Decimal("0")
+            else 0.0
+        )
+
+        # CxC & CxP Pendientes actuales
+        cxc_ten_sql, cxc_ten_args = _t_clause("cuentas_por_cobrar", "cxc")
+        row_cxc = cur.execute(
+            f"""
+            SELECT COALESCE(SUM(cxc.saldo_pendiente), 0), COUNT(CASE WHEN cxc.saldo_pendiente > 0.001 THEN 1 END)
+            FROM cuentas_por_cobrar cxc
+            WHERE COALESCE(cxc.estado, 'pendiente') IN ('pendiente', 'parcial')
+              {cxc_ten_sql}
+            """,
+            cxc_ten_args,
+        ).fetchone()
+        cxc_pendiente_usd = d_round(row_cxc[0], 2)
+        cxc_pendientes_count = int(row_cxc[1] or 0)
+
+        cxp_ten_sql, cxp_ten_args = _t_clause("cuentas_por_pagar", "cxp")
+        row_cxp = cur.execute(
+            f"""
+            SELECT COALESCE(SUM(cxp.saldo_pendiente), 0), COUNT(CASE WHEN cxp.saldo_pendiente > 0.001 THEN 1 END)
+            FROM cuentas_por_pagar cxp
+            WHERE COALESCE(cxp.estado, 'pendiente') IN ('pendiente', 'parcial')
+              {cxp_ten_sql}
+            """,
+            cxp_ten_args,
+        ).fetchone()
+        cxp_pendiente_usd = d_round(row_cxp[0], 2)
+        cxp_pendientes_count = int(row_cxp[1] or 0)
+
+        # 2. Estado Operativo en Vivo: Caja, Pedidos Pendientes y Stock Crítico
+        tc_ten_sql, tc_ten_args = _t_clause("turnos_caja", "tc")
+        turno_abierto = cur.execute(
+            f"""
+            SELECT tc.id, tc.fondo_inicial_usd, tc.fondo_inicial_ves, tc.fecha_apertura
+            FROM turnos_caja tc
+            WHERE tc.estado = 'ABIERTO' {tc_ten_sql}
+            ORDER BY tc.id DESC LIMIT 1
+            """,
+            tc_ten_args,
+        ).fetchone()
+
+        caja_estado = "CERRADO"
+        caja_turno_id = None
+        caja_saldo_usd_dec = Decimal("0")
+        caja_saldo_ves_dec = Decimal("0")
+        caja_saldo_consolidado_dec = Decimal("0")
+
+        if turno_abierto:
+            caja_estado = "ABIERTO"
+            caja_turno_id = int(turno_abierto["id"])
+            caja_saldo_usd_dec = to_decimal(turno_abierto["fondo_inicial_usd"], "0")
+            caja_saldo_ves_dec = to_decimal(turno_abierto["fondo_inicial_ves"], "0")
+            caja_cop_dec = Decimal("0")
+
+            movs_turno = cur.execute(
+                """
+                SELECT tipo, moneda, monto
+                FROM movimientos_caja
+                WHERE turno_id = ? AND COALESCE(referencia, '') != 'APERTURA'
+                """,
+                (caja_turno_id,),
+            ).fetchall()
+            for mv in movs_turno:
+                sign = Decimal("1") if mv["tipo"] == "INGRESO" else Decimal("-1")
+                m_dec = to_decimal(mv["monto"], "0") * sign
+                mon = (mv["moneda"] or "USD").upper()
+                if mon == "USD":
+                    caja_saldo_usd_dec += m_dec
+                elif mon == "VES":
+                    caja_saldo_ves_dec += m_dec
+                elif mon == "COP":
+                    caja_cop_dec += m_dec
+
+            caja_saldo_consolidado_dec = (
+                caja_saldo_usd_dec
+                + (caja_saldo_ves_dec / tasa_ves_dec if tasa_ves_dec > Decimal("0") else Decimal("0"))
+                + (caja_cop_dec / tasa_cop_dec if tasa_cop_dec > Decimal("0") else Decimal("0"))
+            )
+
+        ped_ten_sql, ped_ten_args = _t_clause("pedidos", "ped")
+        pedidos_pendientes_count = int(
+            cur.execute(
+                f"SELECT COUNT(*) FROM pedidos ped WHERE ped.estado = 'PENDIENTE' {ped_ten_sql}",
+                ped_ten_args,
+            ).fetchone()[0]
+            or 0
+        )
+
+        p_ten_sql, p_ten_args = _t_clause("productos", "p")
+        stock_critico_count = int(
+            cur.execute(
+                f"""
+                SELECT COUNT(*) FROM productos p
+                WHERE p.tipo = 'producto' AND COALESCE(p.activo, 1) = 1 AND p.stock <= p.stock_minimo {p_ten_sql}
+                """,
+                p_ten_args,
+            ).fetchone()[0]
+            or 0
+        )
+
+        # 3. Serie Temporal (Ingresos vs Compras/Egresos)
+        group_expr = "substr(COALESCE(fecha, ''), 1, 7)" if periodo_norm == "anio" else "substr(COALESCE(fecha, ''), 1, 10)"
+        group_gasto_expr = "substr(COALESCE(fecha_emision, created_at, ''), 1, 7)" if periodo_norm == "anio" else "substr(COALESCE(fecha_emision, created_at, ''), 1, 10)"
+
+        ing_map = {}
+        for r in cur.execute(
+            f"""
+            SELECT {group_expr} as bucket, COALESCE(SUM(total_usd), 0) as total
+            FROM facturas f
+            WHERE COALESCE(f.estado, 'pagada') != 'anulada'
+              AND substr(COALESCE(f.fecha, ''), 1, 10) BETWEEN ? AND ?
+              {f_ten_sql}
+            GROUP BY bucket
+            """,
+            [desde_str, hasta_str] + f_ten_args,
+        ).fetchall():
+            if r["bucket"]:
+                ing_map[r["bucket"]] = to_decimal(r["total"], "0")
+
+        egr_map = {}
+        c_ten_sql, c_ten_args = _t_clause("compras", "co")
+        for r in cur.execute(
+            f"""
+            SELECT {group_expr.replace('fecha', 'co.fecha')} as bucket, COALESCE(SUM(co.total), 0) as total
+            FROM compras co
+            WHERE COALESCE(co.estado, 'activa') != 'anulada'
+              AND substr(COALESCE(co.fecha, ''), 1, 10) BETWEEN ? AND ?
+              {c_ten_sql}
+            GROUP BY bucket
+            """,
+            [desde_str, hasta_str] + c_ten_args,
+        ).fetchall():
+            if r["bucket"]:
+                egr_map[r["bucket"]] = egr_map.get(r["bucket"], Decimal("0")) + to_decimal(r["total"], "0")
+
+        g_ten_sql, g_ten_args = _t_clause("gastos", "g")
+        for r in cur.execute(
+            f"""
+            SELECT {group_gasto_expr.replace('fecha_emision', 'g.fecha_emision').replace('created_at', 'g.created_at')} as bucket,
+                   COALESCE(SUM(g.monto_total_usd), 0) as total
+            FROM gastos g
+            WHERE COALESCE(g.estado, 'ACTIVO') NOT IN ('anulada', 'ANULADO')
+              AND substr(COALESCE(g.fecha_emision, g.created_at, ''), 1, 10) BETWEEN ? AND ?
+              {g_ten_sql}
+            GROUP BY bucket
+            """,
+            [desde_str, hasta_str] + g_ten_args,
+        ).fetchall():
+            if r["bucket"]:
+                egr_map[r["bucket"]] = egr_map.get(r["bucket"], Decimal("0")) + to_decimal(r["total"], "0")
+
+        meses_es = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+        serie_temporal = []
+        if periodo_norm == "anio":
+            for m in range(1, hoy_dt.month + 1):
+                key = f"{hoy_dt.year:04d}-{m:02d}"
+                serie_temporal.append({
+                    "fecha": key,
+                    "etiqueta": f"{meses_es[m - 1]} {hoy_dt.year}",
+                    "ingresos_usd": d_round(ing_map.get(key, Decimal("0")), 2),
+                    "egresos_usd": d_round(egr_map.get(key, Decimal("0")), 2),
+                })
+        else:
+            cursor_dt = desde_dt
+            while cursor_dt <= hasta_dt:
+                key = cursor_dt.isoformat()
+                serie_temporal.append({
+                    "fecha": key,
+                    "etiqueta": f"{cursor_dt.day:02d} {meses_es[cursor_dt.month - 1]}",
+                    "ingresos_usd": d_round(ing_map.get(key, Decimal("0")), 2),
+                    "egresos_usd": d_round(egr_map.get(key, Decimal("0")), 2),
+                })
+                cursor_dt += timedelta(days=1)
+
+        # 4. Distribución de Pagos (Dona)
+        pagos_agg = {}
+        for r in cur.execute(
+            f"""
+            SELECT COALESCE(NULLIF(TRIM(fp.metodo), ''), 'Otros') as metodo_pago,
+                   COALESCE(SUM(fp.equivalente_usd), 0) as total_usd,
+                   COUNT(*) as cantidad
+            FROM factura_pagos fp
+            JOIN facturas f ON fp.factura_id = f.id
+            WHERE COALESCE(f.estado, 'pagada') != 'anulada'
+              AND substr(COALESCE(f.fecha, ''), 1, 10) BETWEEN ? AND ?
+              {f_ten_sql}
+            GROUP BY metodo_pago
+            """,
+            [desde_str, hasta_str] + f_ten_args,
+        ).fetchall():
+            m_name = r["metodo_pago"]
+            entry = pagos_agg.setdefault(m_name, {"total": Decimal("0"), "cantidad": 0})
+            entry["total"] += to_decimal(r["total_usd"], "0")
+            entry["cantidad"] += int(r["cantidad"] or 0)
+
+        # Incluir ingresos directos de caja sin factura asociada (abonos / ingresos extra)
+        for r in cur.execute(
+            f"""
+            SELECT COALESCE(NULLIF(TRIM(mc.metodo_pago), ''), 'Otros') as metodo_pago,
+                   mc.moneda,
+                   COALESCE(SUM(mc.monto), 0) as monto,
+                   COUNT(*) as cantidad
+            FROM movimientos_caja mc
+            JOIN turnos_caja tc ON mc.turno_id = tc.id
+            WHERE mc.tipo = 'INGRESO'
+              AND mc.factura_id_ref IS NULL
+              AND COALESCE(mc.referencia, '') != 'APERTURA'
+              AND substr(COALESCE(mc.created_at, ''), 1, 10) BETWEEN ? AND ?
+              {tc_ten_sql}
+            GROUP BY metodo_pago, mc.moneda
+            """,
+            [desde_str, hasta_str] + tc_ten_args,
+        ).fetchall():
+            m_name = r["metodo_pago"]
+            mon = (r["moneda"] or "USD").upper()
+            amt = to_decimal(r["monto"], "0")
+            if mon == "VES":
+                eq_usd = amt / tasa_ves_dec if tasa_ves_dec > Decimal("0") else Decimal("0")
+            elif mon == "COP":
+                eq_usd = amt / tasa_cop_dec if tasa_cop_dec > Decimal("0") else Decimal("0")
+            else:
+                eq_usd = amt
+            entry = pagos_agg.setdefault(m_name, {"total": Decimal("0"), "cantidad": 0})
+            entry["total"] += eq_usd
+            entry["cantidad"] += int(r["cantidad"] or 0)
+
+        distribucion_pagos = sorted(
+            [
+                {
+                    "metodo_pago": k,
+                    "total_usd": d_round(v["total"], 2),
+                    "cantidad": v["cantidad"],
+                }
+                for k, v in pagos_agg.items()
+                if v["total"] > Decimal("0")
+            ],
+            key=lambda x: x["total_usd"],
+            reverse=True,
+        )
+
+        # 5. Listas Accionables
+        productos_stock_critico = [
+            dict(r)
+            for r in cur.execute(
+                f"""
+                SELECT p.id, p.codigo, p.nombre, p.stock, p.stock_minimo, p.costo_cpp,
+                       COALESCE(c.nombre, 'General') as categoria_nombre
+                FROM productos p
+                LEFT JOIN categorias c ON p.categoria_id = c.id
+                WHERE p.tipo = 'producto' AND COALESCE(p.activo, 1) = 1 AND p.stock <= p.stock_minimo
+                  {p_ten_sql}
+                ORDER BY p.stock ASC, p.nombre ASC
+                LIMIT 8
+                """,
+                p_ten_args,
+            ).fetchall()
+        ]
+
+        pedidos_pendientes_lista = [
+            dict(r)
+            for r in cur.execute(
+                f"""
+                SELECT ped.id, ped.numero_pedido, ped.fecha, ped.total_usd, ped.condicion_pago,
+                       COALESCE(c.nombre, 'Cliente General') as cliente_nombre,
+                       COALESCE(v.nombre, 'Directo') as vendedor_nombre
+                FROM pedidos ped
+                LEFT JOIN clientes c ON ped.cliente_id = c.id
+                LEFT JOIN vendedores v ON ped.vendedor_id = v.id
+                WHERE ped.estado = 'PENDIENTE' {ped_ten_sql}
+                ORDER BY ped.id DESC
+                LIMIT 6
+                """,
+                ped_ten_args,
+            ).fetchall()
+        ]
+
+        ultimas_facturas = [
+            dict(r)
+            for r in cur.execute(
+                f"""
+                SELECT f.id, f.numero_factura, f.fecha, f.total_usd, f.total_ves, f.tipo_venta, f.estado,
+                       COALESCE(c.nombre, 'Cliente General') as cliente_nombre
+                FROM facturas f
+                LEFT JOIN clientes c ON f.cliente_id = c.id
+                WHERE COALESCE(f.estado, 'pagada') != 'anulada'
+                  AND substr(COALESCE(f.fecha, ''), 1, 10) BETWEEN ? AND ?
+                  {f_ten_sql}
+                ORDER BY f.id DESC
+                LIMIT 6
+                """,
+                [desde_str, hasta_str] + f_ten_args,
+            ).fetchall()
+        ]
+
+        top_productos = [
+            dict(r)
+            for r in cur.execute(
+                f"""
+                SELECT fd.producto_id,
+                       fd.nombre_producto,
+                       ROUND(COALESCE(SUM(fd.cantidad), 0), 2) as total_vendido,
+                       ROUND(COALESCE(SUM(fd.total), 0), 2) as total_usd,
+                       COALESCE(p.stock, 0) as stock_actual,
+                       COALESCE(p.tipo, fd.tipo, 'producto') as tipo
+                FROM factura_detalles fd
+                JOIN facturas f ON fd.factura_id = f.id
+                LEFT JOIN productos p ON fd.producto_id = p.id
+                WHERE COALESCE(f.estado, 'pagada') != 'anulada'
+                  AND substr(COALESCE(f.fecha, ''), 1, 10) BETWEEN ? AND ?
+                  {f_ten_sql}
+                GROUP BY fd.producto_id, fd.nombre_producto
+                ORDER BY total_usd DESC, total_vendido DESC
+                LIMIT 5
+                """,
+                [desde_str, hasta_str] + f_ten_args,
+            ).fetchall()
+        ]
+
+        top_clientes = [
+            dict(r)
+            for r in cur.execute(
+                f"""
+                SELECT c.id, c.nombre, c.cedula, COALESCE(c.telefono, '') as telefono,
+                       COUNT(f.id) as total_facturas,
+                       ROUND(COALESCE(SUM(f.total_usd), 0), 2) as total_comprado_usd
+                FROM facturas f
+                JOIN clientes c ON f.cliente_id = c.id
+                WHERE COALESCE(f.estado, 'pagada') != 'anulada'
+                  AND substr(COALESCE(f.fecha, ''), 1, 10) BETWEEN ? AND ?
+                  {f_ten_sql}
+                GROUP BY c.id
+                ORDER BY total_comprado_usd DESC
+                LIMIT 5
+                """,
+                [desde_str, hasta_str] + f_ten_args,
+            ).fetchall()
+        ]
+
+        ventas_total_usd = d_round(ventas_total_dec, 2)
+        return {
+            "success": True,
+            "periodo": periodo_norm,
+            "rango": {
+                "desde": desde_str,
+                "hasta": hasta_str,
+                "anterior_desde": prev_desde_str,
+                "anterior_hasta": prev_hasta_str,
+            },
+            "tasas": {
+                "tasa_ves": tasa_ves,
+                "tasa_cop": tasa_cop,
+            },
+            "kpis": {
+                "ventas_total_usd": ventas_total_usd,
+                "ventas_total_ves": d_round(ventas_total_dec * tasa_ves_dec, 2),
+                "ventas_periodo_anterior_usd": d_round(ventas_prev_dec, 2),
+                "variacion_ventas_pct": var_pct,
+                "utilidad_bruta_usd": d_round(utilidad_bruta_dec, 2),
+                "margen_promedio_pct": margen_pct,
+                "cxc_pendiente_usd": cxc_pendiente_usd,
+                "cxc_pendientes_count": cxc_pendientes_count,
+                "cxp_pendiente_usd": cxp_pendiente_usd,
+                "cxp_pendientes_count": cxp_pendientes_count,
+                "facturas_count": facturas_count,
+            },
+            "operativo": {
+                "caja_estado": caja_estado,
+                "caja_turno_id": caja_turno_id,
+                "caja_saldo_usd": d_round(caja_saldo_usd_dec, 2),
+                "caja_saldo_ves": d_round(caja_saldo_ves_dec, 2),
+                "caja_saldo_consolidado_usd": d_round(caja_saldo_consolidado_dec, 2),
+                "pedidos_pendientes_count": pedidos_pendientes_count,
+                "stock_critico_count": stock_critico_count,
+            },
+            "serie_temporal": serie_temporal,
+            "distribucion_pagos": distribucion_pagos,
+            "productos_stock_critico": productos_stock_critico,
+            "pedidos_pendientes": pedidos_pendientes_lista,
+            "ultimas_facturas": ultimas_facturas,
+            "top_productos": top_productos,
+            "top_clientes": top_clientes,
+        }
+    finally:
+        if close_after:
+            conn.close()
+

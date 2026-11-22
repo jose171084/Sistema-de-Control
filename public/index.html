@@ -55,6 +55,8 @@
   <!-- Estilos Custom Soft UI y Tematización Dinámica -->
   <!-- html2pdf.js para Generación y Exportación Directa de Archivo PDF -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <!-- Chart.js 4.4 para Analítica BI en Tiempo Real -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="styles.css?v=3.0.0&rev=31">
 </head>
 <body class="auth-locked bg-slate-50 text-slate-800 font-sans min-h-screen antialiased overflow-x-hidden md:flex selection:bg-teal-100 selection:text-teal-900">
@@ -189,92 +191,40 @@
         <span data-label-key="tab_reportes">Informes</span>
       </button>
 
-      <!-- Botón CFO Copilot IA (Fase 3B) -->
-      <div id="sidebar-group-seguridad" class="pt-2 px-1">
-        <div class="pt-3 pb-1 px-2.5">
-        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Seguridad & Sistema</span>
+      <!-- SEXTO GRUPO: SEGURIDAD Y ASISTENTE -->
+      <div id="sidebar-group-seguridad" class="pt-3 pb-1 px-2.5">
+        <span class="sidebar-section-title text-[10px] font-bold uppercase tracking-wider text-cyan-300/70">Sistema & IA</span>
       </div>
       <button onclick="navigate('usuarios')" id="nav-usuarios" class="sidebar-nav-btn group text-slate-100 hover:bg-white/10">
         <i class="fa-solid fa-user-shield mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors text-sm w-4 text-center"></i>
         <span>Usuarios & Roles</span>
       </button>
       <button onclick="abrirModalCfoCopilot()" id="nav-cfo-copilot" class="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-gradient-to-r from-blue-950 via-indigo-950 to-blue-900 border border-blue-500/40 text-white font-semibold text-xs shadow-md hover:border-[#00C6E8] hover:shadow-[#00C6E8]/20 transition-all">
-          <span class="flex items-center space-x-2">
-            <span class="text-sm">🧠</span>
-            <span class="font-bold tracking-tight">CFO Copilot IA</span>
-          </span>
-          <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-[#0755C9]/50 text-cyan-300 border border-cyan-400/30">Audit</span>
-        </button>
-      </div>
+        <span class="flex items-center space-x-2">
+          <i class="fa-solid fa-wand-magic-sparkles text-[#00C6E8] text-xs"></i>
+          <span class="font-bold tracking-tight">CFO Copilot IA</span>
+        </span>
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-[#0755C9]/50 text-cyan-300 border border-cyan-400/30">IA</span>
+      </button>
     </nav>
 
-    <!-- Tarjeta de Tasas de Cambio en Sidebar (Soft UI Mini-Card) -->
-    <div class="sidebar-widget-card p-3 mx-3 my-2 rounded-2xl bg-white/5 border border-white/10 text-xs space-y-2 shadow-2xs transition hover:border-white/20">
-      <div class="flex items-center justify-between cursor-pointer" onclick="openTasasModal()" title="Configurar Tasas y Modo de Sincronización">
-        <span class="font-bold text-slate-200 flex items-center text-[11px] uppercase tracking-wide">
-          <i class="fa-solid fa-arrow-trend-up text-[#00C6E8] mr-1.5 text-xs"></i>
-          Tasas de Cambio
-        </span>
-        <span class="text-[10px] font-semibold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/30 flex items-center" id="badgeTasasOficiales">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse"></span>Auto
-        </span>
-      </div>
-      <div class="space-y-1 cursor-pointer font-mono text-xs" onclick="openTasasModal()" title="Clic para modificar tasas manualmente o cambiar modo">
-        <div class="flex justify-between items-center bg-black/20 px-2.5 py-1.5 rounded-xl border border-white/10 shadow-2xs">
-          <span class="text-slate-300 text-[11px] font-sans flex items-center font-medium">
-            <i class="fa-solid fa-landmark text-amber-400 mr-1.5 text-[11px]"></i>BCV USD:
-          </span>
-          <strong class="text-white font-mono font-bold text-xs" id="sidebarRateVes">45.00 Bs.</strong>
-        </div>
-        <div class="flex justify-between items-center bg-black/20 px-2.5 py-1.5 rounded-xl border border-white/10 shadow-2xs">
-          <span class="text-slate-300 text-[11px] font-sans flex items-center font-medium">
-            <i class="fa-solid fa-scale-balanced text-[#00C6E8] mr-1.5 text-[11px]"></i>TRM USD:
-          </span>
-          <strong class="text-white font-mono font-bold text-xs" id="sidebarRateCop">4,100 COP</strong>
-        </div>
-      </div>
-      <div class="grid grid-cols-2 gap-1.5 pt-1 border-t border-white/10">
-        <button onclick="openTasasModal()" class="bg-white/10 hover:bg-white/20 text-slate-200 font-semibold py-1.5 px-2 rounded-xl text-[10px] flex items-center justify-center border border-white/10 shadow-2xs transition" title="Modificar tasas manualmente o apagar sincronización">
-          <i class="fa-solid fa-pen-to-square mr-1 text-slate-300"></i>Editar
-        </button>
-        <button onclick="sincronizarTasasOficiales()" id="btnSyncTasasSidebar" class="bg-[#0755C9] hover:bg-[#087FE8] text-white font-semibold py-1.5 px-2 rounded-xl text-[10px] flex items-center justify-center shadow-xs transition" title="Consultar BCV y TRM ahora">
-          <i class="fa-solid fa-rotate mr-1" id="iconSyncTasas"></i>Sincronizar
-        </button>
-      </div>
-    </div>
-
     <!-- Opciones del Sistema en Pie de Sidebar -->
-    <div class="p-2.5 border-t border-white/10 space-y-1 text-xs shrink-0">
-      <button onclick="openPersonalizacionModal()" class="w-full flex items-center px-3 py-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition font-medium group">
-        <i class="fa-solid fa-palette mr-2.5 text-[#00C6E8] group-hover:scale-110 transition-transform"></i>
-        <span>Personalizar Marca</span>
+    <div class="p-3 border-t border-white/10 space-y-1.5 text-xs shrink-0">
+      <button type="button" onclick="openConfigHubModal()" id="btnSidebarConfiguracion" style="display: none;" class="w-full flex items-center justify-between px-3 py-2 text-slate-100 hover:text-white bg-white/5 hover:bg-white/15 border border-white/10 rounded-xl transition font-semibold group">
+        <span class="flex items-center">
+          <i class="fa-solid fa-sliders mr-2.5 text-[#00C6E8] group-hover:rotate-12 transition-transform"></i>
+          <span>Configuración</span>
+        </span>
+        <i class="fa-solid fa-chevron-right text-[10px] text-slate-400 group-hover:text-white"></i>
       </button>
-      <button onclick="openFormatosImpresionModal()" class="w-full flex items-center px-3 py-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition font-medium group role-admin-only">
-        <i class="fa-solid fa-print mr-2.5 text-[#00C6E8] group-hover:scale-110 transition-transform"></i>
-        <span>Formatos de Impresión</span>
+      <button type="button" onclick="openAcercaDeModal()" class="w-full flex items-center px-3 py-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition font-medium group">
+        <i class="fa-solid fa-circle-info mr-2.5 text-slate-400 group-hover:text-[#00C6E8] transition-colors"></i>
+        <span>Acerca de</span>
       </button>
-      <button onclick="openConfigModal()" class="w-full flex items-center px-3 py-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition font-medium group role-admin-only">
-        <i class="fa-solid fa-sliders mr-2.5 text-slate-400 group-hover:text-white transition-colors"></i>
-        <span>Configuración Negocio</span>
-      </button>
-      <button onclick="openDatabaseModal()" id="btnSidebarDb" class="w-full flex items-center px-3 py-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition font-medium group role-admin-only">
-        <i class="fa-solid fa-database mr-2.5 text-slate-400 group-hover:text-white transition-colors"></i>
-        <span>Base de Datos & Cloud</span>
-      </button>
-      <button onclick="openAcercaDeModal()" class="w-full flex items-center justify-between px-3 py-2 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition font-medium group border border-white/10 mt-1">
-        <div class="flex items-center">
-          <i class="fa-solid fa-circle-info mr-2.5 text-[#00C6E8] group-hover:scale-110 transition-transform"></i>
-          <span>Acerca de TAVO CLOUD</span>
-        </div>
-        <span class="text-[9px] font-mono font-bold bg-white/10 text-cyan-300 px-1.5 py-0.5 rounded">v3.0 SaaS</span>
-      </button>
-      <button type="button" onclick="cerrarSesionActual()" class="w-full flex items-center justify-center gap-2 px-3 py-2 mt-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-200 hover:text-white border border-rose-400/25 transition font-semibold text-xs">
+      <button type="button" onclick="cerrarSesionActual()" class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-200 hover:text-white border border-rose-400/25 transition font-semibold text-xs">
         <i class="fa-solid fa-right-from-bracket"></i>
-        <span>Cerrar Sesión Segura</span>
+        <span>Cerrar Sesión</span>
       </button>
-      <div class="pt-1 text-center">
-        <p class="text-[9px] text-slate-400 font-mono tracking-tight">TAVO CLOUD © 2026 - D-BIAN SYSTEM COMPUTER</p>
-      </div>
     </div>
   </aside>
 
@@ -286,7 +236,7 @@
        ======================================================== -->
   <div class="app-main-wrapper flex-1 flex flex-col min-w-0 min-h-screen w-full">
     
-    <!-- Banner de Alerta para Entorno Efímero en la Nube (Estilo Corporativo Cloud Demo) -->
+    <!-- Banner de Alerta para Entorno Efímero en la Nube -->
     <div id="cloudEphemeralAlert" class="hidden bg-slate-900 text-slate-200 px-3 sm:px-6 py-2 text-xs font-medium flex items-center justify-between border-b border-amber-500/40 shadow-sm sticky top-0 z-30 transition">
       <div class="flex items-center space-x-2.5">
         <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
@@ -295,7 +245,7 @@
         <span class="text-slate-300">Para respaldo permanente active la sincronización en la nube o descargue una copia (.db) al finalizar.</span>
       </div>
       <div class="flex items-center space-x-2 shrink-0">
-        <button onclick="openDatabaseModal()" class="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-2.5 py-1 rounded-lg text-xs font-semibold shadow-2xs transition cursor-pointer">
+        <button id="btnCloudAlertConfig" onclick="openDatabaseModal()" class="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-2.5 py-1 rounded-lg text-xs font-semibold shadow-2xs transition cursor-pointer">
           <i class="fa-solid fa-cloud-arrow-up mr-1"></i>Configurar Nube
         </button>
         <button onclick="document.getElementById('cloudEphemeralAlert').classList.add('hidden'); sessionStorage.setItem('dismissCloudAlert', '1');" class="text-slate-400 hover:text-white p-1 cursor-pointer" title="Cerrar aviso temporalmente">
@@ -304,45 +254,22 @@
       </div>
     </div>
 
-    <!-- Barra Superior (Header Compacto y Optimizado para Móvil / Desktop) -->
-    <header class="app-header bg-white border-b border-slate-200 sticky top-0 z-20 px-2.5 sm:px-6 py-2 sm:py-2.5 flex items-center justify-between gap-1.5 shadow-xs">
-      <div class="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
+    <!-- Barra Superior Ejecutiva (Limpia, Sin Redundancias) -->
+    <header class="app-header bg-white border-b border-slate-200 sticky top-0 z-20 px-2.5 sm:px-6 py-2.5 flex items-center justify-between gap-2 shadow-xs">
+      <div class="flex items-center space-x-2.5 min-w-0 flex-1">
         <!-- Botón Toggle Menú Móvil -->
         <button onclick="toggleMobileSidebar()" class="md:hidden w-9 h-9 flex items-center justify-center text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 shrink-0 shadow-2xs active:scale-95 transition" aria-label="Abrir Menú">
           <i class="fa-solid fa-bars text-sm"></i>
         </button>
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center space-x-2">
-            <h2 class="font-extrabold text-xs sm:text-base text-slate-800 leading-tight truncate" id="headerBusinessName">Mi Negocio Comercial</h2>
-            <!-- Badge Terminal / Caja -->
-            <span class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200/80">
-              <i class="fa-solid fa-desktop mr-1 text-slate-400 text-[9px]"></i>Terminal #01
-            </span>
-          </div>
-          <div class="flex items-center space-x-1 sm:space-x-2 text-[10px] sm:text-xs text-slate-500 truncate mt-0.5">
-            <span id="headerDocFiscal" class="truncate font-mono">J-12345678-9</span>
-            <span>•</span>
-            <span class="text-emerald-600 font-semibold flex items-center shrink-0">
-              <i class="fa-solid fa-circle-check text-[8px] sm:text-[9px] mr-0.5 sm:mr-1"></i>En línea
-            </span>
-            <span class="hidden lg:inline text-slate-300">|</span>
-            <!-- Selector de Rol (RBAC Switcher) -->
-            <div class="hidden lg:inline-flex items-center space-x-1.5">
-              <span class="text-slate-400 text-[10px] font-medium">Perfil:</span>
-              <button type="button" onclick="toggleRolUsuario()" id="headerRoleBadge" class="inline-flex items-center text-[10px] font-bold text-teal-800 bg-teal-50 hover:bg-teal-100 px-2 py-0.5 rounded-full border border-teal-200 transition cursor-pointer shadow-2xs" title="Clic para alternar entre perfil Administrador y Cajero POS">
-                <i class="fa-solid fa-shield-halved mr-1 text-teal-600"></i>
-                <span id="headerRoleText">Administrador</span>
-                <i class="fa-solid fa-arrows-rotate ml-1.5 text-[8px] text-teal-500"></i>
-              </button>
-            </div>
-          </div>
-        </div>
+        <!-- Título visible en móvil cuando el sidebar está contraído -->
+        <h2 class="md:hidden font-extrabold text-xs sm:text-sm text-slate-800 leading-tight truncate" id="headerBusinessName">Mi Negocio Comercial</h2>
+        <span id="headerDocFiscal" class="hidden"></span>
       </div>
 
-      <!-- Tasas en Header (Mobile + Tablet / Desktop) & Acciones Rápidas -->
-      <div class="flex items-center space-x-1 sm:space-x-2.5 shrink-0">
+      <!-- Tasas, Accesos Operativos y Usuario Activo -->
+      <div class="flex items-center space-x-1.5 sm:space-x-2.5 shrink-0">
         <!-- Badge de Tasas Móvil Compacto (< 1024px) -->
-        <div onclick="openTasasModal()" class="flex lg:hidden items-center space-x-1 bg-slate-50 px-2 py-1 rounded-xl border border-slate-200 text-[10px] font-mono shadow-2xs cursor-pointer hover:bg-slate-100 active:scale-95 transition" title="Configurar Tasas / Modo Manual">
+        <div onclick="openTasasModal()" class="flex lg:hidden items-center space-x-1 bg-slate-50 px-2 py-1.5 rounded-xl border border-slate-200 text-[10px] font-mono shadow-2xs cursor-pointer hover:bg-slate-100 active:scale-95 transition" title="Configurar Tasas de Cambio">
           <span class="text-amber-700 font-bold whitespace-nowrap"><i class="fa-solid fa-landmark text-amber-500 mr-0.5 text-[9px]"></i><span id="mobileRateVes">45.00</span></span>
           <span class="text-slate-300 hidden xs:inline">|</span>
           <span class="text-emerald-700 font-bold whitespace-nowrap hidden sm:inline"><i class="fa-solid fa-coins text-emerald-500 mr-0.5 text-[9px]"></i><span id="mobileRateCop">4,100</span></span>
@@ -368,8 +295,8 @@
           </button>
         </div>
 
-        <!-- Botones de Acción Rápida (Personalizables en Tiempo Real) -->
-        <button onclick="navigate('pedidos'); if(typeof cambiarSubtabPedidos==='function') cambiarSubtabPedidos('nuevo');" id="btnHeaderNuevoPedido" class="hidden bg-gradient-to-r from-[#0755C9] to-[#087FE8] hover:from-[#0648AD] hover:to-[#076FD0] text-white px-2.5 sm:px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-xs flex items-center justify-center transition-all duration-200 active:scale-95" title="Nuevo Pedido / Preventa">
+        <!-- Botones de Acción Rápida -->
+        <button onclick="navigate('pedidos'); if(typeof cambiarSubtabPedidos==='function') cambiarSubtabPedidos('nuevo');" id="btnHeaderNuevoPedido" class="hidden bg-gradient-to-r from-[#0755C9] to-[#087FE8] hover:from-[#0648AD] hover:to-[#076FD0] text-white px-2.5 sm:px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-xs flex items-center justify-center transition-all duration-200 active:scale-95" title="Nuevo Pedido">
           <i class="fa-solid fa-clipboard-list sm:mr-1.5"></i>
           <span class="hidden sm:inline">Nuevo Pedido</span>
         </button>
@@ -381,22 +308,25 @@
           <i class="fa-solid fa-cart-shopping sm:mr-1.5"></i>
           <span class="hidden sm:inline" data-label-key="btn_cargar_compra">Cargar Compra</span>
         </button>
-        <button onclick="abrirModalCfoCopilot()" id="btnHeaderCfoCopilot" title="CFO Copilot IA: Asistente Financiero Ejecutivo" class="px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 via-purple-600 to-teal-600 hover:from-indigo-500 hover:to-teal-500 shadow-sm flex items-center space-x-1.5 transition-all duration-200 active:scale-95">
-          <span class="text-sm">🧠</span>
-          <span class="hidden md:inline font-bold">CFO Copilot</span>
+        <button onclick="abrirModalCfoCopilot()" id="btnHeaderCfoCopilot" title="Asistente Financiero IA" class="px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-indigo-600 via-purple-600 to-teal-600 hover:from-indigo-500 hover:to-teal-500 shadow-sm flex items-center space-x-1.5 transition-all duration-200 active:scale-95">
+          <i class="fa-solid fa-wand-magic-sparkles text-xs"></i>
+          <span class="hidden md:inline font-bold">Asistente IA</span>
         </button>
-        <button onclick="openPersonalizacionModal()" title="Personalizar Colores y Nombres" class="p-2 bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 hover:text-slate-800 rounded-xl transition-all duration-200 shadow-2xs active:scale-95">
-          <i class="fa-solid fa-palette text-xs sm:text-sm"></i>
-        </button>
-        <!-- Operador Autenticado y Cierre de Sesión -->
-        <div id="headerUserMenu" class="flex items-center space-x-2 pl-2 border-l border-slate-200 shrink-0">
-          <div class="hidden 2xl:flex flex-col items-end leading-tight">
-            <span id="headerUserNombre" class="text-[11px] font-bold text-slate-800 max-w-[115px] truncate">Operador</span>
-            <span id="headerUserRol" class="text-[9px] font-bold text-[#0755C9] uppercase tracking-wider">Rol</span>
+
+        <!-- Usuario Activo y Cierre de Sesión -->
+        <div id="headerUserMenu" class="flex items-center space-x-2.5 pl-2.5 border-l border-slate-200 shrink-0">
+          <div class="hidden sm:flex items-center space-x-2">
+            <div class="w-7 h-7 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-[#0755C9] shrink-0">
+              <i class="fa-solid fa-user text-[11px]"></i>
+            </div>
+            <div class="flex flex-col leading-tight">
+              <span id="headerUserNombre" class="text-xs font-bold text-slate-800 max-w-[130px] truncate">Operador</span>
+              <span id="headerUserRol" class="text-[9px] font-semibold text-slate-500 uppercase tracking-wider">Rol</span>
+            </div>
           </div>
-          <button type="button" id="btnHeaderCerrarSesion" onclick="cerrarSesionActual()" title="Cerrar Sesión Segura" class="p-2 sm:px-2.5 sm:py-1.5 bg-slate-100/90 hover:bg-rose-50 text-slate-600 hover:text-rose-600 border border-slate-200/80 hover:border-rose-200 rounded-xl transition-all duration-200 flex items-center space-x-1 text-xs font-bold active:scale-95">
+          <button type="button" id="btnHeaderCerrarSesion" onclick="cerrarSesionActual()" title="Cerrar Sesión" class="p-2 sm:px-2.5 sm:py-1.5 bg-slate-100/90 hover:bg-rose-50 text-slate-600 hover:text-rose-600 border border-slate-200/80 hover:border-rose-200 rounded-xl transition-all duration-200 flex items-center space-x-1 text-xs font-bold active:scale-95">
             <i class="fa-solid fa-right-from-bracket text-xs"></i>
-            <span class="hidden 2xl:inline">Salir</span>
+            <span class="hidden lg:inline">Salir</span>
           </button>
         </div>
       </div>
@@ -408,145 +338,322 @@
     <!-- ========================================================
          VISTA 1: DASHBOARD
          ======================================================== -->
-    <section id="view-dashboard" class="space-y-3.5 sm:space-y-6">
-      <div class="flex items-center justify-between gap-2">
+    <section id="view-dashboard" class="space-y-4 sm:space-y-6">
+      <!-- Barra de Control Global del Dashboard BI -->
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 bg-white/80 backdrop-blur-sm border border-slate-200/80 rounded-2xl p-3.5 sm:p-4 shadow-xs">
         <div class="min-w-0">
-          <h2 class="text-lg sm:text-2xl font-bold text-slate-800 truncate">Panel de Control & Resumen</h2>
-          <p class="text-xs sm:text-sm text-slate-500 truncate">Monitoreo general de inventario, stock crítico y operaciones comerciales.</p>
+          <div class="flex items-center gap-2.5 flex-wrap">
+            <h2 class="text-lg sm:text-2xl font-extrabold text-slate-800 tracking-tight truncate">Panel de Control &amp; Resumen</h2>
+            <span id="dashPeriodoRango" class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+              <i class="fa-regular fa-calendar text-[10px] text-teal-600"></i>
+              Este Mes
+            </span>
+          </div>
+          <p class="text-xs sm:text-sm text-slate-500 truncate mt-0.5">Analítica financiera, tesorería en vivo y centro de acción operativa.</p>
         </div>
-        <div class="flex items-center space-x-2 shrink-0">
-          <button onclick="loadDashboard()" class="text-xs sm:text-sm bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl shadow-xs transition flex items-center">
-            <i class="fa-solid fa-rotate-right sm:mr-1.5"></i><span class="hidden sm:inline">Actualizar</span>
+
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <!-- Selector Segmentado de Período -->
+          <div class="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/80" role="group" aria-label="Selector de período">
+            <button type="button" data-dash-periodo="hoy" onclick="setDashboardPeriodo('hoy')" class="dash-periodo-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-600 hover:text-slate-900">
+              Hoy
+            </button>
+            <button type="button" data-dash-periodo="semana" onclick="setDashboardPeriodo('semana')" class="dash-periodo-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-600 hover:text-slate-900">
+              7 Días
+            </button>
+            <button type="button" data-dash-periodo="mes" onclick="setDashboardPeriodo('mes')" class="dash-periodo-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-white text-teal-700 shadow-xs">
+              Este Mes
+            </button>
+            <button type="button" data-dash-periodo="anio" onclick="setDashboardPeriodo('anio')" class="dash-periodo-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition-all text-slate-600 hover:text-slate-900">
+              Este Año
+            </button>
+          </div>
+
+          <button id="dashRefreshBtn" type="button" onclick="loadDashboard()" class="text-xs sm:text-sm bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-2 rounded-xl shadow-xs transition flex items-center font-semibold">
+            <i id="dashRefreshIcon" class="fa-solid fa-rotate-right sm:mr-1.5 text-teal-600"></i><span class="hidden sm:inline">Actualizar</span>
           </button>
         </div>
       </div>
 
-      <!-- Tarjetas de Estadísticas Principales (Cuadrícula Compacta 2x3 en Móvil, 6 Cols en XL) -->
-      <div class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5 sm:gap-5 mobile-kpi-grid">
-        <!-- Tarjeta Productos con Control de Existencia -->
-        <div class="soft-card p-3 sm:p-5 flex items-center justify-between group hover:-translate-y-0.5 transition-all duration-300">
-          <div class="min-w-0">
-            <p class="text-[10px] sm:text-[11px] font-bold uppercase text-slate-400 tracking-wider truncate">Productos</p>
-            <h3 class="text-lg sm:text-3xl font-extrabold text-slate-800 mt-0.5 sm:mt-1.5 tracking-tight truncate" id="dashTotalProductos">0</h3>
-            <p class="text-[10px] sm:text-xs text-teal-600 mt-1 sm:mt-2 font-medium flex items-center truncate">
-              <i class="fa-solid fa-circle-check mr-1 text-[9px] sm:text-[10px]"></i>Con stock
-            </p>
+      <!-- FILA 1: 4 Tarjetas KPI Ejecutivas -->
+      <div id="dashKpiGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5 sm:gap-5">
+        <!-- KPI 1: Facturación del Período -->
+        <div class="soft-card p-4 sm:p-5 flex flex-col justify-between relative group hover:-translate-y-0.5 transition-all duration-300 border border-slate-200/80">
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <p class="text-[11px] font-bold uppercase text-slate-400 tracking-wider truncate">Facturación del Período</p>
+              <span class="relative group/tip inline-flex items-center">
+                <button type="button" aria-label="Explicación Facturación" class="w-4 h-4 rounded-full bg-slate-100 text-slate-500 hover:bg-teal-100 hover:text-teal-700 text-[10px] font-bold inline-flex items-center justify-center transition">i</button>
+                <span class="pointer-events-none opacity-0 group-hover/tip:opacity-100 group-focus-within/tip:opacity-100 transition-opacity duration-200 absolute left-0 top-6 z-30 w-60 p-2.5 rounded-xl bg-slate-900 text-white text-[11px] font-normal leading-relaxed shadow-xl">
+                  Suma de facturas emitidas (no anuladas) en el período seleccionado, comparada contra el período inmediato anterior.
+                </span>
+              </span>
+            </div>
+            <div class="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center text-base shrink-0">
+              <i class="fa-solid fa-receipt"></i>
+            </div>
           </div>
-          <div class="w-9 h-9 sm:w-13 sm:h-13 rounded-xl sm:rounded-2xl bg-teal-50/80 text-teal-600 flex items-center justify-center text-sm sm:text-xl shrink-0 ml-1.5 group-hover:scale-105 transition-transform duration-300">
-            <i class="fa-solid fa-cubes"></i>
+
+          <div class="mt-3 dash-kpi-content">
+            <div class="flex items-baseline justify-between gap-2 flex-wrap">
+              <h3 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight" id="dashTotalVentas">$0.00</h3>
+              <span id="dashVentasVariacionBadge" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600">
+                0.0% vs ant.
+              </span>
+            </div>
+            <div class="flex items-center justify-between gap-2 mt-2 text-xs text-slate-500">
+              <span id="dashTotalVentasBs" class="font-medium truncate">0.00 Bs.</span>
+              <span id="dashFacturasCountLabel" class="text-[11px] font-semibold text-slate-400 shrink-0">0 facturas</span>
+            </div>
+          </div>
+          <div class="hidden dash-kpi-skeleton animate-pulse mt-3 space-y-2.5">
+            <div class="h-8 bg-slate-200 rounded-lg w-2/3"></div>
+            <div class="h-3.5 bg-slate-100 rounded w-1/2"></div>
           </div>
         </div>
 
-        <!-- Tarjeta Servicios -->
-        <div class="soft-card p-3 sm:p-5 flex items-center justify-between group hover:-translate-y-0.5 transition-all duration-300">
-          <div class="min-w-0">
-            <p class="text-[10px] sm:text-[11px] font-bold uppercase text-slate-400 tracking-wider truncate">Servicios</p>
-            <h3 class="text-lg sm:text-3xl font-extrabold text-slate-800 mt-0.5 sm:mt-1.5 tracking-tight truncate" id="dashTotalServicios">0</h3>
-            <p class="text-[10px] sm:text-xs text-purple-600 mt-1 sm:mt-2 font-medium flex items-center truncate">
-              <i class="fa-solid fa-sparkles mr-1 text-[9px] sm:text-[10px]"></i>Sin stock
-            </p>
+        <!-- KPI 2: Utilidad Estimada (CPP) -->
+        <div class="soft-card p-4 sm:p-5 flex flex-col justify-between relative group hover:-translate-y-0.5 transition-all duration-300 border border-slate-200/80">
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <p class="text-[11px] font-bold uppercase text-slate-400 tracking-wider truncate">Utilidad Estimada (CPP)</p>
+              <span class="relative group/tip inline-flex items-center">
+                <button type="button" aria-label="Explicación Utilidad CPP" class="w-4 h-4 rounded-full bg-slate-100 text-slate-500 hover:bg-emerald-100 hover:text-emerald-700 text-[10px] font-bold inline-flex items-center justify-center transition">i</button>
+                <span class="pointer-events-none opacity-0 group-hover/tip:opacity-100 group-focus-within/tip:opacity-100 transition-opacity duration-200 absolute left-0 top-6 z-30 w-60 p-2.5 rounded-xl bg-slate-900 text-white text-[11px] font-normal leading-relaxed shadow-xl">
+                  Ganancia bruta calculada restando el Costo Promedio Ponderado (CPP) real de los ítems facturados al subtotal neto vendido.
+                </span>
+              </span>
+            </div>
+            <div class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-base shrink-0">
+              <i class="fa-solid fa-chart-line"></i>
+            </div>
           </div>
-          <div class="w-9 h-9 sm:w-13 sm:h-13 rounded-xl sm:rounded-2xl bg-purple-50/80 text-purple-600 flex items-center justify-center text-sm sm:text-xl shrink-0 ml-1.5 group-hover:scale-105 transition-transform duration-300">
-            <i class="fa-solid fa-hand-holding-heart"></i>
+
+          <div class="mt-3 dash-kpi-content">
+            <div class="flex items-baseline justify-between gap-2 flex-wrap">
+              <h3 class="text-2xl sm:text-3xl font-extrabold text-emerald-700 tracking-tight" id="dashUtilidadUsd">$0.00</h3>
+              <span id="dashMargenPct" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70">
+                Margen 0.0%
+              </span>
+            </div>
+            <div class="flex items-center justify-between gap-2 mt-2 text-xs text-slate-500">
+              <span id="dashUtilidadBs" class="font-medium truncate">0.00 Bs.</span>
+              <span class="text-[11px] text-slate-400 shrink-0">Base costo CPP</span>
+            </div>
+          </div>
+          <div class="hidden dash-kpi-skeleton animate-pulse mt-3 space-y-2.5">
+            <div class="h-8 bg-slate-200 rounded-lg w-2/3"></div>
+            <div class="h-3.5 bg-slate-100 rounded w-1/2"></div>
           </div>
         </div>
 
-        <!-- Tarjeta Alertas Stock Bajo -->
-        <div class="soft-card p-3 sm:p-5 flex items-center justify-between group hover:-translate-y-0.5 transition-all duration-300">
-          <div class="min-w-0">
-            <p class="text-[10px] sm:text-[11px] font-bold uppercase text-slate-400 tracking-wider truncate">Stock Crítico</p>
-            <h3 class="text-lg sm:text-3xl font-extrabold text-rose-600 mt-0.5 sm:mt-1.5 tracking-tight truncate" id="dashAlertasStock">0</h3>
-            <p class="text-[10px] sm:text-xs text-rose-500 mt-1 sm:mt-2 font-medium flex items-center truncate">
-              <i class="fa-solid fa-triangle-exclamation mr-1 text-[9px] sm:text-[10px]"></i>Reponer
-            </p>
+        <!-- KPI 3: Caja & Tesorería -->
+        <div class="soft-card p-4 sm:p-5 flex flex-col justify-between relative group hover:-translate-y-0.5 transition-all duration-300 border border-slate-200/80">
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <p class="text-[11px] font-bold uppercase text-slate-400 tracking-wider truncate">Caja &amp; Tesorería</p>
+              <span class="relative group/tip inline-flex items-center">
+                <button type="button" aria-label="Explicación Caja y Tesorería" class="w-4 h-4 rounded-full bg-slate-100 text-slate-500 hover:bg-sky-100 hover:text-sky-700 text-[10px] font-bold inline-flex items-center justify-center transition">i</button>
+                <span class="pointer-events-none opacity-0 group-hover/tip:opacity-100 group-focus-within/tip:opacity-100 transition-opacity duration-200 absolute right-0 sm:left-0 top-6 z-30 w-60 p-2.5 rounded-xl bg-slate-900 text-white text-[11px] font-normal leading-relaxed shadow-xl">
+                  Estado en vivo del turno de caja actual y saldo consolidado disponible según apertura y movimientos registrados.
+                </span>
+              </span>
+            </div>
+            <span id="dashCajaEstadoBadge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200 shrink-0">
+              <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+              CERRADA
+            </span>
           </div>
-          <div class="w-9 h-9 sm:w-13 sm:h-13 rounded-xl sm:rounded-2xl bg-rose-50/80 text-rose-600 flex items-center justify-center text-sm sm:text-xl shrink-0 ml-1.5 group-hover:scale-105 transition-transform duration-300">
-            <i class="fa-solid fa-bell"></i>
+
+          <div class="mt-3 dash-kpi-content">
+            <div class="flex items-baseline justify-between gap-2">
+              <h3 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight" id="dashCajaSaldoUsd">$0.00</h3>
+              <button id="dashCajaQuickBtn" type="button" onclick="navigate('tesoreria')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 transition shrink-0">
+                Ir a Caja
+              </button>
+            </div>
+            <div class="flex items-center justify-between gap-2 mt-2 text-xs text-slate-500">
+              <span id="dashCajaSaldoBs" class="font-medium truncate">Saldo turno: 0.00 Bs.</span>
+              <span id="dashCajaTurnoLabel" class="text-[11px] text-slate-400 shrink-0">Sin turno</span>
+            </div>
+          </div>
+          <div class="hidden dash-kpi-skeleton animate-pulse mt-3 space-y-2.5">
+            <div class="h-8 bg-slate-200 rounded-lg w-2/3"></div>
+            <div class="h-3.5 bg-slate-100 rounded w-1/2"></div>
           </div>
         </div>
 
-        <!-- Tarjeta Ventas Totales -->
-        <div class="soft-card p-3 sm:p-5 flex items-center justify-between group hover:-translate-y-0.5 transition-all duration-300">
-          <div class="min-w-0">
-            <p class="text-[10px] sm:text-[11px] font-bold uppercase text-slate-400 tracking-wider truncate">Facturación</p>
-            <h3 class="text-base sm:text-3xl font-extrabold text-teal-700 mt-0.5 sm:mt-1.5 tracking-tight truncate" id="dashTotalVentas">$0.00</h3>
-            <p class="text-[10px] sm:text-xs text-slate-500 mt-1 sm:mt-2 font-medium truncate" id="dashTotalVentasBs">0.00 Bs.</p>
+        <!-- KPI 4: Salud Financiera (CxC / CxP) -->
+        <div class="soft-card p-4 sm:p-5 flex flex-col justify-between relative group hover:-translate-y-0.5 transition-all duration-300 border border-slate-200/80">
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <p class="text-[11px] font-bold uppercase text-slate-400 tracking-wider truncate">Salud Financiera</p>
+              <span class="relative group/tip inline-flex items-center">
+                <button type="button" aria-label="Explicación Salud Financiera" class="w-4 h-4 rounded-full bg-slate-100 text-slate-500 hover:bg-amber-100 hover:text-amber-700 text-[10px] font-bold inline-flex items-center justify-center transition">i</button>
+                <span class="pointer-events-none opacity-0 group-hover/tip:opacity-100 group-focus-within/tip:opacity-100 transition-opacity duration-200 absolute right-0 top-6 z-30 w-60 p-2.5 rounded-xl bg-slate-900 text-white text-[11px] font-normal leading-relaxed shadow-xl">
+                  Comparativo entre Cuentas por Cobrar (dinero en la calle de clientes) y Cuentas por Pagar pendientes a proveedores.
+                </span>
+              </span>
+            </div>
+            <span id="dashSaludNeta" class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 shrink-0">
+              Neto $0.00
+            </span>
           </div>
-          <div class="w-9 h-9 sm:w-13 sm:h-13 rounded-xl sm:rounded-2xl bg-teal-50/80 text-teal-600 flex items-center justify-center text-sm sm:text-xl shrink-0 ml-1.5 group-hover:scale-105 transition-transform duration-300">
-            <i class="fa-solid fa-receipt"></i>
-          </div>
-        </div>
 
-        <!-- Tarjeta Cuentas por Cobrar (Total Deuda Pendiente) -->
-        <div onclick="navigate('cxc')" class="soft-card-interactive p-3 sm:p-5 flex items-center justify-between group" title="Ir a Cuentas por Cobrar">
-          <div class="min-w-0">
-            <p class="text-[10px] sm:text-[11px] font-bold uppercase text-slate-400 tracking-wider truncate">Por Cobrar (CxC)</p>
-            <h3 class="text-base sm:text-3xl font-extrabold text-amber-600 mt-0.5 sm:mt-1.5 tracking-tight truncate" id="dashTotalCxc">$0.00</h3>
-            <p class="text-[10px] sm:text-xs text-amber-600 mt-1 sm:mt-2 font-medium truncate" id="dashTotalCxcBs">0.00 Bs. (0 pend.)</p>
+          <div class="mt-3 dash-kpi-content grid grid-cols-2 gap-2.5">
+            <div onclick="navigate('cxc')" class="p-2 rounded-xl bg-amber-50/70 border border-amber-200/60 hover:bg-amber-100/60 transition cursor-pointer" title="Ir a Cuentas por Cobrar">
+              <p class="text-[10px] font-bold uppercase text-amber-700 tracking-wide">Por Cobrar</p>
+              <p class="text-base sm:text-lg font-extrabold text-amber-700 truncate mt-0.5" id="dashTotalCxc">$0.00</p>
+              <p class="text-[10px] text-amber-600 font-medium truncate" id="dashCxcCount">0 pend.</p>
+            </div>
+            <div onclick="navigate('cxp')" class="p-2 rounded-xl bg-sky-50/70 border border-sky-200/60 hover:bg-sky-100/60 transition cursor-pointer" title="Ir a Cuentas por Pagar">
+              <p class="text-[10px] font-bold uppercase text-sky-700 tracking-wide">Por Pagar</p>
+              <p class="text-base sm:text-lg font-extrabold text-sky-700 truncate mt-0.5" id="dashTotalCxp">$0.00</p>
+              <p class="text-[10px] text-sky-600 font-medium truncate" id="dashCxpCount">0 pend.</p>
+            </div>
           </div>
-          <div class="w-9 h-9 sm:w-13 sm:h-13 rounded-xl sm:rounded-2xl bg-amber-50/80 text-amber-600 flex items-center justify-center text-sm sm:text-xl shrink-0 ml-1.5 group-hover:scale-105 transition-transform duration-300">
-            <i class="fa-solid fa-hand-holding-dollar"></i>
-          </div>
-        </div>
-
-        <!-- Tarjeta Cuentas por Pagar (Total Deuda a Proveedores) -->
-        <div onclick="navigate('cxp')" class="soft-card-interactive p-3 sm:p-5 flex items-center justify-between group" title="Ir a Cuentas por Pagar">
-          <div class="min-w-0">
-            <p class="text-[10px] sm:text-[11px] font-bold uppercase text-slate-400 tracking-wider truncate">Por Pagar (CxP)</p>
-            <h3 class="text-base sm:text-3xl font-extrabold text-sky-600 mt-0.5 sm:mt-1.5 tracking-tight truncate" id="dashTotalCxp">$0.00</h3>
-            <p class="text-[10px] sm:text-xs text-sky-600 mt-1 sm:mt-2 font-medium truncate" id="dashTotalCxpBs">0.00 Bs. (0 pend.)</p>
-          </div>
-          <div class="w-9 h-9 sm:w-13 sm:h-13 rounded-xl sm:rounded-2xl bg-sky-50/80 text-sky-600 flex items-center justify-center text-sm sm:text-xl shrink-0 ml-1.5 group-hover:scale-105 transition-transform duration-300">
-            <i class="fa-solid fa-file-invoice"></i>
+          <div class="hidden dash-kpi-skeleton animate-pulse mt-3 grid grid-cols-2 gap-2.5">
+            <div class="h-14 bg-slate-200 rounded-xl"></div>
+            <div class="h-14 bg-slate-200 rounded-xl"></div>
           </div>
         </div>
       </div>
 
-      <!-- Sección de Alertas y Últimas Ventas -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Productos que necesitan reposición -->
-        <div class="soft-card p-6">
-          <div class="flex items-center justify-between mb-5">
-            <h3 class="font-bold text-slate-800 flex items-center text-sm sm:text-base">
-              <i class="fa-solid fa-triangle-exclamation text-amber-500 mr-2.5"></i>
-              Productos con Stock Mínimo o Agotados
-            </h3>
-            <button onclick="navigate('compras')" class="text-xs font-semibold text-teal-600 hover:text-teal-700 transition flex items-center">
+      <!-- FILA 2: Analítica Visual con Chart.js -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
+        <!-- Gráfico Principal 8 cols: Flujo de Ventas vs Compras/Egresos -->
+        <div class="lg:col-span-8 soft-card p-4 sm:p-6 border border-slate-200/80 flex flex-col">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+            <div>
+              <h3 class="font-bold text-slate-800 text-sm sm:text-base flex items-center gap-2">
+                <i class="fa-solid fa-wave-square text-teal-600"></i>
+                Flujo de Ventas vs Compras / Egresos
+              </h3>
+              <p class="text-xs text-slate-500 mt-0.5">Comparativa diaria/mensual de facturación frente a compras y gastos en USD.</p>
+            </div>
+            <div id="dashFlujoResumenBadges" class="flex items-center gap-2 text-xs">
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-teal-50 text-teal-700 font-semibold border border-teal-100">
+                <span class="w-2 h-2 rounded-full bg-teal-600"></span>Ingresos
+              </span>
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 font-semibold border border-rose-100">
+                <span class="w-2 h-2 rounded-full bg-rose-500"></span>Egresos
+              </span>
+            </div>
+          </div>
+
+          <div class="relative flex-1 min-h-[260px] sm:min-h-[300px]">
+            <div id="dashChartFlujoSkeleton" class="hidden animate-pulse absolute inset-0 bg-slate-100/80 rounded-xl flex items-center justify-center">
+              <div class="text-center space-y-2">
+                <i class="fa-solid fa-chart-area text-3xl text-slate-300"></i>
+                <p class="text-xs text-slate-400 font-medium">Cargando serie financiera...</p>
+              </div>
+            </div>
+            <div id="dashChartFlujoEmpty" class="hidden absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-slate-50/70 rounded-xl border border-dashed border-slate-200">
+              <div class="w-12 h-12 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center text-xl mb-3">
+                <i class="fa-solid fa-chart-line"></i>
+              </div>
+              <p class="text-sm font-bold text-slate-700">Aún no registras ventas ni egresos en este período</p>
+              <p class="text-xs text-slate-500 mt-1 max-w-sm">Emite una factura o registra una compra para visualizar la curva de flujo financiero en tiempo real.</p>
+              <button type="button" onclick="navigate('facturacion')" class="mt-4 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs transition">
+                <i class="fa-solid fa-plus mr-1.5"></i>Emitir Primera Venta
+              </button>
+            </div>
+            <canvas id="dashChartFlujo" class="w-full h-full"></canvas>
+          </div>
+        </div>
+
+        <!-- Gráfico Secundario 4 cols: Dona Ingresos por Método de Pago -->
+        <div class="lg:col-span-4 soft-card p-4 sm:p-6 border border-slate-200/80 flex flex-col">
+          <div class="flex items-start justify-between gap-2 mb-4">
+            <div>
+              <h3 class="font-bold text-slate-800 text-sm sm:text-base flex items-center gap-2">
+                <i class="fa-solid fa-chart-pie text-sky-600"></i>
+                Ingresos por Método de Pago
+              </h3>
+              <p class="text-xs text-slate-500 mt-0.5">Distribución cobrada en USD equivalente.</p>
+            </div>
+          </div>
+
+          <div class="relative flex-1 min-h-[260px] sm:min-h-[300px] flex flex-col items-center justify-center">
+            <div id="dashChartPagosSkeleton" class="hidden animate-pulse absolute inset-0 bg-slate-100/80 rounded-xl flex items-center justify-center">
+              <div class="w-40 h-40 rounded-full border-8 border-slate-200"></div>
+            </div>
+            <div id="dashChartPagosEmpty" class="hidden absolute inset-0 flex flex-col items-center justify-center text-center p-5 bg-slate-50/70 rounded-xl border border-dashed border-slate-200">
+              <div class="w-12 h-12 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center text-xl mb-3">
+                <i class="fa-solid fa-wallet"></i>
+              </div>
+              <p class="text-sm font-bold text-slate-700">Sin cobros registrados en este período</p>
+              <p class="text-xs text-slate-500 mt-1">Aquí verás el peso de Efectivo, Pago Móvil, Zelle y Punto de Venta.</p>
+              <button type="button" onclick="navigate('facturacion')" class="mt-4 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs transition">
+                <i class="fa-solid fa-plus mr-1.5"></i>Emitir Primera Venta
+              </button>
+            </div>
+            <div id="dashChartPagosWrapper" class="w-full h-[220px] relative">
+              <canvas id="dashChartPagos"></canvas>
+            </div>
+            <div id="dashPagosLegend" class="w-full mt-3 space-y-1.5 max-h-24 overflow-y-auto pr-1 text-xs"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FILA 3: Centro de Acción Operativa -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
+        <!-- Izquierda 6 cols: Alertas de Stock Crítico + Pedidos Pendientes -->
+        <div class="lg:col-span-6 soft-card p-4 sm:p-6 border border-slate-200/80 flex flex-col">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 mb-4">
+            <div class="inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/70 self-start">
+              <button id="dashTabStockBtn" type="button" onclick="switchDashboardOpTab('stock')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-800 shadow-xs transition flex items-center gap-1.5">
+                <i class="fa-solid fa-triangle-exclamation text-amber-500"></i>
+                <span>Stock Crítico</span>
+                <span id="dashBadgeStockCount" class="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-700">0</span>
+              </button>
+              <button id="dashTabPedidosBtn" type="button" onclick="switchDashboardOpTab('pedidos')" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition flex items-center gap-1.5">
+                <i class="fa-solid fa-clipboard-list text-sky-600"></i>
+                <span>Pedidos Pendientes</span>
+                <span id="dashBadgePedidosCount" class="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800">0</span>
+              </button>
+            </div>
+
+            <button id="dashOpHeaderActionBtn" type="button" onclick="navigate('compras')" class="text-xs font-semibold text-teal-600 hover:text-teal-700 transition flex items-center self-start sm:self-auto">
               Cargar Compra <i class="fa-solid fa-arrow-right ml-1.5 text-[10px]"></i>
             </button>
           </div>
-          <div id="dashStockList" class="space-y-3 overflow-y-auto max-h-72 pr-1">
+
+          <div id="dashStockList" class="space-y-2.5 overflow-y-auto max-h-80 pr-1">
+            <!-- Dinámico -->
+          </div>
+          <div id="dashPedidosList" class="hidden space-y-2.5 overflow-y-auto max-h-80 pr-1">
             <!-- Dinámico -->
           </div>
         </div>
 
-        <!-- Últimas Facturas Emitidas -->
-        <div class="soft-card p-6">
-          <div class="flex items-center justify-between mb-5">
+        <!-- Derecha 6 cols: Últimas Facturas Registradas -->
+        <div class="lg:col-span-6 soft-card p-4 sm:p-6 border border-slate-200/80 flex flex-col">
+          <div class="flex items-center justify-between mb-4">
             <h3 class="font-bold text-slate-800 flex items-center text-sm sm:text-base">
               <i class="fa-solid fa-receipt text-teal-600 mr-2.5"></i>
               Últimas Facturas Registradas
             </h3>
-            <button onclick="navigate('facturacion')" class="text-xs font-semibold text-teal-600 hover:text-teal-700 transition flex items-center">
+            <button type="button" onclick="navigate('facturacion')" class="text-xs font-semibold text-teal-600 hover:text-teal-700 transition flex items-center">
               Ir a Facturación <i class="fa-solid fa-arrow-right ml-1.5 text-[10px]"></i>
             </button>
           </div>
-          <div id="dashFacturasList" class="space-y-3 overflow-y-auto max-h-72 pr-1">
+          <div id="dashFacturasList" class="space-y-2.5 overflow-y-auto max-h-80 pr-1">
             <!-- Dinámico -->
           </div>
         </div>
       </div>
 
-      <!-- Sección de Top 5 Productos y Top 5 Clientes -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- FILA 4: Rankings Top 5 Productos y Top 5 Clientes -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         <!-- Top 5 Productos Más Vendidos -->
-        <div class="soft-card p-6">
-          <div class="flex items-center justify-between mb-5">
+        <div class="soft-card p-4 sm:p-6 border border-slate-200/80">
+          <div class="flex items-center justify-between mb-4">
             <h3 class="font-bold text-slate-800 flex items-center text-sm sm:text-base">
               <i class="fa-solid fa-trophy text-amber-500 mr-2.5"></i>
               Top 5 Productos Más Vendidos
             </h3>
-            <button onclick="navigate('reportes')" class="text-xs font-semibold text-sky-600 hover:text-sky-700 transition flex items-center">
+            <button type="button" onclick="navigate('reportes')" class="text-xs font-semibold text-sky-600 hover:text-sky-700 transition flex items-center">
               Ver Reportes <i class="fa-solid fa-arrow-right ml-1.5 text-[10px]"></i>
             </button>
           </div>
@@ -556,14 +663,14 @@
         </div>
 
         <!-- Top 5 Mejores Clientes -->
-        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+        <div class="soft-card p-4 sm:p-6 border border-slate-200/80">
           <div class="flex items-center justify-between mb-4">
-            <h3 class="font-bold text-slate-800 flex items-center">
-              <i class="fa-solid fa-crown text-amber-500 mr-2"></i>
+            <h3 class="font-bold text-slate-800 flex items-center text-sm sm:text-base">
+              <i class="fa-solid fa-crown text-amber-500 mr-2.5"></i>
               Top 5 Mejores Clientes
             </h3>
-            <button onclick="navigate('clientes')" class="text-xs font-semibold text-teal-600 hover:text-teal-700">
-              Ver Clientes &rarr;
+            <button type="button" onclick="navigate('clientes')" class="text-xs font-semibold text-teal-600 hover:text-teal-700 transition flex items-center">
+              Ver Clientes <i class="fa-solid fa-arrow-right ml-1.5 text-[10px]"></i>
             </button>
           </div>
           <div id="dashTopClientesList" class="space-y-3">
@@ -7221,79 +7328,137 @@
   </div>
 
   <!-- ========================================================
-       MODAL CORPORATIVO: ACERCA DEL SISTEMA & LICENCIA PRO
+       MODAL CORPORATIVO: ACERCA DEL SISTEMA
        ======================================================== -->
   <div id="modalAcercaDe" class="modal-overlay hidden" onclick="if(event.target===this)closeAcercaDeModal()">
-    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden transform transition-all animate-fadeIn" onclick="event.stopPropagation()">
-      <!-- Encabezado con degradado tecnológico -->
-      <div class="bg-gradient-to-r from-[#071B49] via-[#0755C9] to-[#087FE8] text-white p-6 relative">
+    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden transform transition-all animate-fadeIn m-4" onclick="event.stopPropagation()">
+      <!-- Encabezado corporativo -->
+      <div class="bg-gradient-to-r from-[#071B49] via-[#0755C9] to-[#087FE8] text-white px-6 py-5 relative">
         <button onclick="closeAcercaDeModal()" class="absolute top-4 right-4 text-white/80 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition" aria-label="Cerrar">
-          <i class="fa-solid fa-xmark text-lg"></i>
+          <i class="fa-solid fa-xmark text-base"></i>
         </button>
         <div class="flex items-center space-x-3.5">
-          <div class="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-[#00C6E8] text-2xl shadow-md">
+          <div class="w-11 h-11 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center text-[#00C6E8] text-xl shrink-0">
             <i class="fa-solid fa-cloud"></i>
           </div>
           <div>
-            <span class="text-[10px] font-bold tracking-widest uppercase text-cyan-300 bg-blue-950/60 px-2 py-0.5 rounded border border-cyan-400/30">Enterprise SaaS Edition</span>
-            <h3 class="text-xl font-black text-white mt-1 leading-tight">TAVO CLOUD</h3>
-            <p class="text-xs text-blue-100/90 font-medium">Business Management System & Motor Multimoneda</p>
+            <h3 class="text-lg font-extrabold text-white leading-tight tracking-tight">TAVO CLOUD</h3>
+            <p class="text-xs text-blue-100/90 font-medium">Sistema de Gestión Empresarial & Facturación</p>
           </div>
         </div>
       </div>
 
-      <!-- Contenido de Especificaciones Técnicas y Certificación -->
+      <!-- Especificaciones Corporativas -->
       <div class="p-6 space-y-4 text-xs text-slate-600">
-        <!-- Tarjeta de Especificaciones de Software -->
-        <div class="grid grid-cols-2 gap-2.5 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 font-mono text-[11px]">
+        <div class="grid grid-cols-2 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
           <div>
-            <span class="text-slate-400 block text-[10px] font-sans font-semibold uppercase">Versión Comercial:</span>
-            <strong class="text-slate-800">v2.5.0 Enterprise Ready</strong>
+            <span class="text-slate-400 block text-[10px] font-semibold uppercase tracking-wide">Versión</span>
+            <strong class="text-slate-800 text-xs">v3.0 Corporativa</strong>
           </div>
           <div>
-            <span class="text-slate-400 block text-[10px] font-sans font-semibold uppercase">Motor Contable:</span>
-            <strong class="text-teal-700">CPP (NIC-2 / NIIF)</strong>
+            <span class="text-slate-400 block text-[10px] font-semibold uppercase tracking-wide">Costeo</span>
+            <strong class="text-slate-800 text-xs">Costo Promedio (CPP)</strong>
           </div>
           <div>
-            <span class="text-slate-400 block text-[10px] font-sans font-semibold uppercase">Multimoneda:</span>
-            <strong class="text-slate-800">USD / Bs. (BCV) / COP (TRM)</strong>
+            <span class="text-slate-400 block text-[10px] font-semibold uppercase tracking-wide">Monedas</span>
+            <strong class="text-slate-800 text-xs">USD / Bs. / COP</strong>
           </div>
           <div>
-            <span class="text-slate-400 block text-[10px] font-sans font-semibold uppercase">Impresión Oficial:</span>
-            <strong class="text-slate-800">DocumentPrinter Oficial</strong>
+            <span class="text-slate-400 block text-[10px] font-semibold uppercase tracking-wide">Seguridad</span>
+            <strong class="text-emerald-700 text-xs">Acceso por Roles</strong>
           </div>
         </div>
 
-        <!-- Créditos y Autoría Técnica Oficial -->
-        <div class="border border-teal-100 bg-teal-50/50 p-4 rounded-xl space-y-2">
+        <div class="border border-slate-200 bg-white p-4 rounded-xl space-y-1.5">
           <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-2">
-              <i class="fa-solid fa-microchip text-teal-600 text-base"></i>
-              <strong class="text-slate-800 text-xs font-bold tracking-wide">D-BIAN SYSTEM COMPUTER</strong>
-            </div>
-            <span class="bg-teal-600 text-white font-mono font-bold text-[10px] px-2 py-0.5 rounded-full">Autor Registrado</span>
+            <span class="text-slate-800 font-bold text-xs tracking-wide flex items-center gap-2">
+              <i class="fa-solid fa-building text-[#0755C9]"></i>
+              D-BIAN SYSTEM COMPUTER
+            </span>
+            <span class="text-[10px] font-semibold text-slate-500">© 2026</span>
           </div>
-          <div class="text-[11px] text-slate-700 space-y-1 pt-1 border-t border-teal-200/50">
-            <p><strong>Diseño, Arquitectura & Desarrollo:</strong> Ing. José Morales</p>
-            <p><strong>Identificación Profesional:</strong> <span class="font-mono font-semibold bg-white px-1.5 py-0.5 rounded border border-teal-200">V-165392830</span></p>
-            <p class="text-[10px] text-slate-500 pt-1">Todos los derechos reservados. Desarrollado con los más altos estándares de rigor transaccional, trazabilidad de costos e integridad contable.</p>
-          </div>
-        </div>
-
-        <!-- Estado de Certificación y Tests -->
-        <div class="flex items-center justify-between p-3 bg-emerald-50 border border-emerald-200/80 rounded-xl text-emerald-800">
-          <div class="flex items-center space-x-2">
-            <i class="fa-solid fa-circle-check text-emerald-600 text-sm"></i>
-            <span class="font-bold text-[11px]">Sistema Certificado & Auditoría Conciliada</span>
-          </div>
-          <span class="font-mono text-[10px] font-semibold bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">161/161 Tests Backend OK</span>
+          <p class="text-[11px] text-slate-600 pt-1 border-t border-slate-100">
+            <strong>Dirección y Desarrollo:</strong> Ing. José Morales
+          </p>
+          <p class="text-[11px] text-slate-500">
+            Plataforma empresarial diseñada para control operativo, inventario, tesorería y ventas multimoneda.
+          </p>
         </div>
       </div>
 
-      <!-- Pie del Modal -->
       <div class="bg-slate-50 px-6 py-3 border-t border-slate-200 flex justify-end">
         <button type="button" onclick="closeAcercaDeModal()" class="btn-theme-primary text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-xs transition">
-          Entendido / Cerrar
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       MODAL UNIFICADO: CONFIGURACIÓN DEL SISTEMA (SOLO SUPERADMIN)
+       ======================================================== -->
+  <div id="modalHubConfiguracion" class="modal-overlay hidden" onclick="if(event.target===this)closeConfigHubModal()">
+    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full overflow-hidden m-4" onclick="event.stopPropagation()">
+      <div class="bg-gradient-to-r from-[#071B49] via-[#0755C9] to-[#087FE8] text-white px-6 py-4 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center text-[#00C6E8]">
+            <i class="fa-solid fa-sliders text-base"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-base leading-tight">Configuración del Sistema</h3>
+            <p class="text-[11px] text-blue-100/90">Centro administrativo exclusivo para Super Usuario</p>
+          </div>
+        </div>
+        <button type="button" onclick="closeConfigHubModal()" class="text-white/80 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition" aria-label="Cerrar">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-3.5 bg-slate-50/50">
+        <button type="button" onclick="closeConfigHubModal(); openConfigModal();" class="text-left p-4 bg-white hover:bg-sky-50/50 border border-slate-200 hover:border-[#0755C9]/40 rounded-2xl shadow-2xs transition group flex items-start space-x-3.5">
+          <div class="w-10 h-10 rounded-xl bg-sky-50 text-[#0755C9] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+            <i class="fa-solid fa-building-gear text-base"></i>
+          </div>
+          <div>
+            <h4 class="font-bold text-sm text-slate-800 group-hover:text-[#0755C9] transition-colors">Configuración del Negocio</h4>
+            <p class="text-[11px] text-slate-500 mt-0.5 leading-snug">Datos fiscales, logotipo, porcentaje de IVA y parámetros generales.</p>
+          </div>
+        </button>
+
+        <button type="button" onclick="closeConfigHubModal(); openPersonalizacionModal();" class="text-left p-4 bg-white hover:bg-indigo-50/50 border border-slate-200 hover:border-indigo-400 rounded-2xl shadow-2xs transition group flex items-start space-x-3.5">
+          <div class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+            <i class="fa-solid fa-palette text-base"></i>
+          </div>
+          <div>
+            <h4 class="font-bold text-sm text-slate-800 group-hover:text-indigo-700 transition-colors">Personalizar Marca y Tema</h4>
+            <p class="text-[11px] text-slate-500 mt-0.5 leading-snug">Colores corporativos, esquema visual y nombres de módulos.</p>
+          </div>
+        </button>
+
+        <button type="button" onclick="closeConfigHubModal(); openFormatosImpresionModal();" class="text-left p-4 bg-white hover:bg-teal-50/50 border border-slate-200 hover:border-teal-400 rounded-2xl shadow-2xs transition group flex items-start space-x-3.5">
+          <div class="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+            <i class="fa-solid fa-print text-base"></i>
+          </div>
+          <div>
+            <h4 class="font-bold text-sm text-slate-800 group-hover:text-teal-700 transition-colors">Formatos de Impresión</h4>
+            <p class="text-[11px] text-slate-500 mt-0.5 leading-snug">Diseño de comprobantes, tickets térmicos y encabezados.</p>
+          </div>
+        </button>
+
+        <button type="button" onclick="closeConfigHubModal(); openDatabaseModal();" class="text-left p-4 bg-white hover:bg-emerald-50/50 border border-slate-200 hover:border-emerald-400 rounded-2xl shadow-2xs transition group flex items-start space-x-3.5">
+          <div class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+            <i class="fa-solid fa-database text-base"></i>
+          </div>
+          <div>
+            <h4 class="font-bold text-sm text-slate-800 group-hover:text-emerald-700 transition-colors">Base de Datos y Respaldos</h4>
+            <p class="text-[11px] text-slate-500 mt-0.5 leading-snug">Copias de seguridad, restauración, nube y mantenimiento.</p>
+          </div>
+        </button>
+      </div>
+
+      <div class="bg-white px-6 py-3 border-t border-slate-200 flex justify-end">
+        <button type="button" onclick="closeConfigHubModal()" class="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-xs font-semibold transition">
+          Cerrar
         </button>
       </div>
     </div>
