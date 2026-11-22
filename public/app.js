@@ -1,37 +1,32 @@
 // ==============================================================================
-// INTERCEPTOR GLOBAL DE SEGURIDAD HTTP (TOKEN BEARER EN TODAS LAS PETICIONES)
+// INTERCEPTOR GLOBAL DE SEGURIDAD HTTP (COOKIE HTTPONLY + ANTI-CSRF)
 // ==============================================================================
+try {
+  localStorage.removeItem('tavo_auth_token');
+} catch (e) {}
+
 const originalFetch = window.fetch;
 window.fetch = function(url, options = {}) {
-  const token = localStorage.getItem('tavo_auth_token');
   const csrf = localStorage.getItem('tavo_csrf_token');
   options.headers = options.headers || {};
+  if (!options.credentials) {
+    options.credentials = 'same-origin';
+  }
   const method = (options.method || 'GET').toUpperCase();
 
   if (options.headers instanceof Headers) {
-    if (token && !options.headers.has('Authorization')) {
-      options.headers.set('Authorization', `Bearer ${token}`);
-    }
     if (csrf && ['POST', 'PUT', 'DELETE'].includes(method) && !options.headers.has('X-CSRF-Token')) {
       options.headers.set('X-CSRF-Token', csrf);
     }
   } else if (Array.isArray(options.headers)) {
-    if (token) options.headers.push(['Authorization', `Bearer ${token}`]);
     if (csrf && ['POST', 'PUT', 'DELETE'].includes(method)) options.headers.push(['X-CSRF-Token', csrf]);
   } else {
-    if (token && !options.headers['Authorization']) {
-      options.headers['Authorization'] = `Bearer ${token}`;
-    }
     if (csrf && ['POST', 'PUT', 'DELETE'].includes(method) && !options.headers['X-CSRF-Token']) {
       options.headers['X-CSRF-Token'] = csrf;
     }
   }
 
   return originalFetch.call(this, url, options).then(response => {
-    const newToken = response.headers.get('X-New-Session-Token');
-    if (newToken) {
-      localStorage.setItem('tavo_auth_token', newToken);
-    }
     if (response.status === 401 && typeof url === 'string' && !url.includes('/api/auth/login')) {
       localStorage.removeItem('tavo_auth_token');
       localStorage.removeItem('tavo_csrf_token');
@@ -80,6 +75,7 @@ const AppState = {
   posFilterCategory: 'todos',
   ultimaFacturaEmitida: null,
   // Estado del Módulo Dedicado de Pedidos (Vendedores)
+  pedProductos: null,
   pedCart: [],
   pedTipoVenta: 'contado',
   pedFilterCategory: 'todos',
@@ -334,6 +330,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const pedCliResults = document.getElementById('pedClienteSearchResults');
     if (pedCliResults && !pedCliResults.contains(e.target) && e.target !== pedCliInput) {
       pedCliResults.classList.add('hidden');
+    }
+
+    const pedProdInput = document.getElementById('pedSearchProduct');
+    const pedProdResults = document.getElementById('pedProductSearchResults');
+    if (pedProdResults && !pedProdResults.contains(e.target) && e.target !== pedProdInput) {
+      pedProdResults.classList.add('hidden');
     }
   });
 });
@@ -1550,8 +1552,40 @@ async function probarConexionSupabase() {
   }
 }
 
-function downloadDatabaseBackup() {
-  window.location.href = '/api/database/backup';
+async function downloadDatabaseBackup() {
+  try {
+    if (typeof showToast === 'function') {
+      showToast('Preparando respaldo de base de datos...', 'info');
+    }
+    const resp = await fetch('/api/database/backup', { credentials: 'same-origin' });
+    if (!resp.ok) {
+      let msg = 'No se pudo descargar el respaldo de la base de datos.';
+      try {
+        const errData = await resp.json();
+        if (errData && errData.error) msg = errData.error;
+      } catch (_) {}
+      if (typeof showToast === 'function') showToast(msg, 'error');
+      return;
+    }
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const disp = resp.headers.get('Content-Disposition') || '';
+    const match = disp.match(/filename="?([^"]+)"?/i);
+    a.href = url;
+    a.download = (match && match[1]) ? match[1] : `inventario_respaldo_${new Date().toISOString().slice(0, 10)}.db`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+    if (typeof showToast === 'function') {
+      showToast('Respaldo descargado correctamente.', 'success');
+    }
+  } catch (e) {
+    if (typeof showToast === 'function') {
+      showToast('Error de conexión al descargar el respaldo.', 'error');
+    }
+  }
 }
 
 async function ejecutarAuditoriaBD() {
@@ -2039,23 +2073,29 @@ function populateCategoryDropdowns() {
 // ========================================================
 // MÓDULO 2: PRODUCTOS & SERVICIOS
 // ========================================================
-async function loadProductos() {
+async function loadProductos(ignoreFilters = false) {
   try {
-    const search = document.getElementById('prodSearchInput')?.value.trim() || '';
-    const tipo = document.getElementById('prodFilterTipo')?.value || '';
-    const categoriaId = document.getElementById('prodFilterCategoria')?.value || '';
+    const search = ignoreFilters ? '' : (document.getElementById('prodSearchInput')?.value.trim() || '');
+    const tipo = ignoreFilters ? '' : (document.getElementById('prodFilterTipo')?.value || '');
+    const categoriaId = ignoreFilters ? '' : (document.getElementById('prodFilterCategoria')?.value || '');
 
     const params = new URLSearchParams();
     if (search) params.append('q', search);
     if (tipo) params.append('tipo', tipo);
     if (categoriaId) params.append('categoria_id', categoriaId);
 
-    const res = await fetch(`/api/productos?${params.toString()}`);
+    const qs = params.toString();
+    const res = await fetch(qs ? `/api/productos?${qs}` : '/api/productos');
     if (!res.ok) return;
-    AppState.productos = await res.json();
+    const rows = await res.json();
+    AppState.productos = Array.isArray(rows) ? rows : [];
+    if (!qs) {
+      AppState.pedProductos = AppState.productos;
+    }
     renderProductosTable();
-    if (typeof renderPedCatalog === 'function' && AppState.currentView === 'pedidos') {
-      renderPedCatalog();
+    if (AppState.currentView === 'pedidos') {
+      if (typeof poblarSelectProductosPedido === 'function') poblarSelectProductosPedido();
+      if (typeof renderPedCatalog === 'function') renderPedCatalog();
     }
   } catch (err) {
     console.error("Error al cargar productos:", err);
@@ -14598,33 +14638,8 @@ function renderTablaArqueosTesoreria(cierres) {
 }
 
 // ============================================================================
-// CONTROLADORES DE MODALES DE TESORERÍA
+// CONTROLADORES DE CAJA ERP Y TESORERÍA
 // ============================================================================
-
-/**
- * Modal Apertura de Caja
- */
-function openModalAperturaCaja() {
-  const modal = document.getElementById('modalAperturaCaja');
-  const select = document.getElementById('aperturaCuentaId');
-  if (!modal || !select) return;
-
-  // Filtrar solo cuentas tipo caja_efectivo
-  const cajas = (AppState.tesoreria.cuentas || []).filter(c => c.tipo === 'caja_efectivo');
-  select.innerHTML = cajas.map(c => `
-    <option value="${c.id}">${c.nombre} (${c.moneda}) - Saldo actual: ${parseFloat(c.saldo_actual || 0).toFixed(2)}</option>
-  `).join('');
-
-  document.getElementById('aperturaMontoUsd').value = '0.00';
-  document.getElementById('aperturaMontoMoneda').value = '0.00';
-  document.getElementById('aperturaNotas').value = '';
-
-  modal.classList.remove('hidden');
-}
-
-function closeModalAperturaCaja() {
-  document.getElementById('modalAperturaCaja')?.classList.add('hidden');
-}
 
 /**
  * ==============================================================================
@@ -17575,11 +17590,12 @@ function _hideAuthBootScreen() {
 }
 
 async function initAuth() {
-  const token = localStorage.getItem('tavo_auth_token');
-  if (token) {
+  localStorage.removeItem('tavo_auth_token');
+  const csrf = localStorage.getItem('tavo_csrf_token');
+  if (csrf) {
     try {
       const resp = await originalFetch('/api/auth/me', {
-        headers: { 'Authorization': `Bearer ${token}` }
+        credentials: 'same-origin'
       });
       if (resp.ok) {
         const data = await resp.json();
@@ -17591,7 +17607,6 @@ async function initAuth() {
         await bootAuthenticatedWorkspace();
         return;
       }
-      localStorage.removeItem('tavo_auth_token');
       localStorage.removeItem('tavo_csrf_token');
       AppState.usuarioActual = null;
     } catch (e) {
@@ -17860,6 +17875,7 @@ async function ejecutarLogin(event) {
   try {
     const res = await originalFetch('/api/auth/login', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     });
@@ -17871,7 +17887,7 @@ async function ejecutarLogin(event) {
     }
 
     if (res.ok && data.success) {
-      localStorage.setItem('tavo_auth_token', data.token);
+      localStorage.removeItem('tavo_auth_token');
       if (data.csrf_token) {
         localStorage.setItem('tavo_csrf_token', data.csrf_token);
       }
@@ -17885,7 +17901,7 @@ async function ejecutarLogin(event) {
     } else {
       let friendlyMsg = data.error || 'Credenciales inválidas';
       if (res.status === 401) {
-        friendlyMsg = 'Usuario o contraseña incorrectos. Verifique sus credenciales (ej. usuario "admin").';
+        friendlyMsg = 'Usuario o contraseña incorrectos. Verifique sus credenciales e intente nuevamente.';
       }
       showLoginError(friendlyMsg);
       if (pwdInput) {
@@ -17904,9 +17920,8 @@ window.ejecutarLogin = ejecutarLogin;
 
 async function cerrarSesionActual() {
   try {
-    const token = localStorage.getItem('tavo_auth_token');
-    if (token) {
-      await fetch('/api/auth/logout', { method: 'POST' });
+    if (AppState.usuarioActual || localStorage.getItem('tavo_csrf_token')) {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
     }
   } catch (e) {}
   localStorage.removeItem('tavo_auth_token');
@@ -18973,6 +18988,7 @@ async function autorizarYFacturarPedido(pedidoId) {
         loadProductos()
       ];
       if (typeof cargarListaPedidosModulo === 'function') postF.push(cargarListaPedidosModulo());
+      if (typeof cargarCatalogoParaPedidos === 'function') postF.push(cargarCatalogoParaPedidos(false));
       if (typeof cargarDirectorioVendedores === 'function') postF.push(cargarDirectorioVendedores());
       if (typeof cargarReporteComisiones === 'function') postF.push(cargarReporteComisiones());
       const pUsr = AppState.usuarioActual?.permisos;
@@ -19041,6 +19057,7 @@ async function rechazarPedidoPrompt(pedidoId) {
       closeModalDetallePedido();
       const postR = [cargarPedidosAdmin(), loadProductos()];
       if (typeof cargarListaPedidosModulo === 'function') postR.push(cargarListaPedidosModulo());
+      if (typeof cargarCatalogoParaPedidos === 'function') postR.push(cargarCatalogoParaPedidos(false));
       await Promise.allSettled(postR);
     } else {
       alert('Error: ' + (data.error || 'No se pudo rechazar'));
@@ -19302,14 +19319,137 @@ function previewFormatoImpresionDirecto() {
 // ==============================================================================
 // MÓDULO DEDICADO: PEDIDOS & PREVENTAS PARA VENDEDORES (INDEPENDIENTE DE FACTURACIÓN)
 // ==============================================================================
-async function loadPedidosModulo() {
-  if (!Array.isArray(AppState.productos) || AppState.productos.length === 0) {
-    await loadProductos();
+async function cargarCatalogoParaPedidos(mostrarFeedback = false) {
+  const badge = document.getElementById('pedCatalogCountBadge');
+  const grid = document.getElementById('pedCatalogGrid');
+  try {
+    const res = await fetch('/api/productos');
+    if (!res.ok) {
+      let errMsg = `HTTP ${res.status}`;
+      try {
+        const errData = await res.json();
+        errMsg = errData.error || errMsg;
+      } catch (_) {}
+      if (badge) {
+        badge.textContent = 'Error al cargar';
+        badge.className = 'text-[10px] font-bold bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full border border-rose-200';
+      }
+      if (grid) {
+        grid.innerHTML = `<div class="col-span-full py-6 px-4 text-center text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-xl space-y-2"><p class="font-bold">No se pudieron cargar los productos de inventario (${escapeHtml(errMsg)}).</p><button type="button" onclick="cargarCatalogoParaPedidos(true)" class="px-3 py-1.5 bg-rose-600 text-white rounded-lg font-bold">Reintentar</button></div>`;
+      }
+      return;
+    }
+    const items = await res.json();
+    AppState.pedProductos = Array.isArray(items) ? items : [];
+    const hasFilter = document.getElementById('prodSearchInput')?.value.trim() || document.getElementById('prodFilterTipo')?.value || document.getElementById('prodFilterCategoria')?.value;
+    if (!hasFilter) {
+      AppState.productos = AppState.pedProductos;
+    }
+    poblarSelectProductosPedido();
+    renderPedCatalog();
+    if (mostrarFeedback && typeof showToast === 'function') {
+      showToast(`Inventario actualizado: ${AppState.pedProductos.length} productos disponibles`, 'success');
+    }
+  } catch (err) {
+    console.error('Error cargando catálogo para pedidos:', err);
+    if (badge) badge.textContent = 'Sin conexión';
   }
+}
+window.cargarCatalogoParaPedidos = cargarCatalogoParaPedidos;
+
+function poblarSelectProductosPedido() {
+  const sel = document.getElementById('pedProductoSelect');
+  const badge = document.getElementById('pedCatalogCountBadge');
+  const catalogo = Array.isArray(AppState.pedProductos) ? AppState.pedProductos : (AppState.productos || []);
+  const canNeg = AppState.usuarioActual?.permisos?.facturar_negativo === 1;
+
+  if (badge) {
+    badge.className = 'text-[10px] font-bold bg-blue-50 text-[#0755C9] px-2 py-0.5 rounded-full border border-blue-200';
+    badge.textContent = `${catalogo.length} en inventario`;
+  }
+  if (!sel) return;
+
+  const opts = catalogo.map(p => {
+    const esProd = p.tipo === 'producto';
+    const stkDisp = Math.max(0, parseFloat(p.stock || 0) - parseFloat(p.stock_comprometido || 0));
+    const agotado = esProd && !canNeg && stkDisp <= 0;
+    const stockTxt = esProd ? `Disp: ${stkDisp}` : 'Servicio';
+    const precioTxt = `$${parseFloat(p.precio_total || p.precio_base || 0).toFixed(2)}`;
+    return `<option value="${p.id}" ${agotado ? 'disabled' : ''}>[${escapeHtml(p.codigo || '')}] ${escapeHtml(p.nombre || '')} — ${stockTxt} — ${precioTxt}${agotado ? ' (Agotado)' : ''}</option>`;
+  }).join('');
+
+  sel.innerHTML = `<option value="">-- Seleccionar producto del inventario (${catalogo.length} disponibles) --</option>${opts}`;
+}
+window.poblarSelectProductosPedido = poblarSelectProductosPedido;
+
+function agregarProductoSelectPedido(prodIdParam = null) {
+  const sel = document.getElementById('pedProductoSelect');
+  const rawId = prodIdParam !== null && prodIdParam !== undefined ? prodIdParam : (sel ? sel.value : '');
+  if (!rawId) {
+    if (prodIdParam === null) {
+      alert('Seleccione un producto del menú desplegable para agregarlo al pedido.');
+    }
+    return;
+  }
+  addPedItem(parseInt(rawId, 10));
+  if (sel) sel.value = '';
+}
+window.agregarProductoSelectPedido = agregarProductoSelectPedido;
+
+function buscarProductoPedidoDropdown(query = '') {
+  const resDiv = document.getElementById('pedProductSearchResults');
+  if (!resDiv) return;
+  const catalogo = Array.isArray(AppState.pedProductos) ? AppState.pedProductos : (AppState.productos || []);
+  const q = (query || '').toLowerCase().trim();
+  const canNeg = AppState.usuarioActual?.permisos?.facturar_negativo === 1;
+
+  let matches = catalogo;
+  if (AppState.pedFilterCategory && AppState.pedFilterCategory !== 'todos') {
+    matches = matches.filter(p => p.tipo === AppState.pedFilterCategory);
+  }
+  if (q) {
+    matches = matches.filter(p =>
+      (p.nombre && p.nombre.toLowerCase().includes(q)) ||
+      (p.codigo && p.codigo.toLowerCase().includes(q)) ||
+      (p.categoria_nombre && p.categoria_nombre.toLowerCase().includes(q))
+    );
+  }
+
+  if (matches.length === 0) {
+    resDiv.innerHTML = '<div class="p-3 text-xs text-slate-400 text-center">No hay productos coincidentes en inventario.</div>';
+    resDiv.classList.remove('hidden');
+    return;
+  }
+
+  resDiv.innerHTML = matches.slice(0, 15).map(p => {
+    const esProd = p.tipo === 'producto';
+    const stkDisp = Math.max(0, parseFloat(p.stock || 0) - parseFloat(p.stock_comprometido || 0));
+    const agotado = esProd && !canNeg && stkDisp <= 0;
+    const precio = parseFloat(p.precio_total || p.precio_base || 0).toFixed(2);
+    return `
+      <div ${agotado ? '' : `onclick="addPedItem(${p.id}); document.getElementById('pedProductSearchResults')?.classList.add('hidden');"`}
+           class="p-2.5 flex items-center justify-between text-xs transition ${agotado ? 'opacity-50 cursor-not-allowed bg-slate-50' : 'hover:bg-blue-50 cursor-pointer'}">
+        <div class="min-w-0 pr-2">
+          <p class="font-bold text-slate-800 truncate">${escapeHtml(p.nombre)}</p>
+          <p class="text-[11px] text-slate-500 font-mono">${escapeHtml(p.codigo)} · ${esProd ? `Disp: <strong class="${agotado ? 'text-rose-600' : 'text-emerald-700'}">${stkDisp}</strong>` : 'Servicio'}</p>
+        </div>
+        <div class="flex items-center space-x-2 shrink-0">
+          <span class="font-extrabold text-[#0755C9]">$${precio}</span>
+          ${agotado ? '<span class="text-[10px] font-bold text-rose-600">Agotado</span>' : '<span class="px-2 py-1 bg-[#0755C9] text-white rounded-lg text-[10px] font-bold">+ Agregar</span>'}
+        </div>
+      </div>
+    `;
+  }).join('');
+  resDiv.classList.remove('hidden');
+}
+window.buscarProductoPedidoDropdown = buscarProductoPedidoDropdown;
+
+async function loadPedidosModulo() {
   if (!Array.isArray(AppState.clientes) || AppState.clientes.length === 0) {
     await loadClientes();
   }
   await Promise.allSettled([
+    cargarCatalogoParaPedidos(false),
     cargarVendedoresEnPedidos(),
     cargarListaPedidosModulo()
   ]);
@@ -19551,7 +19691,8 @@ function renderPedCatalog() {
   if (!grid) return;
 
   const search = document.getElementById('pedSearchProduct')?.value.toLowerCase().trim() || '';
-  let filtrados = AppState.productos || [];
+  const catalogo = Array.isArray(AppState.pedProductos) ? AppState.pedProductos : (AppState.productos || []);
+  let filtrados = catalogo;
 
   if (AppState.pedFilterCategory && AppState.pedFilterCategory !== 'todos') {
     filtrados = filtrados.filter(p => p.tipo === AppState.pedFilterCategory);
@@ -19564,7 +19705,7 @@ function renderPedCatalog() {
   }
 
   if (filtrados.length === 0) {
-    grid.innerHTML = '<div class="col-span-full py-8 text-center text-slate-400 text-xs">No hay ítems para mostrar en el catálogo de pedidos.</div>';
+    grid.innerHTML = `<div class="col-span-full py-8 text-center text-slate-400 text-xs space-y-2"><p>No hay ítems para mostrar en el catálogo de pedidos.</p><button type="button" onclick="cargarCatalogoParaPedidos(true)" class="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#0755C9] rounded-lg font-bold">Recargar Productos de Inventario</button></div>`;
     return;
   }
 
@@ -19624,20 +19765,23 @@ function handlePedCatalogKeydown(event) {
   event.preventDefault();
   const q = event.target.value.trim().toLowerCase();
   if (!q) return;
-  const prod = (AppState.productos || []).find(p =>
+  const catalogo = Array.isArray(AppState.pedProductos) ? AppState.pedProductos : (AppState.productos || []);
+  const prod = catalogo.find(p =>
     (p.codigo && p.codigo.toLowerCase() === q) ||
     (p.codigo_barras && p.codigo_barras.toLowerCase() === q)
   );
   if (prod) {
     addPedItem(prod.id);
     event.target.value = '';
+    document.getElementById('pedProductSearchResults')?.classList.add('hidden');
     renderPedCatalog();
   }
 }
 window.handlePedCatalogKeydown = handlePedCatalogKeydown;
 
 function addPedItem(productoId) {
-  const prod = (AppState.productos || []).find(p => Number(p.id) === Number(productoId));
+  const catalogo = Array.isArray(AppState.pedProductos) ? AppState.pedProductos : (AppState.productos || []);
+  const prod = catalogo.find(p => Number(p.id) === Number(productoId));
   if (!prod) return;
 
   const canNeg = AppState.usuarioActual?.permisos?.facturar_negativo === 1;
@@ -19888,7 +20032,7 @@ async function guardarPedidoModulo() {
       if (notasInp) notasInp.value = '';
       setPedTipoVenta('contado');
       await Promise.allSettled([
-        loadProductos(),
+        cargarCatalogoParaPedidos(false),
         cargarListaPedidosModulo(),
         typeof cargarPedidosAdmin === 'function' ? cargarPedidosAdmin() : Promise.resolve()
       ]);

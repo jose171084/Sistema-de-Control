@@ -19,6 +19,8 @@ import shutil
 import uuid
 import secrets
 import hashlib
+import gzip
+import logging
 import email.parser
 import email.policy
 from datetime import datetime, timedelta, timezone
@@ -34,7 +36,8 @@ from database import (
     obtener_estado_cuenta_cliente_cxc, obtener_estado_cuenta_proveedor_cxp,
     get_connection, init_db, DB_PATH, 
     limpiar_transacciones_db, restablecer_fabrica_db, 
-    schedule_cloud_sync, get_supabase_config,
+    schedule_cloud_sync, get_supabase_config, sync_to_supabase_storage,
+    export_consistent_db_bytes, cleanup_wal_sidecars, to_decimal, d_round,
     auditar_y_migrar_db, migrar_historico_inventario,
     conciliar_inventario, registrar_movimiento_inventario,
     calcular_cpp_entrada, calcular_valor_salida_cpp, validar_stock_no_negativo,
@@ -53,6 +56,13 @@ from database import (
 from inventario_ia import diagnosticar_inventario_organico, simular_impacto_precio
 import cfo_copilot
 
+server_logger = logging.getLogger("tavo.server")
+if not server_logger.handlers:
+    _srv_handler = logging.StreamHandler()
+    _srv_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"))
+    server_logger.addHandler(_srv_handler)
+    server_logger.setLevel(logging.INFO)
+
 PORT = int(os.environ.get("PORT", 8000))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PUBLIC_DIR = os.path.join(BASE_DIR, "public")
@@ -63,13 +73,11 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 def obtener_tasas_oficiales():
     """
-    Consulta las tasas oficiales en tiempo real:
+    Consulta las tasas oficiales en tiempo real con verificación TLS estricta:
     - BCV (Banco Central de Venezuela): ve.dolarapi.com/v1/dolares/oficial con fallback scraping bcv.org.ve
     - TRM Colombia: open.er-api.com y api.exchangerate-api.com
     """
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    ctx_strict = ssl.create_default_context()
 
     tasa_ves = None
     tasa_cop = None
@@ -82,7 +90,7 @@ def obtener_tasas_oficiales():
             'https://ve.dolarapi.com/v1/dolares/oficial', 
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         )
-        with urllib.request.urlopen(req_ves, timeout=4, context=ctx) as r:
+        with urllib.request.urlopen(req_ves, timeout=4, context=ctx_strict) as r:
             data_ves = json.loads(r.read().decode('utf-8'))
             val_ves = data_ves.get('promedio')
             if val_ves:
@@ -95,13 +103,16 @@ def obtener_tasas_oficiales():
                 'https://www.bcv.org.ve',
                 headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
             )
-            with urllib.request.urlopen(req_bcv, timeout=4, context=ctx) as r_bcv:
+            with urllib.request.urlopen(req_bcv, timeout=4, context=ctx_strict) as r_bcv:
                 html = r_bcv.read().decode('utf-8', errors='ignore')
                 m = re.search(r'id=[\"\']dolar[\"\'].*?<strong[^>]*>\s*([0-9.,]+)\s*</strong>', html, re.DOTALL | re.IGNORECASE)
                 if m:
                     val_str = m.group(1).strip().replace('.', '').replace(',', '.')
                     tasa_ves = round(float(val_str), 4)
                     fuentes.append("BCV Oficial (Web Directa)")
+        except ssl.SSLCertVerificationError as e_ssl:
+            server_logger.warning(f"Certificado TLS no verificado en bcv.org.ve fallback: {e_ssl}")
+            errores.append(f"BCV Directo TLS: {str(e_ssl)}")
         except Exception as e_bcv:
             errores.append(f"BCV Directo: {str(e_bcv)}")
 
@@ -112,7 +123,7 @@ def obtener_tasas_oficiales():
                 url_cop, 
                 headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
             )
-            with urllib.request.urlopen(req_cop, timeout=4, context=ctx) as r:
+            with urllib.request.urlopen(req_cop, timeout=4, context=ctx_strict) as r:
                 data_cop = json.loads(r.read().decode('utf-8'))
                 rates = data_cop.get("rates", {})
                 if "COP" in rates and rates["COP"]:
@@ -129,9 +140,44 @@ def obtener_tasas_oficiales():
 
 class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
+    def setup(self):
+        super().setup()
+        try:
+            self.connection.settimeout(30.0)
+        except Exception:
+            pass
+
+    def _is_https_request(self) -> bool:
+        proto = (self.headers.get("X-Forwarded-Proto") or "").lower()
+        return proto == "https" or bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"))
+
+    def _build_session_cookie(self, token: str, max_age: int = 28800) -> str:
+        cookie = f"{security_core.SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={max_age}"
+        if self._is_https_request():
+            cookie += "; Secure"
+        return cookie
+
+    def _build_clear_cookie(self) -> str:
+        cookie = f"{security_core.SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"
+        if self._is_https_request():
+            cookie += "; Secure"
+        return cookie
+
+    def _gzip_if_accepted(self, raw_bytes: bytes, content_type: str):
+        accept_enc = (self.headers.get("Accept-Encoding") or "").lower()
+        compressible = (
+            content_type.startswith("application/json")
+            or content_type.startswith("text/")
+            or "javascript" in content_type
+            or "svg+xml" in content_type
+        )
+        if compressible and len(raw_bytes) >= 1024 and "gzip" in accept_enc:
+            return gzip.compress(raw_bytes, compresslevel=6), True
+        return raw_bytes, False
+
     def get_current_user_and_perms(self):
         """
-        Extrae y valida el token Bearer del header Authorization o cookie.
+        Extrae y valida el token Bearer del header Authorization o cookie HttpOnly.
         Retorna (payload_dict, permisos_dict). Si no hay token válido, retorna (None, None).
         Cero bypass: Erradicación definitiva de fallback automático a SuperAdmin.
         """
@@ -150,17 +196,8 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 pass
             return {"uid": uid, "usr": f"user_{uid}", "rol": rol}, s.get("perms", {})
 
-        # 2. Extracción directa segura
-        auth_header = self.headers.get("Authorization", "")
-        token = None
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:].strip()
-        elif "token=" in self.headers.get("Cookie", ""):
-            for part in self.headers.get("Cookie", "").split(";"):
-                if part.strip().startswith("token="):
-                    token = part.strip()[6:]
-                    break
-
+        # 2. Extracción directa segura (Authorization Bearer o Cookie HttpOnly)
+        token, _ = security_core.extraer_jwt_de_headers(self.headers)
         if token:
             payload = security_core.decodificar_y_verificar_jwt(token)
             if payload:
@@ -178,27 +215,48 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         return None, None
 
 
-    def send_json(self, data, status=200):
+    def send_json(self, data, status=200, extra_headers=None, cookies=None):
+        raw_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        payload_bytes, is_gzipped = self._gzip_if_accepted(raw_bytes, "application/json")
+
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload_bytes)))
+        if is_gzipped:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token, Idempotency-Key")
         self.send_header("Access-Control-Expose-Headers", "X-New-Session-Token")
+        if getattr(self, "_pending_new_jwt", None):
+            self.send_header("X-New-Session-Token", self._pending_new_jwt)
+            self.send_header("Set-Cookie", self._build_session_cookie(self._pending_new_jwt))
+        if cookies:
+            for c_val in cookies:
+                self.send_header("Set-Cookie", c_val)
+        if extra_headers:
+            for k, v in extra_headers.items():
+                self.send_header(k, v)
         self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+        self.wfile.write(payload_bytes)
 
-    def send_error_json(self, message, status=400):
-        self.send_json({"error": message, "success": False}, status=status)
+    def send_error_json(self, message, status=400, extra_headers=None):
+        self.send_json({"error": message, "success": False}, status=status, extra_headers=extra_headers)
 
     def parse_body_json(self):
         try:
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length == 0:
                 return {}
+            if content_length < 0 or content_length > 30 * 1024 * 1024:
+                return None
             body_bytes = self.rfile.read(content_length)
             return json.loads(body_bytes.decode("utf-8"))
-        except Exception as e:
+        except Exception:
             return None
 
     def do_OPTIONS(self):
@@ -231,15 +289,23 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             self.serve_file(file_path)
             return
 
-        # Frontend SPA
-        rel_path = path.lstrip("/")
+        # Frontend SPA con protección anti-Path Traversal y bloqueo de archivos .bak
+        raw_rel = urllib.parse.unquote(path).lstrip("/")
+        if ".." in raw_rel.split("/") or ".." in raw_rel.split("\\") or ".bak" in raw_rel.lower():
+            self.send_error_json("Acceso denegado", 403)
+            return
+        rel_path = raw_rel
         if not rel_path or rel_path == "":
             rel_path = "index.html"
         elif rel_path in ["catalogo", "catalogo/"]:
             rel_path = "catalogo.html"
-        file_path = os.path.join(PUBLIC_DIR, rel_path)
+        safe_public = os.path.abspath(PUBLIC_DIR)
+        file_path = os.path.abspath(os.path.join(safe_public, rel_path))
+        if not file_path.startswith(safe_public + os.sep) and file_path != safe_public:
+            self.send_error_json("Acceso denegado: Path traversal detectado", 403)
+            return
         if not os.path.exists(file_path) or os.path.isdir(file_path):
-            file_path = os.path.join(PUBLIC_DIR, "index.html")
+            file_path = os.path.join(safe_public, "index.html")
         self.serve_file(file_path)
 
     # --- ENRUTADOR POST ---
@@ -288,22 +354,43 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
         try:
             with open(filepath, "rb") as f:
-                content = f.read()
+                raw_content = f.read()
+
+            etag = '"' + hashlib.sha256(raw_content).hexdigest()[:16] + '"'
+            if_none_match = self.headers.get("If-None-Match", "")
+            is_web_asset = filepath.lower().endswith((".html", ".js", ".css", ".json", ".svg"))
+
+            if if_none_match and etag in if_none_match:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                if is_web_asset:
+                    self.send_header("Cache-Control", "no-cache, must-revalidate")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                return
+
+            payload, is_gzipped = self._gzip_if_accepted(raw_content, mime_type)
+
             self.send_response(200)
             self.send_header("Content-Type", mime_type)
-            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("ETag", etag)
+            if is_gzipped:
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "SAMEORIGIN")
+            self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
             self.send_header("Access-Control-Allow-Origin", "*")
-            # Headers anti-cache estrictos para desarrollo continuo y despliegues
-            if filepath.lower().endswith((".html", ".js", ".css", ".json")):
-                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0")
-                self.send_header("Pragma", "no-cache")
-                self.send_header("Expires", "0")
+            if is_web_asset:
+                self.send_header("Cache-Control", "no-cache, must-revalidate")
             self.end_headers()
-            self.wfile.write(content)
+            self.wfile.write(payload)
         except Exception as e:
+            server_logger.exception(f"Error sirviendo archivo estático {filepath}: {e}")
             self.send_response(500)
             self.end_headers()
-            self.wfile.write(str(e).encode())
+            self.wfile.write(b"Error interno del servidor")
 
     # ==========================================
     # CONTROLADORES DE LA API (GET)
@@ -475,32 +562,72 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             elif path == "/api/comisiones/reporte":
                 mes = query.get("mes", [datetime.now().strftime("%Y-%m")])[0]
-                cursor.execute("""
-                    SELECT v.id as vendedor_id, v.codigo, v.nombre, v.porcentaje_comision_base, v.meta_mensual_usd,
-                           COALESCE(COUNT(f.id), 0) as total_facturas,
-                           COALESCE(SUM(f.total_usd), 0.0) as total_ventas_usd,
-                           COALESCE(SUM(f.comision_monto_usd), 0.0) as comisiones_totales_usd,
-                           COALESCE(SUM(CASE WHEN f.comision_estado = 'DEVENGADA' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_devengadas_usd,
-                           COALESCE(SUM(CASE WHEN f.comision_estado = 'PENDIENTE' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_pendientes_usd
-                    FROM vendedores v
-                    LEFT JOIN facturas f ON f.vendedor_id = v.id AND f.fecha LIKE ? AND f.estado != 'anulada'
-                    GROUP BY v.id
-                    ORDER BY total_ventas_usd DESC
-                """, (f"{mes}%",))
-                resumen = [dict(r) for r in cursor.fetchall()]
+                user_tok, perms = self.get_current_user_and_perms()
+                own_vendedor_id = None
+                if perms and perms.get("facturar_directo", 1) == 0:
+                    uid = user_tok.get("uid") if user_tok else None
+                    if uid:
+                        cursor.execute("SELECT id FROM vendedores WHERE usuario_id = ? AND activo = 1", (uid,))
+                        v_row = cursor.fetchone()
+                        own_vendedor_id = v_row["id"] if v_row else -1
+                    else:
+                        own_vendedor_id = -1
 
-                cursor.execute("""
-                    SELECT f.id, f.numero_factura, f.fecha, f.total_usd, f.tipo_venta, f.estado,
-                           f.vendedor_id, v.nombre as vendedor_nombre,
-                           f.comision_porcentaje, f.comision_monto_usd, f.comision_estado,
-                           c.nombre as cliente_nombre
-                    FROM facturas f
-                    LEFT JOIN vendedores v ON f.vendedor_id = v.id
-                    LEFT JOIN clientes c ON f.cliente_id = c.id
-                    WHERE f.fecha LIKE ? AND f.estado != 'anulada' AND f.vendedor_id IS NOT NULL
-                    ORDER BY f.id DESC
-                """, (f"{mes}%",))
-                facturas_comision = [dict(r) for r in cursor.fetchall()]
+                if own_vendedor_id is not None:
+                    cursor.execute("""
+                        SELECT v.id as vendedor_id, v.codigo, v.nombre, v.porcentaje_comision_base, v.meta_mensual_usd,
+                               COALESCE(COUNT(f.id), 0) as total_facturas,
+                               COALESCE(SUM(f.total_usd), 0.0) as total_ventas_usd,
+                               COALESCE(SUM(f.comision_monto_usd), 0.0) as comisiones_totales_usd,
+                               COALESCE(SUM(CASE WHEN f.comision_estado = 'DEVENGADA' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_devengadas_usd,
+                               COALESCE(SUM(CASE WHEN f.comision_estado = 'PENDIENTE' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_pendientes_usd
+                        FROM vendedores v
+                        LEFT JOIN facturas f ON f.vendedor_id = v.id AND f.fecha LIKE ? AND f.estado != 'anulada'
+                        WHERE v.id = ?
+                        GROUP BY v.id
+                        ORDER BY total_ventas_usd DESC
+                    """, (f"{mes}%", own_vendedor_id))
+                    resumen = [dict(r) for r in cursor.fetchall()]
+
+                    cursor.execute("""
+                        SELECT f.id, f.numero_factura, f.fecha, f.total_usd, f.tipo_venta, f.estado,
+                               f.vendedor_id, v.nombre as vendedor_nombre,
+                               f.comision_porcentaje, f.comision_monto_usd, f.comision_estado,
+                               c.nombre as cliente_nombre
+                        FROM facturas f
+                        LEFT JOIN vendedores v ON f.vendedor_id = v.id
+                        LEFT JOIN clientes c ON f.cliente_id = c.id
+                        WHERE f.fecha LIKE ? AND f.estado != 'anulada' AND f.vendedor_id = ?
+                        ORDER BY f.id DESC
+                    """, (f"{mes}%", own_vendedor_id))
+                    facturas_comision = [dict(r) for r in cursor.fetchall()]
+                else:
+                    cursor.execute("""
+                        SELECT v.id as vendedor_id, v.codigo, v.nombre, v.porcentaje_comision_base, v.meta_mensual_usd,
+                               COALESCE(COUNT(f.id), 0) as total_facturas,
+                               COALESCE(SUM(f.total_usd), 0.0) as total_ventas_usd,
+                               COALESCE(SUM(f.comision_monto_usd), 0.0) as comisiones_totales_usd,
+                               COALESCE(SUM(CASE WHEN f.comision_estado = 'DEVENGADA' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_devengadas_usd,
+                               COALESCE(SUM(CASE WHEN f.comision_estado = 'PENDIENTE' THEN f.comision_monto_usd ELSE 0 END), 0.0) as comisiones_pendientes_usd
+                        FROM vendedores v
+                        LEFT JOIN facturas f ON f.vendedor_id = v.id AND f.fecha LIKE ? AND f.estado != 'anulada'
+                        GROUP BY v.id
+                        ORDER BY total_ventas_usd DESC
+                    """, (f"{mes}%",))
+                    resumen = [dict(r) for r in cursor.fetchall()]
+
+                    cursor.execute("""
+                        SELECT f.id, f.numero_factura, f.fecha, f.total_usd, f.tipo_venta, f.estado,
+                               f.vendedor_id, v.nombre as vendedor_nombre,
+                               f.comision_porcentaje, f.comision_monto_usd, f.comision_estado,
+                               c.nombre as cliente_nombre
+                        FROM facturas f
+                        LEFT JOIN vendedores v ON f.vendedor_id = v.id
+                        LEFT JOIN clientes c ON f.cliente_id = c.id
+                        WHERE f.fecha LIKE ? AND f.estado != 'anulada' AND f.vendedor_id IS NOT NULL
+                        ORDER BY f.id DESC
+                    """, (f"{mes}%",))
+                    facturas_comision = [dict(r) for r in cursor.fetchall()]
                 self.send_json({"periodo": mes, "resumen": resumen, "facturas": facturas_comision})
                 return
 
@@ -525,18 +652,19 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json("Archivo de base de datos no encontrado", 404)
                     return
                 try:
-                    with open(DB_PATH, "rb") as f:
-                        content = f.read()
+                    content = export_consistent_db_bytes(DB_PATH)
                     self.send_response(200)
                     self.send_header("Content-Type", "application/x-sqlite3")
                     self.send_header("Content-Disposition", f'attachment; filename="inventario_respaldo_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db"')
                     self.send_header("Content-Length", str(len(content)))
+                    self.send_header("X-Content-Type-Options", "nosniff")
                     self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(content)
                     return
                 except Exception as e:
-                    self.send_error_json(f"Error al exportar base de datos: {str(e)}", 500)
+                    server_logger.exception(f"Error al exportar base de datos: {e}")
+                    self.send_error_json("Error al exportar base de datos.", 500)
                     return
 
             # Estado de Persistencia y Estadísticas de la Base de Datos (Auditoría Render / Cloud)
@@ -669,13 +797,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             # 2. Resumen del Dashboard
             elif path == "/api/dashboard":
-                cursor.execute("SELECT COUNT(*) FROM productos WHERE tipo = 'producto'")
+                cursor.execute("SELECT COUNT(*) FROM productos WHERE tipo = 'producto' AND COALESCE(activo, 1) = 1")
                 total_productos = cursor.fetchone()[0]
 
-                cursor.execute("SELECT COUNT(*) FROM productos WHERE tipo = 'servicio'")
+                cursor.execute("SELECT COUNT(*) FROM productos WHERE tipo = 'servicio' AND COALESCE(activo, 1) = 1")
                 total_servicios = cursor.fetchone()[0]
 
-                cursor.execute("SELECT COUNT(*) FROM productos WHERE tipo = 'producto' AND stock <= stock_minimo")
+                cursor.execute("SELECT COUNT(*) FROM productos WHERE tipo = 'producto' AND COALESCE(activo, 1) = 1 AND stock <= stock_minimo")
                 alertas_stock = cursor.fetchone()[0]
 
                 cursor.execute("SELECT COUNT(*) FROM clientes")
@@ -690,7 +818,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 ventas_total_usd = round(facturas_row[1] or 0.0, 2)
 
                 # Total de Devoluciones y Ventas Netas
-                cursor.execute("SELECT COUNT(*), COALESCE(SUM(total_usd), 0) FROM devoluciones")
+                cursor.execute("SELECT COUNT(*), COALESCE(SUM(total_usd), 0) FROM devoluciones WHERE COALESCE(estado, 'activa') != 'anulada'")
                 dev_row = cursor.fetchone()
                 total_devoluciones = dev_row[0]
                 total_devoluciones_usd = round(dev_row[1] or 0.0, 2)
@@ -699,30 +827,30 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 # Ventas del día (brutas y netas restando devoluciones de hoy)
                 cursor.execute("SELECT COALESCE(SUM(total_usd), 0) FROM facturas WHERE estado != 'anulada' AND date(fecha) = date('now')")
                 ventas_hoy_brutas = round(cursor.fetchone()[0] or 0.0, 2)
-                cursor.execute("SELECT COALESCE(SUM(total_usd), 0) FROM devoluciones WHERE date(fecha_emision) = date('now')")
+                cursor.execute("SELECT COALESCE(SUM(total_usd), 0) FROM devoluciones WHERE COALESCE(estado, 'activa') != 'anulada' AND date(fecha_emision) = date('now')")
                 dev_hoy_usd = round(cursor.fetchone()[0] or 0.0, 2)
                 ventas_hoy_netas = max(0.0, round(ventas_hoy_brutas - dev_hoy_usd, 2))
 
-                cursor.execute("SELECT COUNT(*), COALESCE(SUM(total), 0) FROM compras")
+                cursor.execute("SELECT COUNT(*), COALESCE(SUM(total), 0) FROM compras WHERE COALESCE(estado, 'activa') != 'anulada'")
                 compras_row = cursor.fetchone()
                 total_compras = compras_row[0]
                 compras_total_usd = compras_row[1]
 
                 # Últimas 5 facturas
                 cursor.execute("""
-                    SELECT f.*, c.nombre as cliente_nombre 
+                    SELECT f.*, COALESCE(c.nombre, 'Cliente General') as cliente_nombre 
                     FROM facturas f 
-                    JOIN clientes c ON f.cliente_id = c.id 
+                    LEFT JOIN clientes c ON f.cliente_id = c.id 
                     ORDER BY f.id DESC LIMIT 5
                 """)
                 ultimas_facturas = [dict(r) for r in cursor.fetchall()]
 
                 # Productos con poco stock
                 cursor.execute("""
-                    SELECT p.*, c.nombre as categoria_nombre 
+                    SELECT p.*, COALESCE(c.nombre, 'General') as categoria_nombre 
                     FROM productos p
-                    JOIN categorias c ON p.categoria_id = c.id
-                    WHERE p.tipo = 'producto' AND p.stock <= p.stock_minimo
+                    LEFT JOIN categorias c ON p.categoria_id = c.id
+                    WHERE p.tipo = 'producto' AND COALESCE(p.activo, 1) = 1 AND p.stock <= p.stock_minimo
                     ORDER BY p.stock ASC LIMIT 5
                 """)
                 productos_bajo_stock = [dict(r) for r in cursor.fetchall()]
@@ -733,6 +861,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         COALESCE(SUM(saldo_pendiente), 0) as total_saldo_usd,
                         COUNT(CASE WHEN estado IN ('pendiente', 'parcial') THEN 1 END) as cuentas_pendientes
                     FROM cuentas_por_cobrar
+                    WHERE COALESCE(estado, 'pendiente') != 'anulada'
                 """)
                 cxc_dash_row = cursor.fetchone()
                 cxc_total_usd = round(cxc_dash_row[0] or 0.0, 2)
@@ -752,6 +881,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         COALESCE(SUM(saldo_pendiente), 0) as total_saldo_usd,
                         COUNT(CASE WHEN estado IN ('pendiente', 'parcial') THEN 1 END) as cuentas_pendientes
                     FROM cuentas_por_pagar
+                    WHERE COALESCE(estado, 'pendiente') != 'anulada'
                 """)
                 cxp_dash_row = cursor.fetchone()
                 cxp_total_usd = round(cxp_dash_row[0] or 0.0, 2)
@@ -771,6 +901,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     FROM factura_detalles fd
                     JOIN facturas f ON fd.factura_id = f.id
                     LEFT JOIN productos p ON fd.producto_id = p.id
+                    WHERE f.estado != 'anulada'
                     GROUP BY fd.producto_id, fd.nombre_producto
                     ORDER BY total_vendido DESC
                     LIMIT 5
@@ -788,6 +919,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         ROUND(COALESCE(SUM(f.total_usd), 0), 2) as total_comprado_usd
                     FROM facturas f
                     JOIN clientes c ON f.cliente_id = c.id
+                    WHERE f.estado != 'anulada'
                     GROUP BY c.id, c.nombre, c.cedula, c.telefono
                     ORDER BY total_comprado_usd DESC
                     LIMIT 5
@@ -841,12 +973,12 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 search = query.get("q", [None])[0]
 
                 sql = """
-                    SELECT p.*, c.nombre as categoria_nombre, c.tipo as categoria_tipo,
+                    SELECT p.*, COALESCE(c.nombre, 'General') as categoria_nombre, c.tipo as categoria_tipo,
                            COALESCE(p.stock_comprometido, 0.0) as stock_comprometido,
                            MAX(0.0, p.stock - COALESCE(p.stock_comprometido, 0.0)) as stock_disponible
                     FROM productos p 
-                    JOIN categorias c ON p.categoria_id = c.id 
-                    WHERE p.activo = 1
+                    LEFT JOIN categorias c ON p.categoria_id = c.id 
+                    WHERE COALESCE(p.activo, 1) = 1
                 """
                 params = []
 
@@ -885,13 +1017,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
                 sql_cat = """
                     SELECT p.id, p.codigo, p.nombre, p.descripcion, p.categoria_id,
-                           c.nombre as categoria_nombre, p.tipo, p.precio_base, p.precio_total,
+                           COALESCE(c.nombre, 'General') as categoria_nombre, p.tipo, p.precio_base, p.precio_total,
                            p.stock, COALESCE(p.stock_comprometido, 0.0) as stock_comprometido,
                            MAX(0.0, p.stock - COALESCE(p.stock_comprometido, 0.0)) as stock_disponible,
                            p.imagen, p.impuesto_tipo
                     FROM productos p
-                    JOIN categorias c ON p.categoria_id = c.id
-                    WHERE p.activo = 1
+                    LEFT JOIN categorias c ON p.categoria_id = c.id
+                    WHERE COALESCE(p.activo, 1) = 1
                 """
                 params_cat = []
                 if cat_filtro:
@@ -931,9 +1063,9 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             elif path.startswith("/api/productos/"):
                 item_id = path.split("/")[-1]
                 cursor.execute("""
-                    SELECT p.*, c.nombre as categoria_nombre 
+                    SELECT p.*, COALESCE(c.nombre, 'General') as categoria_nombre 
                     FROM productos p 
-                    JOIN categorias c ON p.categoria_id = c.id 
+                    LEFT JOIN categorias c ON p.categoria_id = c.id 
                     WHERE p.id = ?
                 """, (item_id,))
                 row = cursor.fetchone()
@@ -1002,7 +1134,21 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 cursor.execute("SELECT * FROM clientes WHERE id = ?", (c_id,))
                 row = cursor.fetchone()
                 if row:
-                    self.send_json(dict(row))
+                    cli_dict = dict(row)
+                    user_tok, perms = self.get_current_user_and_perms()
+                    if perms and perms.get("facturar_directo", 1) == 0:
+                        usuario_id = user_tok.get("uid") if user_tok else None
+                        own_v_id = None
+                        if usuario_id:
+                            cursor.execute("SELECT id FROM vendedores WHERE usuario_id = ? AND activo = 1", (usuario_id,))
+                            v_row = cursor.fetchone()
+                            if v_row:
+                                own_v_id = v_row["id"]
+                        es_mostrador = (cli_dict.get("id") == 1 or cli_dict.get("cedula") == "V-00000000")
+                        if cli_dict.get("vendedor_id") is not None and not es_mostrador and cli_dict.get("vendedor_id") != own_v_id:
+                            self.send_error_json("Acceso denegado: este cliente pertenece a la cartera de otro asesor comercial.", 403)
+                            return
+                    self.send_json(cli_dict)
                 else:
                     self.send_error_json("Cliente no encontrado", 404)
 
@@ -1042,10 +1188,12 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             elif path.startswith("/api/facturas/"):
                 f_id = path.split("/")[-1]
                 cursor.execute("""
-                    SELECT f.*, c.nombre as cliente_nombre, c.cedula as cliente_cedula, 
-                           c.telefono as cliente_telefono, c.correo as cliente_correo, c.direccion as cliente_direccion
+                    SELECT f.*, COALESCE(c.nombre, 'Cliente General') as cliente_nombre,
+                           COALESCE(c.cedula, '-') as cliente_cedula, 
+                           COALESCE(c.telefono, '-') as cliente_telefono,
+                           c.correo as cliente_correo, c.direccion as cliente_direccion
                     FROM facturas f 
-                    JOIN clientes c ON f.cliente_id = c.id 
+                    LEFT JOIN clientes c ON f.cliente_id = c.id 
                     WHERE f.id = ?
                 """, (f_id,))
                 factura = cursor.fetchone()
@@ -1504,16 +1652,6 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             # 10. Devoluciones
 
             # DEVOLUCIONES DE COMPRAS (PROVEEDORES)
-            elif path == "/api/configuracion/impresion":
-                cfg_actualizada = database.guardar_config_impresion(body, tenant_id=1)
-                schedule_cloud_sync()
-                self.send_json({
-                    "success": True,
-                    "message": "Configuración de formatos de impresión guardada exitosamente",
-                    "config": cfg_actualizada,
-                    **cfg_actualizada
-                })
-
             elif path == "/api/devoluciones-compras":
                 cursor.execute("""
                     SELECT dc.*, p.nombre as proveedor_nombre, p.cedula as proveedor_rif, p.telefono as proveedor_telefono
@@ -2958,9 +3096,10 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 restablecer_fabrica_db(confirmacion)
                 self.send_json({
                     "success": True,
-                    "message": "Base de datos restablecida a valores de fábrica limpios para el Beta Tester."
+                    "message": "Base de datos restablecida a valores iniciales limpios."
                 })
             except Exception as e:
+                server_logger.exception(f"Error al restablecer base de datos: {e}")
                 self.send_error_json(f"Error al restablecer base de datos: {str(e)}", 500)
             return
 
@@ -2979,6 +3118,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 if os.path.exists(DB_PATH):
                     shutil.copy2(DB_PATH, backup_path)
                 
+                cleanup_wal_sidecars(DB_PATH)
                 with open(DB_PATH, "wb") as f:
                     f.write(db_bytes)
 
@@ -2990,6 +3130,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 })
                 return
             except Exception as e:
+                server_logger.exception(f"Error al restaurar archivo: {e}")
                 self.send_error_json(f"Error al restaurar archivo: {str(e)}", 500)
                 return
 
@@ -3042,11 +3183,30 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 if not username or not password:
                     self.send_error_json("Usuario y contraseña requeridos", 400)
                     return
+
+                bloqueado_seg = security_core.verificar_bloqueo_login(conn, client_ip, username)
+                if bloqueado_seg:
+                    database.registrar_auditoria(None, username, "LOGIN_BLOQUEADO_RATE_LIMIT", "AUTENTICACION", f"Bloqueado temporalmente ({bloqueado_seg}s)", client_ip, conn)
+                    self.send_error_json(
+                        f"Demasiados intentos fallidos. Intente nuevamente en {bloqueado_seg} segundos.",
+                        429,
+                        extra_headers={"Retry-After": str(bloqueado_seg)}
+                    )
+                    return
+
                 cursor.execute("SELECT * FROM usuarios WHERE LOWER(username) = ?", (username,))
                 u = cursor.fetchone()
                 if not u:
-                    database.registrar_auditoria(None, username, "LOGIN_FALLIDO", "AUTENTICACION", "Usuario inexistente", client_ip, conn)
-                    self.send_error_json("Credenciales inválidas", 401)
+                    intentos, blq = security_core.registrar_intento_fallido_login(conn, client_ip, username)
+                    database.registrar_auditoria(None, username, "LOGIN_FALLIDO", "AUTENTICACION", f"Usuario inexistente (intento {intentos})", client_ip, conn)
+                    if blq > 0:
+                        self.send_error_json(
+                            f"Demasiados intentos fallidos. Cuenta bloqueada temporalmente por {blq} segundos.",
+                            429,
+                            extra_headers={"Retry-After": str(blq)}
+                        )
+                    else:
+                        self.send_error_json("Credenciales inválidas", 401)
                     return
                 u_dict = dict(u)
                 if u_dict.get("activo", 0) != 1:
@@ -3054,10 +3214,19 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json("Usuario inactivo o suspendido", 403)
                     return
                 if not database.verificar_password(password, u_dict["salt"], u_dict["password_hash"]):
-                    database.registrar_auditoria(u_dict["id"], username, "LOGIN_FALLIDO", "AUTENTICACION", "Contraseña incorrecta", client_ip, conn)
-                    self.send_error_json("Credenciales inválidas", 401)
+                    intentos, blq = security_core.registrar_intento_fallido_login(conn, client_ip, username)
+                    database.registrar_auditoria(u_dict["id"], username, "LOGIN_FALLIDO", "AUTENTICACION", f"Contraseña incorrecta (intento {intentos})", client_ip, conn)
+                    if blq > 0:
+                        self.send_error_json(
+                            f"Demasiados intentos fallidos. Acceso bloqueado temporalmente por {blq} segundos.",
+                            429,
+                            extra_headers={"Retry-After": str(blq)}
+                        )
+                    else:
+                        self.send_error_json("Credenciales inválidas", 401)
                     return
 
+                security_core.limpiar_intentos_login(conn, client_ip, username)
                 cursor.execute("UPDATE usuarios SET ultimo_acceso = CURRENT_TIMESTAMP WHERE id = ?", (u_dict["id"],))
                 perms = database.obtener_permisos_usuario(u_dict["id"], conn)
                 rol_nombre = perms.get("rol_nombre", "Usuario")
@@ -3097,7 +3266,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         "rol_nombre": rol_nombre,
                         "permisos": {k: perms[k] for k in perms if k.startswith("perm_") or k in ("facturar_negativo", "autorizar_devoluciones", "modificar_precios", "ver_costos_utilidad", "anular_transacciones", "facturar_directo")}
                     }
-                })
+                }, status=200, cookies=[self._build_session_cookie(token)])
                 return
 
             elif path == "/api/auth/logout":
@@ -3109,7 +3278,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 client_ip = self.client_address[0] if hasattr(self, 'client_address') else ''
                 if user:
                     database.registrar_auditoria(user.get("uid"), user.get("usr"), "LOGOUT", "AUTENTICACION", "Cierre de sesión", client_ip, conn)
-                self.send_json({"success": True, "message": "Sesión cerrada correctamente"})
+                self.send_json({"success": True, "message": "Sesión cerrada correctamente"}, status=200, cookies=[self._build_clear_cookie()])
                 return
 
             elif path == "/api/usuarios":
@@ -3420,10 +3589,11 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
                 precio_total = round(precio_base + iva_monto, 4)
 
+                costo_cpp_inicial = round(costo, 4) if costo > 0 else 0.0
                 cursor.execute("""
-                    INSERT INTO productos (codigo, nombre, categoria_id, tipo, impuesto_tipo, precio_base, iva_monto, precio_total, costo, stock, stock_minimo, imagen, descripcion)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (codigo, nombre, categoria_id, tipo, impuesto_tipo, precio_base, iva_monto, precio_total, costo, stock, stock_minimo, imagen, descripcion))
+                    INSERT INTO productos (codigo, nombre, categoria_id, tipo, impuesto_tipo, precio_base, iva_monto, precio_total, costo, costo_cpp, stock, stock_minimo, imagen, descripcion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (codigo, nombre, categoria_id, tipo, impuesto_tipo, precio_base, iva_monto, precio_total, costo, costo_cpp_inicial, stock, stock_minimo, imagen, descripcion))
                 p_id = cursor.lastrowid
 
                 # FASE 2C: Si se crea un producto físico con stock inicial > 0,
@@ -3585,22 +3755,24 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 # BEGIN IMMEDIATE: Candado exclusivo para aislar lecturas y escrituras de stock y CPP
                 cursor.execute("BEGIN IMMEDIATE")
 
-                # Obtener configuración de tasas e IVA
+                # Obtener configuración de tasas e IVA (aritmética Decimal exacta)
                 cursor.execute("SELECT * FROM configuracion WHERE id = 1")
                 cfg = dict(cursor.fetchone())
-                tasa_ves = cfg["tasa_ves"]
-                tasa_cop = cfg["tasa_cop"]
-                iva_pct = cfg["iva_porcentaje"] / 100.0
+                tasa_ves_dec = to_decimal(cfg["tasa_ves"], "1")
+                tasa_cop_dec = to_decimal(cfg["tasa_cop"], "1")
+                tasa_ves = float(tasa_ves_dec)
+                tasa_cop = float(tasa_cop_dec)
+                iva_pct_dec = to_decimal(cfg["iva_porcentaje"], "0") / Decimal("100")
 
                 # Pre-validación de ítems y cálculo de subtotales financieros
-                subtotal = 0.0
-                iva_total = 0.0
+                subtotal_dec = Decimal("0")
+                iva_total_dec = Decimal("0")
 
                 for itm in items:
                     prod_id = itm.get("producto_id") or itm.get("id")
-                    cant_v = float(itm.get("cantidad", 1))
-                    if cant_v <= 0:
-                        raise ValueError(f"La cantidad vendida debe ser mayor a 0, recibido: {cant_v}")
+                    cant_dec_v = to_decimal(itm.get("cantidad", 1), "1")
+                    if cant_dec_v <= Decimal("0"):
+                        raise ValueError(f"La cantidad vendida debe ser mayor a 0, recibido: {cant_dec_v}")
 
                     cursor.execute("SELECT id, nombre, tipo, impuesto_tipo, precio_base FROM productos WHERE id = ?", (prod_id,))
                     p_info = cursor.fetchone()
@@ -3608,52 +3780,58 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         raise ValueError(f"Producto ID {prod_id} no existe en catálogo")
 
                     p_dict = dict(p_info)
-                    precio_u_v = float(itm.get("precio_unitario", p_dict["precio_base"]))
-                    if precio_u_v < 0:
-                        raise ValueError(f"El precio unitario no puede ser negativo, recibido: {precio_u_v}")
+                    raw_precio = itm.get("precio_unitario", p_dict["precio_base"])
+                    precio_u_dec = to_decimal(raw_precio if raw_precio is not None else p_dict["precio_base"], "0")
+                    if precio_u_dec < Decimal("0"):
+                        raise ValueError(f"El precio unitario no puede ser negativo, recibido: {precio_u_dec}")
 
                     imp_tipo_v = p_dict["impuesto_tipo"]
-                    iva_u_v = round(precio_u_v * iva_pct, 4) if imp_tipo_v == "gravado" else 0.0
-                    subtotal += round(precio_u_v * cant_v, 4)
-                    iva_total += round(iva_u_v * cant_v, 4)
+                    iva_u_dec = (precio_u_dec * iva_pct_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP) if imp_tipo_v == "gravado" else Decimal("0")
+                    subtotal_dec += (precio_u_dec * cant_dec_v).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                    iva_total_dec += (iva_u_dec * cant_dec_v).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
-                total_usd = round(subtotal + iva_total, 2)
-                total_ves = round(total_usd * tasa_ves, 2)
-                total_cop = round(total_usd * tasa_cop, 2)
+                subtotal = d_round(subtotal_dec, 4)
+                iva_total = d_round(iva_total_dec, 4)
+                total_usd_dec = (subtotal_dec + iva_total_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                total_usd = float(total_usd_dec)
+                total_ves = d_round(total_usd_dec * tasa_ves_dec, 2)
+                total_cop = d_round(total_usd_dec * tasa_cop_dec, 2)
 
-                # Procesar pagos recibidos
-                total_pagado_usd = 0.0
+                # Procesar pagos recibidos con conversión exacta Decimal
+                total_pagado_dec = Decimal("0")
                 pagos_procesados = []
                 for p in pagos:
                     moneda = (p.get("moneda") or "USD").upper()
                     metodo = p.get("metodo") or "Efectivo"
-                    monto_moneda = float(p.get("monto_moneda", 0))
-                    tasa_cambio = float(p.get("tasa_cambio") or 1.0)
+                    monto_moneda_dec = to_decimal(p.get("monto_moneda", 0), "0")
+                    tasa_cambio_dec = to_decimal(p.get("tasa_cambio") or "1", "1")
                     referencia = p.get("referencia", "")
 
                     if moneda == "USD":
-                        equiv_usd = monto_moneda
+                        equiv_usd_dec = monto_moneda_dec
                     elif moneda in ("VES", "COP"):
-                        equiv_usd = round(monto_moneda / tasa_cambio, 2) if tasa_cambio > 0 else 0.0
+                        equiv_usd_dec = (monto_moneda_dec / tasa_cambio_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if tasa_cambio_dec > Decimal("0") else Decimal("0")
                     else:
-                        equiv_usd = monto_moneda
+                        equiv_usd_dec = monto_moneda_dec
 
-                    if monto_moneda > 0:
-                        total_pagado_usd += equiv_usd
+                    if monto_moneda_dec > Decimal("0"):
+                        total_pagado_dec += equiv_usd_dec
                         pagos_procesados.append({
                             "moneda": moneda,
                             "metodo": metodo,
-                            "monto_moneda": monto_moneda,
-                            "tasa_cambio": tasa_cambio,
-                            "equivalente_usd": round(equiv_usd, 2),
+                            "monto_moneda": float(monto_moneda_dec),
+                            "tasa_cambio": float(tasa_cambio_dec),
+                            "equivalente_usd": d_round(equiv_usd_dec, 2),
                             "referencia": referencia
                         })
 
-                total_pagado_usd = round(total_pagado_usd, 2)
+                total_pagado_usd = d_round(total_pagado_dec, 2)
+                total_pagado_rounded_dec = Decimal(str(total_pagado_usd))
 
                 if tipo_venta == "credito":
-                    saldo_pendiente = max(0.0, round(total_usd - total_pagado_usd, 2))
-                    estado_factura = "pagada" if saldo_pendiente <= 0.001 else "pendiente"
+                    saldo_dec = max(Decimal("0"), (total_usd_dec - total_pagado_rounded_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+                    saldo_pendiente = float(saldo_dec)
+                    estado_factura = "pagada" if saldo_dec <= Decimal("0.001") else "pendiente"
                 else:
                     saldo_pendiente = 0.0
                     estado_factura = "pagada"
@@ -3680,8 +3858,9 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     cursor.execute("SELECT id, porcentaje_comision_base FROM vendedores WHERE id = ? AND activo = 1", (vendedor_id,))
                     v_row = cursor.fetchone()
                     if v_row:
-                        comision_pct = float(v_row["porcentaje_comision_base"] or 0.0)
-                        comision_monto_usd = round(subtotal * (comision_pct / 100.0), 2)
+                        com_pct_dec = to_decimal(v_row["porcentaje_comision_base"], "0")
+                        comision_pct = float(com_pct_dec)
+                        comision_monto_usd = d_round(subtotal_dec * (com_pct_dec / Decimal("100")), 2)
                         comision_estado = "DEVENGADA" if tipo_venta == "contado" else "PENDIENTE"
 
                 user_tok, _ = self.get_current_user_and_perms()
@@ -3696,7 +3875,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 # Procesamiento secuencial renglón por renglón con integración transaccional CPP
                 for itm in items:
                     prod_id = itm.get("producto_id") or itm.get("id")
-                    cant_dec = Decimal(str(itm.get("cantidad", 1)))
+                    cant_dec = to_decimal(itm.get("cantidad", 1), "1")
 
                     # Lectura atómica del estado del producto bajo BEGIN IMMEDIATE
                     cursor.execute("""
@@ -3705,14 +3884,18 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     """, (prod_id,))
                     prod = dict(cursor.fetchone())
 
-                    precio_unitario = float(itm.get("precio_unitario", prod["precio_base"]))
+                    raw_pu = itm.get("precio_unitario", prod["precio_base"])
+                    precio_u_item_dec = to_decimal(raw_pu if raw_pu is not None else prod["precio_base"], "0")
+                    precio_unitario = float(precio_u_item_dec)
                     impuesto_tipo = prod["impuesto_tipo"]
                     tipo = prod["tipo"]
 
-                    iva_u = round(precio_unitario * iva_pct, 4) if impuesto_tipo == "gravado" else 0.0
-                    item_subtotal = round(precio_unitario * float(cant_dec), 4)
-                    item_iva = round(iva_u * float(cant_dec), 4)
-                    item_total = round(item_subtotal + item_iva, 4)
+                    iva_u_dec = (precio_u_item_dec * iva_pct_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP) if impuesto_tipo == "gravado" else Decimal("0")
+                    iva_u = float(iva_u_dec)
+                    item_subtotal_dec = (precio_u_item_dec * cant_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                    item_iva_dec = (iva_u_dec * cant_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+                    item_subtotal = float(item_subtotal_dec)
+                    item_total = float((item_subtotal_dec + item_iva_dec).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
 
                     costo_u_val = None
                     costo_tot_val = None
@@ -3778,7 +3961,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                             documento_id=factura_id,
                             documento_numero=numero_factura,
                             motivo=f"Salida por venta según factura {numero_factura} (Línea {factura_detalle_id})",
-                            usuario_id=1,
+                            usuario_id=usuario_emisor_id,
                             documento_linea_id=factura_detalle_id
                         )
 
@@ -5153,6 +5336,10 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             # Anulación Directa LIFO de Ajuste de Inventario (FASE 2F-5B)
             elif path.startswith("/api/inventario/ajustes/") and path.endswith("/anular"):
+                user_tok, perms = self.get_current_user_and_perms()
+                if perms and not perms.get("anular_transacciones", 0) and perms.get("rol_nombre") != "SuperAdmin":
+                    self.send_error_json("ACCESO DENEGADO: Su rol de usuario no tiene autorización para anular ajustes de inventario.", 403)
+                    return
                 parts = path.split("/")
                 try:
                     aj_id = int(parts[4])
@@ -5160,7 +5347,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json("ID de ajuste inválido", 400)
                     return
                 motivo = (body.get("motivo") or "Anulación directa de ajuste de inventario").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 res = anular_ajuste_inventario(
                     cursor=cursor,
                     ajuste_id=aj_id,
@@ -5178,13 +5365,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             # Anulación de Factura de Venta
             elif path.startswith("/api/facturas/") and path.endswith("/anular"):
                 user_tok, perms = self.get_current_user_and_perms()
-                if perms and not perms.get("anular_transacciones", 0):
+                if perms and not perms.get("anular_transacciones", 0) and perms.get("rol_nombre") != "SuperAdmin":
                     self.send_error_json("ACCESO DENEGADO: Su rol de usuario no tiene autorización para anular facturas.", 403)
                     return
                 parts = path.split("/")
                 f_id = int(parts[3])
                 motivo = (body.get("motivo") or "Anulación de factura").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 res = anular_factura_venta(cursor, f_id, motivo=motivo, usuario_id=usuario_id)
                 conn.commit()
                 schedule_cloud_sync()
@@ -5197,10 +5384,14 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             # Anulación de Devolución de Cliente
             elif path.startswith("/api/devoluciones/") and path.endswith("/anular"):
+                user_tok, perms = self.get_current_user_and_perms()
+                if perms and not perms.get("anular_transacciones", 0) and perms.get("rol_nombre") != "SuperAdmin":
+                    self.send_error_json("ACCESO DENEGADO: Su rol de usuario no tiene autorización para anular devoluciones.", 403)
+                    return
                 parts = path.split("/")
                 d_id = int(parts[3])
                 motivo = (body.get("motivo") or "Anulación de devolución").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 res = anular_devolucion_cliente(cursor, d_id, motivo=motivo, usuario_id=usuario_id)
                 conn.commit()
                 schedule_cloud_sync()
@@ -5213,10 +5404,14 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             # Anulación de Compra de Proveedor
             elif path.startswith("/api/compras/") and path.endswith("/anular"):
+                user_tok, perms = self.get_current_user_and_perms()
+                if perms and not perms.get("anular_transacciones", 0) and perms.get("rol_nombre") != "SuperAdmin":
+                    self.send_error_json("ACCESO DENEGADO: Su rol de usuario no tiene autorización para anular compras.", 403)
+                    return
                 parts = path.split("/")
                 c_id = int(parts[3])
                 motivo = (body.get("motivo") or "Anulación de compra").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 res = anular_compra_proveedor(cursor, c_id, motivo=motivo, usuario_id=usuario_id)
                 conn.commit()
                 schedule_cloud_sync()
@@ -5229,10 +5424,14 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             # Anulación de Cobro / Abono en CXC
             elif path.startswith("/api/cxc/abonos/") and path.endswith("/anular"):
+                user_tok, perms = self.get_current_user_and_perms()
+                if perms and not perms.get("anular_transacciones", 0) and perms.get("rol_nombre") != "SuperAdmin":
+                    self.send_error_json("ACCESO DENEGADO: Su rol de usuario no tiene autorización para anular cobros.", 403)
+                    return
                 parts = path.split("/")
                 ab_id = int(parts[4])
                 motivo = (body.get("motivo") or "Anulación de cobro a cliente").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 cxc_id_exp = body.get("cxc_id")
                 res = anular_abono_cxc(cursor, ab_id, motivo=motivo, usuario_id=usuario_id, cxc_id_explicit=cxc_id_exp)
                 conn.commit()
@@ -5246,10 +5445,14 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             # Anulación de Pago / Abono en CXP
             elif path.startswith("/api/cxp/abonos/") and path.endswith("/anular"):
+                user_tok, perms = self.get_current_user_and_perms()
+                if perms and not perms.get("anular_transacciones", 0) and perms.get("rol_nombre") != "SuperAdmin":
+                    self.send_error_json("ACCESO DENEGADO: Su rol de usuario no tiene autorización para anular pagos a proveedores.", 403)
+                    return
                 parts = path.split("/")
                 ab_id = int(parts[4])
                 motivo = (body.get("motivo") or "Anulación de pago a proveedor").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 cxp_id_exp = body.get("cxp_id")
                 res = anular_abono_cxp(cursor, ab_id, motivo=motivo, usuario_id=usuario_id, cxp_id_explicit=cxp_id_exp)
                 conn.commit()
@@ -5263,10 +5466,14 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             # Anulación de Cuenta por Pagar Directa (Gasto / Factura Directa)
             elif path.startswith("/api/cxp/") and path.endswith("/anular") and not path.startswith("/api/cxp/abonos/"):
+                user_tok, perms = self.get_current_user_and_perms()
+                if perms and not perms.get("anular_transacciones", 0) and perms.get("rol_nombre") != "SuperAdmin":
+                    self.send_error_json("ACCESO DENEGADO: Su rol de usuario no tiene autorización para anular cuentas por pagar.", 403)
+                    return
                 parts = path.split("/")
                 cxp_id = int(parts[3])
                 motivo = (body.get("motivo") or "Anulación de cuenta por pagar").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 res = anular_cuenta_cxp_directa(cursor, cxp_id, motivo=motivo, usuario_id=usuario_id)
                 conn.commit()
                 schedule_cloud_sync()
@@ -5289,10 +5496,14 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 return
 
             elif path.startswith("/api/pagos/") and path.endswith("/anular"):
+                user_tok, perms = self.get_current_user_and_perms()
+                if perms and not perms.get("anular_transacciones", 0) and perms.get("rol_nombre") != "SuperAdmin":
+                    self.send_error_json("ACCESO DENEGADO: Su rol de usuario no tiene autorización para anular pagos.", 403)
+                    return
                 parts = path.split("/")
                 pago_id = int(parts[3])
-                motivo = (body.get("motivo") or "Anulacin de pago financiero").strip()
-                usuario_id = int(body.get("usuario_id") or 1)
+                motivo = (body.get("motivo") or "Anulación de pago financiero").strip()
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 res = anular_pago_financiero(pago_id, usuario_id=usuario_id, motivo=motivo, conn=conn)
                 schedule_cloud_sync()
                 self.send_json({
@@ -5305,7 +5516,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             elif path == "/api/anticipos/aplicar":
                 anticipo_id = int(body.get("anticipo_id"))
                 aplicaciones = body.get("aplicaciones", [])
-                usuario_id = int(body.get("usuario_id") or 1)
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 res = aplicar_anticipo_cliente(anticipo_id, aplicaciones, usuario_id=usuario_id, conn=conn)
                 schedule_cloud_sync()
                 self.send_json({
@@ -5317,7 +5528,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             elif path == "/api/tesoreria/cajas/apertura":
                 cuenta_id = int(body.get("cuenta_tesoreria_id"))
-                usuario_id = int(body.get("usuario_id") or 1)
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 monto_usd = float(body.get("monto_inicial_usd") or 0.0)
                 monto_mon = float(body.get("monto_inicial_moneda") or 0.0)
                 notas = (body.get("notas") or body.get("notas_apertura") or "").strip()
@@ -5331,7 +5542,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             elif path == "/api/tesoreria/cajas/cierre":
                 apertura_id = int(body.get("caja_apertura_id"))
-                usuario_id = int(body.get("usuario_id") or 1)
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 saldo_usd = float(body.get("saldo_real_fisico_usd") or 0.0)
                 saldo_mon = float(body.get("saldo_real_fisico_moneda") or 0.0)
                 notas = (body.get("notas") or body.get("notas_cierre") or "").strip()
@@ -5349,19 +5560,19 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 monto_origen = float(body.get("monto_origen") or 0.0)
                 monto_destino = float(body.get("monto_destino") or 0.0)
                 tasa = float(body.get("tasa_cambio") or 1.0)
-                usuario_id = int(body.get("usuario_id") or 1)
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 notas = (body.get("notas") or "").strip()
                 res = transferir_entre_cuentas_tesoreria(origen_id, destino_id, monto_origen, monto_destino, tasa, usuario_id=usuario_id, notas=notas, conn=conn)
                 schedule_cloud_sync()
                 self.send_json({
                     "success": True,
-                    "message": f"Transferencia de tesorera completada exitosamente.",
+                    "message": "Transferencia de tesorería completada exitosamente.",
                     "data": res
                 })
                 return
 
             elif path == "/api/gastos":
-                usuario_id = int(body.get("usuario_id") or 1)
+                usuario_id = int((getattr(self, "current_session", None) or {}).get("usuario_id") or body.get("usuario_id") or 1)
                 res = registrar_gasto_operativo(body, usuario_id=usuario_id, conn=conn)
                 schedule_cloud_sync()
                 self.send_json({
@@ -5432,52 +5643,12 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         cursor = conn.cursor()
 
         try:
-            # 1. Configuración & Tasas
-            if path == "/api/config":
-                auto_sync = int(body.get("sincronizacion_tasas_auto", 1)) if "sincronizacion_tasas_auto" in body else None
-                if auto_sync is not None:
-                    cursor.execute("""
-                        UPDATE configuracion 
-                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
-                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?
-                        WHERE id = 1
-                    """, (
-                        body.get("nombre_negocio"),
-                        body.get("documento_fiscal"),
-                        body.get("telefono"),
-                        body.get("direccion"),
-                        float(body.get("iva_porcentaje", 16.0)),
-                        float(body.get("tasa_ves", 45.0)),
-                        float(body.get("tasa_cop", 4100.0)),
-                        auto_sync
-                    ))
-                else:
-                    cursor.execute("""
-                        UPDATE configuracion 
-                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
-                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?
-                        WHERE id = 1
-                    """, (
-                        body.get("nombre_negocio"),
-                        body.get("documento_fiscal"),
-                        body.get("telefono"),
-                        body.get("direccion"),
-                        float(body.get("iva_porcentaje", 16.0)),
-                        float(body.get("tasa_ves", 45.0)),
-                        float(body.get("tasa_cop", 4100.0))
-                    ))
-                conn.commit()
-                self.send_json({"success": True, "message": "Configuración y tasas actualizadas correctamente"})
-
-            # 2. Actualizar Producto / Servicio
-            elif path.startswith("/api/productos/"):
+            # 1. Actualizar Producto / Servicio
+            if path.startswith("/api/productos/"):
                 p_id = int(path.split("/")[-1])
                 precio_base = float(body.get("precio_base", 0.0))
                 impuesto_tipo = body.get("impuesto_tipo", "gravado")
                 tipo = body.get("tipo", "producto")
-                stock = float(body.get("stock", 0.0))
-                if tipo == 'servicio':
-                    stock = 0.0
 
                 cursor.execute("SELECT iva_porcentaje FROM configuracion WHERE id = 1")
                 iva_pct = cursor.fetchone()[0] / 100.0
@@ -5569,7 +5740,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 schedule_cloud_sync()
                 self.send_json({"success": True, "vendedor_id": vendedor_val, "zona_id": zona_val})
 
-            # 5. Actualizar Proveedor
+            # 5. Actualizar Usuario
             elif path.startswith("/api/usuarios/"):
                 u_id = int(path.split("/")[-1])
                 nombre_completo = body.get("nombre_completo")
@@ -5578,6 +5749,10 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 rol_id = body.get("rol_id")
                 activo = body.get("activo")
                 new_pwd = body.get("password")
+
+                if u_id == 1 and activo is not None and int(activo) == 0:
+                    self.send_error_json("No se puede desactivar la cuenta principal de SuperAdmin.", 400)
+                    return
 
                 if new_pwd and str(new_pwd).strip():
                     salt = database.generar_salt()
@@ -5593,6 +5768,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                             salt = ?
                         WHERE id = ?
                     """, (nombre_completo, email, telefono, rol_id, activo, pwd_hash, salt, u_id))
+                    cursor.execute("UPDATE sesiones_activas SET estado = 'REVOCADA', encrypted_jwt = NULL WHERE usuario_id = ? AND estado = 'ACTIVA'", (u_id,))
                 else:
                     cursor.execute("""
                         UPDATE usuarios
@@ -5603,6 +5779,8 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                             activo = COALESCE(?, activo)
                         WHERE id = ?
                     """, (nombre_completo, email, telefono, rol_id, activo, u_id))
+                    if (activo is not None and int(activo) == 0) or rol_id is not None:
+                        cursor.execute("UPDATE sesiones_activas SET estado = 'REVOCADA', encrypted_jwt = NULL WHERE usuario_id = ? AND estado = 'ACTIVA'", (u_id,))
                 conn.commit()
                 schedule_cloud_sync()
                 self.send_json({"success": True, "message": "Usuario actualizado correctamente"})
@@ -5750,11 +5928,11 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             elif path.startswith("/api/categorias/"):
                 c_id = int(path.split("/")[-1])
-                # Verificar si tiene productos asociados
-                cursor.execute("SELECT COUNT(*) FROM productos WHERE categoria_id = ? AND activo = 1", (c_id,))
+                # Verificar si tiene productos asociados (activos o inactivos por FK RESTRICT)
+                cursor.execute("SELECT COUNT(*) FROM productos WHERE categoria_id = ?", (c_id,))
                 count = cursor.fetchone()[0]
                 if count > 0:
-                    self.send_error_json(f"No se puede eliminar la categoría porque tiene {count} productos/servicios asociados.", 400)
+                    self.send_error_json(f"No se puede eliminar la categoría porque tiene {count} productos o servicios vinculados en el historial.", 400)
                     return
                 cursor.execute("DELETE FROM categorias WHERE id = ?", (c_id,))
                 conn.commit()
@@ -5766,12 +5944,29 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 if perms and perms.get("facturar_directo", 1) == 0:
                     self.send_error_json("Acceso denegado: solo Administración puede eliminar fichas de clientes.", 403)
                     return
+                if c_id == 1:
+                    self.send_error_json("No se puede eliminar el cliente genérico de mostrador.", 400)
+                    return
+                cursor.execute("SELECT COUNT(*) FROM facturas WHERE cliente_id = ?", (c_id,))
+                cnt_fac = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM pedidos WHERE cliente_id = ?", (c_id,))
+                cnt_ped = cursor.fetchone()[0]
+                if cnt_fac > 0 or cnt_ped > 0:
+                    self.send_error_json(f"No se puede eliminar el cliente porque posee {cnt_fac} factura(s) y {cnt_ped} pedido(s) registrados.", 400)
+                    return
                 cursor.execute("DELETE FROM clientes WHERE id = ?", (c_id,))
                 conn.commit()
                 self.send_json({"success": True})
 
             elif path.startswith("/api/proveedores/"):
                 p_id = int(path.split("/")[-1])
+                cursor.execute("SELECT COUNT(*) FROM compras WHERE proveedor_id = ?", (p_id,))
+                cnt_comp = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM cuentas_por_pagar WHERE proveedor_id = ?", (p_id,))
+                cnt_cxp = cursor.fetchone()[0]
+                if cnt_comp > 0 or cnt_cxp > 0:
+                    self.send_error_json(f"No se puede eliminar el proveedor porque posee {cnt_comp} compra(s) o cuentas por pagar registradas.", 400)
+                    return
                 cursor.execute("DELETE FROM proveedores WHERE id = ?", (p_id,))
                 conn.commit()
                 self.send_json({"success": True})
@@ -5953,12 +6148,12 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             conn.rollback()
             self.send_error_json(f"Error al guardar configuración: {str(e)}", 500)
+        finally:
+            conn.close()
 
 
 import threading
 import webbrowser
-
-
 
 
 def is_server_responding(port):
@@ -6010,19 +6205,23 @@ def run_server():
 
     # Si ya hay un servidor activo en el puerto 8000, abrir navegador y no dar error
     if is_server_responding(PORT):
-        print(f"===============================================================")
-        print(f" Sistema de Control de Inventario y Facturacion Multimoneda")
-        print(f"===============================================================")
+        print("===============================================================")
+        print(" Sistema de Control de Inventario y Facturacion Multimoneda")
+        print("===============================================================")
         print(f" [INFO] El servidor ya se encuentra ACTIVO en: http://localhost:{PORT}")
-        print(f" [INFO] Abriendo la aplicacion en su navegador web...")
-        print(f"===============================================================")
+        print(" [INFO] Abriendo la aplicacion en su navegador web...")
+        print("===============================================================")
         try:
             webbrowser.open(f"http://localhost:{PORT}")
         except Exception:
             pass
         return
 
-    socketserver.ThreadingTCPServer.allow_reuse_address = True
+    class _TavoHTTPServer(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+        request_queue_size = 128
+
     httpd = None
     actual_port = PORT
 
@@ -6031,7 +6230,7 @@ def run_server():
     for p in ports_to_try:
         try:
             server_address = ("", p)
-            httpd = socketserver.ThreadingTCPServer(server_address, InventoryAppHandler)
+            httpd = _TavoHTTPServer(server_address, InventoryAppHandler)
             actual_port = p
             break
         except OSError:
@@ -6047,14 +6246,14 @@ def run_server():
 
     if not httpd:
         print(f"[ERROR] No se pudo iniciar el servidor en el puerto {PORT}.")
-        print(f"Verifique si otra aplicacion ajena lo esta utilizando.")
+        print("Verifique si otra aplicacion ajena lo esta utilizando.")
         return
 
-    print(f"===============================================================")
-    print(f" Sistema de Control de Inventario y Facturacion Multimoneda")
+    print("===============================================================")
+    print(" Sistema de Control de Inventario y Facturacion Multimoneda")
     print(f" Servidor iniciado exitosamente en: http://localhost:{actual_port}")
-    print(f" Presione Ctrl + C para detener.")
-    print(f"===============================================================")
+    print(" Presione Ctrl + C para detener.")
+    print("===============================================================")
     
     threading.Thread(target=check_and_update_rates_background, daemon=True).start()
     
@@ -6077,150 +6276,3 @@ def run_server():
 if __name__ == "__main__":
     run_server()
 
-
-    # ========================================================
-    # MOTOR MULTI-TENANT DE LOGOTIPOS Y CONFIGURACIÓN (FASE 2)
-    # BLINDAJE DE SEGURIDAD ESTRICTA (NIVEL ROJO)
-    # ========================================================
-    def handle_save_config(self, path):
-        content_type = self.headers.get("Content-Type", "")
-        content_length = int(self.headers.get("Content-Length", 0))
-
-        # 1. Protección contra saturación de memoria / DoS por tamaño de request
-        MAX_REQUEST_BYTES = 5 * 1024 * 1024  # 5MB límite total de la petición
-        if content_length > MAX_REQUEST_BYTES:
-            self.send_error_json("La solicitud supera el tamaño máximo permitido de 5MB.", 413)
-            return
-
-        body_dict = {}
-        uploaded_logo_bytes = None
-        uploaded_logo_filename = None
-        uploaded_logo_ct = None
-
-        if "multipart/form-data" in content_type:
-            try:
-                raw_bytes = self.rfile.read(content_length)
-                # Parsear usando email.parser con headers
-                header_bytes = f"Content-Type: {content_type}\r\n\r\n".encode("utf-8")
-                msg = email.parser.BytesParser(policy=email.policy.default).parsebytes(header_bytes + raw_bytes)
-                for part in msg.iter_parts():
-                    name = part.get_param("name", header="content-disposition")
-                    filename = part.get_filename()
-                    if filename:
-                        uploaded_logo_bytes = part.get_payload(decode=True)
-                        uploaded_logo_filename = filename
-                        uploaded_logo_ct = part.get_content_type()
-                    elif name:
-                        body_dict[name] = part.get_payload(decode=True).decode("utf-8", errors="replace").strip()
-            except Exception as e:
-                self.send_error_json(f"Error procesando formulario multipart: {str(e)}", 400)
-                return
-        else:
-            # Soporte compatible para peticiones application/json
-            body_dict = self.parse_body_json()
-            if body_dict is None:
-                self.send_error_json("Formato JSON inválido", 400)
-                return
-
-        # 2. Validación y Blindaje del Archivo de Logotipo
-        new_logo_url = None
-        if uploaded_logo_bytes and len(uploaded_logo_bytes) > 0:
-            # A. Límite de tamaño: Rechazo de archivos > 2MB
-            if len(uploaded_logo_bytes) > 2 * 1024 * 1024:
-                self.send_error_json("El archivo supera el tamaño máximo permitido de 2MB.", 413)
-                return
-
-            # B. Validación de Magic Bytes (Firma Binaria Real - Imposible de burlar renombrando extensiones)
-            safe_ext = None
-            if len(uploaded_logo_bytes) >= 8 and uploaded_logo_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-                safe_ext = ".png"
-            elif len(uploaded_logo_bytes) >= 3 and uploaded_logo_bytes.startswith(b"\xff\xd8\xff"):
-                safe_ext = ".jpg"
-            elif len(uploaded_logo_bytes) >= 12 and uploaded_logo_bytes.startswith(b"RIFF") and uploaded_logo_bytes[8:12] == b"WEBP":
-                safe_ext = ".webp"
-
-            # C. Validación MIME: Rechazar ejecutables, scripts o documentos
-            allowed_mimes = ["image/png", "image/jpeg", "image/jpg", "image/pjpeg", "image/webp"]
-            mime_ok = (uploaded_logo_ct.lower() in allowed_mimes) if uploaded_logo_ct else True
-
-            if not safe_ext or not mime_ok:
-                self.send_error_json(
-                    "Tipo de archivo no permitido. Solo se admiten imágenes válidas PNG, JPG o WEBP.",
-                    415
-                )
-                return
-
-            # D. Sanitización estricta del nombre (UUID / Hash seguro para evitar Path Traversal y sobreescrituras)
-            os.makedirs(UPLOADS_DIR, exist_ok=True)
-            safe_filename = f"logo_empresa_{int(time.time())}_{uuid.uuid4().hex[:8]}{safe_ext}"
-            file_dest = os.path.join(UPLOADS_DIR, safe_filename)
-
-            try:
-                with open(file_dest, "wb") as f_out:
-                    f_out.write(uploaded_logo_bytes)
-                new_logo_url = f"/uploads/{safe_filename}"
-            except Exception as e:
-                self.send_error_json(f"Error escribiendo archivo en disco: {str(e)}", 500)
-                return
-
-        # 3. Persistencia Atómica en SQLite
-        conn = get_connection()
-        cursor = conn.cursor()
-        try:
-            nombre = body_dict.get("nombre_negocio")
-            doc_fiscal = body_dict.get("documento_fiscal")
-            tel = body_dict.get("telefono")
-            direc = body_dict.get("direccion")
-            iva = float(body_dict.get("iva_porcentaje", 16.0)) if body_dict.get("iva_porcentaje") else 16.0
-            t_ves = float(body_dict.get("tasa_ves", 45.0)) if body_dict.get("tasa_ves") else 45.0
-            t_cop = float(body_dict.get("tasa_cop", 4100.0)) if body_dict.get("tasa_cop") else 4100.0
-            auto_sync = int(body_dict.get("sincronizacion_tasas_auto", 1)) if "sincronizacion_tasas_auto" in body_dict else None
-
-            if new_logo_url:
-                if auto_sync is not None:
-                    cursor.execute("""
-                        UPDATE configuracion 
-                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
-                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?,
-                            logo_url = ?
-                        WHERE id = 1
-                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync, new_logo_url))
-                else:
-                    cursor.execute("""
-                        UPDATE configuracion 
-                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
-                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?,
-                            logo_url = ?
-                        WHERE id = 1
-                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, new_logo_url))
-            else:
-                if auto_sync is not None:
-                    cursor.execute("""
-                        UPDATE configuracion 
-                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
-                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?
-                        WHERE id = 1
-                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync))
-                else:
-                    cursor.execute("""
-                        UPDATE configuracion 
-                        SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
-                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?
-                        WHERE id = 1
-                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop))
-
-            conn.commit()
-            schedule_cloud_sync()
-
-            cursor.execute("SELECT logo_url FROM configuracion WHERE id = 1")
-            cur_row = cursor.fetchone()
-            current_logo_url = cur_row[0] if cur_row else new_logo_url
-
-            self.send_json({
-                "success": True,
-                "message": "Configuración y logotipo actualizados correctamente",
-                "logo_url": current_logo_url
-            })
-        except Exception as e:
-            conn.rollback()
-            self.send_error_json(f"Error al guardar configuración: {str(e)}", 500)

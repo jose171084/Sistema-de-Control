@@ -15,12 +15,33 @@ import hmac
 import hashlib
 import secrets
 import sqlite3
+import logging
+from http.cookies import SimpleCookie
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, Tuple
 
+_sec_logger = logging.getLogger("tavo.security")
+if not _sec_logger.handlers:
+    _sh = logging.StreamHandler()
+    _sh.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"))
+    _sec_logger.addHandler(_sh)
+    _sec_logger.setLevel(logging.INFO)
+
+_DEFAULT_JWT_SECRET = "TAVO_CLOUD_SECRET_KEY_DEV_9876543210_SECURE"
+_DEFAULT_ENC_KEY = "TAVO_CLOUD_SESSION_ENC_KEY_DEV_123456789"
+
 # Constantes de Seguridad Canónicas
-JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "TAVO_CLOUD_SECRET_KEY_DEV_9876543210_SECURE")
-SESSION_ENCRYPTION_KEY = os.environ.get("SESSION_ENCRYPTION_KEY", "TAVO_CLOUD_SESSION_ENC_KEY_DEV_123456789")
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", _DEFAULT_JWT_SECRET)
+SESSION_ENCRYPTION_KEY = os.environ.get("SESSION_ENCRYPTION_KEY", _DEFAULT_ENC_KEY)
+
+if (JWT_SECRET_KEY == _DEFAULT_JWT_SECRET or SESSION_ENCRYPTION_KEY == _DEFAULT_ENC_KEY) and (
+    os.environ.get("RENDER") or os.environ.get("TAVO_ENV") == "production"
+):
+    if os.environ.get("TAVO_STRICT_SECRETS") == "1":
+        raise RuntimeError("CONFIGURACIÓN CRÍTICA FALTANTE: Defina JWT_SECRET_KEY y SESSION_ENCRYPTION_KEY en producción.")
+    _sec_logger.warning("Claves JWT_SECRET_KEY / SESSION_ENCRYPTION_KEY usan valores por defecto en producción. Configure variables de entorno.")
+
+SESSION_COOKIE_NAME = "tavo_session"
 
 GRACE_WINDOW_SECONDS = 30           # Tolerancia para peticiones en tránsito con token rotado
 MAX_SESSION_LIFETIME_SECONDS = 28800 # 8 horas de límite absoluto inviolable
@@ -327,7 +348,7 @@ def validar_y_rotar_sesion(conn: sqlite3.Connection, incoming_jwt: str, client_i
         # =====================================================================
         if (expira_en_ts - ahora_ts) < RENEWAL_THRESHOLD_SECONDS:
             nuevo_jti = secrets.token_hex(32)
-            nuevo_csrf = secrets.token_hex(32)
+            nuevo_csrf = row_dict["csrf_token"] or secrets.token_hex(32)
             nueva_expira = (datetime.now(timezone.utc) + timedelta(seconds=SESSION_IDLE_TIMEOUT_SECONDS)).isoformat()
             
             # Generar nuevo JWT
@@ -451,3 +472,117 @@ def encolar_evento_outbox(conn: sqlite3.Connection, tipo_evento: str, payload: D
         INSERT INTO outbox_eventos (tipo_evento, payload_json, estado)
         VALUES (?, ?, 'PENDIENTE')
     """, (tipo_evento, json.dumps(payload)))
+
+# =============================================================================
+# 8. EXTRACCIÓN SEGURA DE CREDENCIAL (BEARER O COOKIE HTTPONLY)
+# =============================================================================
+
+def extraer_jwt_de_headers(headers) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Extrae el JWT desde Authorization: Bearer <jwt> o desde Cookie HttpOnly 'tavo_session'.
+    Retorna (token, origen) donde origen es 'bearer' | 'cookie' | None.
+    """
+    if not headers:
+        return None, None
+    auth_header = headers.get("Authorization") or headers.get("authorization") or ""
+    if auth_header.startswith("Bearer "):
+        tok = auth_header.split(" ", 1)[1].strip()
+        if tok:
+            return tok, "bearer"
+
+    raw_cookie = headers.get("Cookie") or headers.get("cookie") or ""
+    if raw_cookie and SESSION_COOKIE_NAME in raw_cookie:
+        try:
+            jar = SimpleCookie()
+            jar.load(raw_cookie)
+            if SESSION_COOKIE_NAME in jar:
+                val = jar[SESSION_COOKIE_NAME].value.strip()
+                if val:
+                    return val, "cookie"
+        except Exception:
+            pass
+    return None, None
+
+# =============================================================================
+# 9. CONTROL ANTI-FUERZA BRUTA / RATE LIMITING EN LOGIN
+# =============================================================================
+
+LOGIN_MAX_INTENTOS = 5
+LOGIN_WINDOW_SECONDS = 900      # Ventana de 15 minutos
+LOGIN_LOCKOUT_SECONDS = 300     # Bloqueo temporal de 5 minutos
+
+def _asegurar_tabla_rate_limit(cur: sqlite3.Cursor):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS login_intentos (
+            clave TEXT PRIMARY KEY,
+            intentos INTEGER NOT NULL DEFAULT 0,
+            bloqueado_hasta INTEGER NOT NULL DEFAULT 0,
+            ultimo_intento INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+
+def _claves_rate_limit(client_ip: str, username: str):
+    claves = []
+    if client_ip:
+        claves.append(f"ip:{client_ip}")
+    if username:
+        claves.append(f"usr:{username.strip().lower()}")
+    return claves
+
+def verificar_bloqueo_login(conn: sqlite3.Connection, client_ip: str, username: str = "") -> Optional[int]:
+    """Retorna segundos restantes de bloqueo si la IP o el usuario excedió intentos fallidos; sino None."""
+    ahora = int(time.time())
+    cur = conn.cursor()
+    _asegurar_tabla_rate_limit(cur)
+    max_restante = 0
+    for clave in _claves_rate_limit(client_ip, username):
+        cur.execute("SELECT bloqueado_hasta FROM login_intentos WHERE clave = ?", (clave,))
+        row = cur.fetchone()
+        if row and row[0] and int(row[0]) > ahora:
+            restante = int(row[0]) - ahora
+            if restante > max_restante:
+                max_restante = restante
+    return max_restante if max_restante > 0 else None
+
+def registrar_intento_fallido_login(conn: sqlite3.Connection, client_ip: str, username: str = "") -> Tuple[int, int]:
+    """Registra fallo de autenticación y activa bloqueo temporal al alcanzar LOGIN_MAX_INTENTOS."""
+    ahora = int(time.time())
+    cur = conn.cursor()
+    _asegurar_tabla_rate_limit(cur)
+    max_intentos = 0
+    bloqueo_seg = 0
+    for clave in _claves_rate_limit(client_ip, username):
+        cur.execute("SELECT intentos, bloqueado_hasta, ultimo_intento FROM login_intentos WHERE clave = ?", (clave,))
+        row = cur.fetchone()
+        if row:
+            intentos_prev, blq_hasta, ult = int(row[0]), int(row[1]), int(row[2])
+            if (ahora - ult) > LOGIN_WINDOW_SECONDS and blq_hasta <= ahora:
+                intentos_nuevos = 1
+            else:
+                intentos_nuevos = intentos_prev + 1
+        else:
+            intentos_nuevos = 1
+
+        nuevo_blq_hasta = ahora + LOGIN_LOCKOUT_SECONDS if intentos_nuevos >= LOGIN_MAX_INTENTOS else 0
+        if nuevo_blq_hasta > ahora:
+            bloqueo_seg = max(bloqueo_seg, LOGIN_LOCKOUT_SECONDS)
+        max_intentos = max(max_intentos, intentos_nuevos)
+        cur.execute("""
+            INSERT INTO login_intentos (clave, intentos, bloqueado_hasta, ultimo_intento)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(clave) DO UPDATE SET
+                intentos = excluded.intentos,
+                bloqueado_hasta = excluded.bloqueado_hasta,
+                ultimo_intento = excluded.ultimo_intento
+        """, (clave, intentos_nuevos, nuevo_blq_hasta, ahora))
+    conn.commit()
+    return max_intentos, bloqueo_seg
+
+def limpiar_intentos_login(conn: sqlite3.Connection, client_ip: str, username: str = ""):
+    """Restablece el contador de intentos fallidos tras un login válido."""
+    cur = conn.cursor()
+    _asegurar_tabla_rate_limit(cur)
+    for clave in _claves_rate_limit(client_ip, username):
+        cur.execute("DELETE FROM login_intentos WHERE clave = ?", (clave,))
+    conn.commit()
+

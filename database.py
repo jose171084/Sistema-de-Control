@@ -14,17 +14,47 @@ import shutil
 import hashlib
 import hmac
 import base64
-from decimal import Decimal, ROUND_HALF_UP
+import tempfile
+import logging
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import datetime, timedelta
+
+logger = logging.getLogger("tavo.db")
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
 
 DEFAULT_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inventario.db")
 DB_LIMPIA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inventario_limpia.db")
+
+def to_decimal(val, default="0") -> Decimal:
+    """Convierte cualquier valor numérico a Decimal exacto sin errores de coma flotante."""
+    if isinstance(val, Decimal):
+        return val
+    if val is None or val == "":
+        return Decimal(default)
+    try:
+        return Decimal(str(val))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal(default)
+
+def d_round(val, decimals: int = 2) -> float:
+    """Redondeo contable estandarizado ROUND_HALF_UP sobre Decimal."""
+    quant = Decimal("1") if decimals <= 0 else Decimal("1." + ("0" * decimals))
+    return float(to_decimal(val).quantize(quant, rounding=ROUND_HALF_UP))
 
 
 # ==============================================================================
 # MÓDULO DE CRIPTOGRAFÍA, TOKENS DE SESIÓN Y SEGURIDAD RBAC (OWASP COMPLIANT)
 # ==============================================================================
-SESSION_SECRET = os.environ.get("SESSION_SECRET", "TAVO_CLOUD_SECRET_2026_SUPER_SECURE_KEY_@#$%")
+_DEFAULT_DEV_SESSION_SECRET = "TAVO_CLOUD_SECRET_2026_SUPER_SECURE_KEY_@#$%"
+SESSION_SECRET = os.environ.get("SESSION_SECRET", _DEFAULT_DEV_SESSION_SECRET)
+if SESSION_SECRET == _DEFAULT_DEV_SESSION_SECRET and (os.environ.get("RENDER") or os.environ.get("TAVO_ENV") == "production"):
+    if os.environ.get("TAVO_STRICT_SECRETS") == "1":
+        raise RuntimeError("CONFIGURACIÓN CRÍTICA FALTANTE: Defina SESSION_SECRET en variables de entorno de producción.")
+    logger.warning("SESSION_SECRET usa valor por defecto en producción. Configure la variable de entorno SESSION_SECRET.")
 
 def generar_salt() -> str:
     """Genera un salt criptográfico de 16 bytes aleatorios en formato hexadecimal."""
@@ -371,6 +401,7 @@ def sync_from_supabase_storage():
         if b_alt not in buckets_to_try:
             buckets_to_try.append(b_alt)
 
+    had_transient_error = False
     for b in buckets_to_try:
         endpoints = [
             f"{cfg['url']}/storage/v1/object/authenticated/{b}/{cfg['filename']}",
@@ -394,8 +425,10 @@ def sync_from_supabase_storage():
                         # Respaldo de seguridad local antes de sobrescribir
                         if os.path.exists(DB_PATH):
                             shutil.copy2(DB_PATH, DB_PATH + ".pre_cloud_sync.bak")
+                        cleanup_wal_sidecars(DB_PATH)
                         with open(DB_PATH, "wb") as f:
                             f.write(data)
+                        _wal_configured_paths.discard(DB_PATH)
                         print(f"[PERSISTENCIA NUBE] Base de datos persistente descargada exitosamente ({len(data)} bytes) desde bucket '{b}'.")
                         _last_cloud_sync_status = {
                             "ok": True,
@@ -407,19 +440,25 @@ def sync_from_supabase_storage():
                         }
                         return True
             except urllib.error.HTTPError as e:
-                if e.code == 404:
+                if e.code in (400, 404):
                     continue
                 else:
+                    had_transient_error = True
                     print(f"[PERSISTENCIA NUBE] Error HTTP {e.code} en {url}: {e.reason}")
             except Exception as e:
+                had_transient_error = True
                 print(f"[PERSISTENCIA NUBE] Error de conexión a {url}: {str(e)}")
+
+    if had_transient_error:
+        print("[PERSISTENCIA NUBE] Error de red/servidor al consultar Supabase. Se omite sobrescritura automática para proteger datos en la nube.")
+        return False
 
     print(f"[PERSISTENCIA NUBE] Aún no existe '{cfg['filename']}' en Supabase Storage. Subiendo base actual como imagen persistente...")
     sync_to_supabase_storage()
     return False
 
 def sync_to_supabase_storage():
-    """Sube el archivo inventario.db a Supabase Storage con x-upsert para persistencia permanente."""
+    """Sube un snapshot consistente de inventario.db a Supabase Storage con x-upsert."""
     global _last_cloud_sync_status
     cfg = get_supabase_config()
     if not cfg or not os.path.exists(DB_PATH):
@@ -429,8 +468,7 @@ def sync_to_supabase_storage():
         data = None
         for _ in range(3):
             try:
-                with open(DB_PATH, "rb") as f:
-                    data = f.read()
+                data = export_consistent_db_bytes(DB_PATH)
                 if data and len(data) >= 100:
                     break
             except Exception:
@@ -513,6 +551,60 @@ def schedule_cloud_sync():
     """Programa o despacha sincronización inmediata/diferida hacia la nube."""
     trigger_cloud_sync_async()
 
+_wal_configured_paths = set()
+_wal_init_lock = threading.Lock()
+
+def cleanup_wal_sidecars(db_path=None):
+    """Elimina archivos residuales -wal y -shm antes de sobrescribir físicamente la BD."""
+    target = db_path or DB_PATH
+    _wal_configured_paths.discard(target)
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = target + suffix
+        if os.path.exists(sidecar):
+            try:
+                os.remove(sidecar)
+            except Exception:
+                pass
+
+def export_consistent_db_bytes(db_path=None) -> bytes:
+    """Genera un snapshot binario atómico y consistente (incluyendo frames WAL confirmados)."""
+    target = db_path or DB_PATH
+    if not os.path.exists(target):
+        raise FileNotFoundError(f"Base de datos no encontrada: {target}")
+    fd, tmp_path = tempfile.mkstemp(prefix="tavo_snap_", suffix=".db")
+    os.close(fd)
+    src_conn = None
+    dst_conn = None
+    try:
+        src_conn = sqlite3.connect(target, timeout=30.0)
+        dst_conn = sqlite3.connect(tmp_path)
+        src_conn.backup(dst_conn)
+        dst_conn.commit()
+        dst_conn.close()
+        dst_conn = None
+        src_conn.close()
+        src_conn = None
+        with open(tmp_path, "rb") as f:
+            return f.read()
+    finally:
+        if dst_conn is not None:
+            try:
+                dst_conn.close()
+            except Exception:
+                pass
+        if src_conn is not None:
+            try:
+                src_conn.close()
+            except Exception:
+                pass
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            p = tmp_path + suffix
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+
 class MonitoredConnection(sqlite3.Connection):
     """Conexión SQLite que intercepta commit() para auto-guardar en la nube sin bloquear peticiones."""
     def commit(self):
@@ -520,9 +612,19 @@ class MonitoredConnection(sqlite3.Connection):
         trigger_cloud_sync_async()
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH, factory=MonitoredConnection)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0, factory=MonitoredConnection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    if DB_PATH not in _wal_configured_paths:
+        with _wal_init_lock:
+            if DB_PATH not in _wal_configured_paths:
+                try:
+                    conn.execute("PRAGMA journal_mode = WAL")
+                    conn.execute("PRAGMA synchronous = NORMAL")
+                    _wal_configured_paths.add(DB_PATH)
+                except sqlite3.OperationalError:
+                    pass
     return conn
 
 def auditar_y_migrar_db(conn=None, cursor=None):
@@ -2431,6 +2533,15 @@ def init_db():
     )
     ''')
 
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS login_intentos (
+        clave TEXT PRIMARY KEY,
+        intentos INTEGER NOT NULL DEFAULT 0,
+        bloqueado_hasta INTEGER NOT NULL DEFAULT 0,
+        ultimo_intento INTEGER NOT NULL DEFAULT 0
+    )
+    ''')
+
     cursor.execute("SELECT COUNT(*) FROM clientes")
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
@@ -2481,6 +2592,7 @@ def restablecer_fabrica_db(confirmacion=""):
     if confirmacion not in ["CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO", "CONFIRMAR_BORRADO_TOTAL_AUTORIZADO"]:
         raise PermissionError("Acción bloqueada: Debe proporcionar la frase de seguridad 'CONFIRMAR_RESTABLECER_FABRICA_AUTORIZADO'.")
 
+    cleanup_wal_sidecars(DB_PATH)
     from crear_base_datos_limpia import crear_base_limpia
     crear_base_limpia(DB_PATH)
     auditar_y_migrar_db()
@@ -4453,9 +4565,9 @@ def anular_factura_venta(cursor, factura_id, motivo="Anulación de factura", usu
     # 3. Marcar factura como anulada
     cursor.execute("""
         UPDATE facturas 
-        SET estado = 'anulada', saldo_pendiente = 0.0, motivo_anulacion = ?, fecha_anulacion = ? 
+        SET estado = 'anulada', saldo_pendiente = 0.0, motivo_anulacion = ?, fecha_anulacion = ?, usuario_anulacion_id = ?
         WHERE id = ?
-    """, (motivo, fecha_hoy, factura_id))
+    """, (motivo, fecha_hoy, usuario_id, factura_id))
 
     return {
         "success": True,
@@ -7683,6 +7795,9 @@ def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_con
                 "costo_cpp": it.get("costo_cpp") or it.get("costo") or 0.0
             })
 
+        if not any(it["cant_aprobada"] > Decimal('0.0') for it in items_finales):
+            raise ValueError("Debe aprobar una cantidad mayor a cero en al menos un renglón para facturar el pedido.")
+
         total_usd_aprob = (subtotal_aprob + iva_total_aprob).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         # Generar numero correlativo de factura
@@ -7902,6 +8017,8 @@ def rechazar_pedido(pedido_id, usuario_id=1, motivo='', conn=None, auto_commit=T
 
         if ped["estado"] == "FACTURADO":
             raise ValueError("No se puede rechazar un pedido que ya ha sido facturado")
+        if ped["estado"] != "PENDIENTE":
+            raise ValueError(f"Solo se pueden rechazar pedidos pendientes (Estado actual: '{ped['estado']}')")
 
         # Liberar stock comprometido
         cur.execute("""
@@ -8378,7 +8495,7 @@ def cerrar_turno_caja_ciego(declarado, usuario_id=1, turno_id=None, notas='', co
         # Cargar todos los movimientos del turno (excluyendo registros duplicados de APERTURA si ya están en fondo inicial)
         cur.execute("""
             SELECT * FROM movimientos_caja 
-            WHERE turno_id = ? AND referencia != 'APERTURA'
+            WHERE turno_id = ? AND COALESCE(referencia, '') != 'APERTURA'
             ORDER BY id ASC
         """, (turno_id,))
         movs = [dict(r) for r in cur.fetchall()]

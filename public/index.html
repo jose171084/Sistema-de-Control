@@ -290,9 +290,9 @@
     <div id="cloudEphemeralAlert" class="hidden bg-slate-900 text-slate-200 px-3 sm:px-6 py-2 text-xs font-medium flex items-center justify-between border-b border-amber-500/40 shadow-sm sticky top-0 z-30 transition">
       <div class="flex items-center space-x-2.5">
         <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-          <i class="fa-solid fa-cloud-arrow-up mr-1 text-amber-400"></i>Cloud Demo
+          <i class="fa-solid fa-cloud-arrow-up mr-1 text-amber-400"></i>Almacenamiento Temporal
         </span>
-        <span class="text-slate-300">Entorno en la nube de demostración. Para sincronización permanente active Supabase Storage.</span>
+        <span class="text-slate-300">Para respaldo permanente active la sincronización en la nube o descargue una copia (.db) al finalizar.</span>
       </div>
       <div class="flex items-center space-x-2 shrink-0">
         <button onclick="openDatabaseModal()" class="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-2.5 py-1 rounded-lg text-xs font-semibold shadow-2xs transition cursor-pointer">
@@ -3644,7 +3644,7 @@
             <div class="bg-white p-4 rounded-2xl shadow-sm border border-teal-300 bg-teal-50/30">
               <p class="text-[11px] font-bold uppercase text-teal-800">Existencia Resultante</p>
               <h3 class="text-2xl font-black text-teal-700 mt-1" id="kardexV2SaldoActual">0.00</h3>
-              <p class="text-xs text-teal-700 font-semibold">Saldo materializado oficial</p>
+              <p class="text-xs text-teal-700 font-semibold">Stock actual en almacén</p>
             </div>
           </div>
 
@@ -3656,7 +3656,7 @@
                   <i class="fa-solid fa-list-check text-teal-600 mr-2"></i>
                   Libro Mayor de Movimientos: <span id="kardexV2HeaderTitle" class="ml-1 text-teal-700 font-extrabold">Todos los Productos</span>
                 </h4>
-                <p class="text-xs text-slate-400">Historial inmutable con saldo determinístico y costos reales por movimiento.</p>
+                <p class="text-xs text-slate-400">Historial detallado de entradas, salidas y costos por movimiento.</p>
               </div>
               <span class="text-xs font-mono font-bold bg-slate-100 text-slate-700 px-3 py-1 rounded-lg" id="kardexV2CountBadge">0 movimientos</span>
             </div>
@@ -4151,7 +4151,7 @@
             Cajas & Tesorería Multimoneda
           </h2>
           <p class="text-sm text-slate-500">
-            Control de efectivo en bóveda, cajas de mostrador, cuentas bancarias, arqueos de turno y pagos N:M.
+            Control de cajas, cuentas bancarias, cierres de turno, gastos y cobros.
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
@@ -4171,7 +4171,7 @@
             <i class="fa-solid fa-receipt mr-1.5"></i>Registrar Gasto
           </button>
           <button onclick="openModalCobroMultipleNM()" class="bg-teal-600 hover:bg-teal-700 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow-2xs transition">
-            <i class="fa-solid fa-hand-holding-dollar mr-1.5"></i>Cobro N:M / Anticipo
+            <i class="fa-solid fa-hand-holding-dollar mr-1.5"></i>Cobro Múltiple / Anticipo
           </button>
         </div>
       </div>
@@ -4487,13 +4487,37 @@
             </div>
           </div>
 
-          <!-- Buscador y Catálogo para Pedidos -->
-          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+          <!-- Selector Desplegable, Buscador y Catálogo de Productos del Inventario -->
+          <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3.5">
+            <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
+              <div class="flex items-center space-x-2">
+                <span class="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center">
+                  <i class="fa-solid fa-boxes-stacked mr-1.5 text-[#0755C9]"></i>Productos y Servicios de Inventario *
+                </span>
+                <span id="pedCatalogCountBadge" class="text-[10px] font-bold bg-blue-50 text-[#0755C9] px-2 py-0.5 rounded-full border border-blue-200">Cargando...</span>
+              </div>
+              <button type="button" onclick="cargarCatalogoParaPedidos(true)" class="text-xs font-bold text-[#0755C9] hover:text-blue-800 bg-blue-50/70 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition flex items-center">
+                <i class="fa-solid fa-rotate-right mr-1"></i>Actualizar Inventario
+              </button>
+            </div>
+
+            <!-- Desplegable Directo de Inventario -->
+            <div class="flex flex-col sm:flex-row gap-2">
+              <select id="pedProductoSelect" onchange="agregarProductoSelectPedido(this.value)" class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs sm:text-sm font-semibold text-slate-800 focus:outline-none focus:border-[#0755C9] focus:ring-2 focus:ring-blue-500/20">
+                <option value="">-- Seleccionar producto del inventario --</option>
+              </select>
+              <button type="button" onclick="agregarProductoSelectPedido()" class="px-4 py-2.5 bg-[#0755C9] hover:bg-blue-600 text-white rounded-xl text-xs font-bold shadow-xs transition shrink-0 flex items-center justify-center">
+                <i class="fa-solid fa-plus mr-1.5"></i>Agregar Ítem
+              </button>
+            </div>
+
+            <!-- Buscador con Lista Desplegable Automática y Filtros -->
             <div class="flex flex-col sm:flex-row gap-2 justify-between items-center">
               <div class="relative w-full">
                 <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400 text-sm"></i>
-                <input type="text" id="pedSearchProduct" oninput="renderPedCatalog()" onkeydown="handlePedCatalogKeydown(event)" placeholder="Buscar producto o código para agregar al pedido..."
+                <input type="text" id="pedSearchProduct" oninput="buscarProductoPedidoDropdown(this.value); renderPedCatalog();" onfocus="buscarProductoPedidoDropdown(this.value)" onkeydown="handlePedCatalogKeydown(event)" autocomplete="off" placeholder="Buscar producto por nombre o código para desplegar..."
                        class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0755C9] focus:ring-2 focus:ring-blue-500/20">
+                <div id="pedProductSearchResults" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto z-30 divide-y divide-slate-100"></div>
               </div>
               <div class="flex space-x-1 shrink-0">
                 <button type="button" onclick="setPedFilterCategory('todos')" id="pedCat-todos" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-white">Todos</button>
@@ -4862,8 +4886,8 @@
             <i class="fa-solid fa-user-shield text-cyan-300 text-xl"></i>
           </div>
           <div>
-            <h2 class="text-xl font-extrabold text-slate-900 tracking-tight">Gestión de Usuarios & Roles (RBAC)</h2>
-            <p class="text-xs text-slate-500 mt-0.5">Control de acceso granular por organigrama, permisos operacionales críticos y bitácora de auditoría.</p>
+            <h2 class="text-xl font-extrabold text-slate-900 tracking-tight">Usuarios, Roles y Permisos</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Administración de usuarios, permisos por perfil e historial de actividad.</p>
           </div>
         </div>
         <div class="flex items-center space-x-2.5 w-full sm:w-auto justify-end">
@@ -4879,10 +4903,10 @@
           <i class="fa-solid fa-users mr-1.5"></i>Usuarios Activos
         </button>
         <button type="button" onclick="cambiarSubtabUsuarios('roles')" id="subtabUsrRoles" class="px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition">
-          <i class="fa-solid fa-shield-halved mr-1.5"></i>Matriz de Roles & Permisos
+          <i class="fa-solid fa-shield-halved mr-1.5"></i>Roles y Permisos
         </button>
         <button type="button" onclick="cambiarSubtabUsuarios('auditoria')" id="subtabUsrAuditoria" class="px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition">
-          <i class="fa-solid fa-clipboard-list mr-1.5"></i>Bitácora de Auditoría Forense
+          <i class="fa-solid fa-clipboard-list mr-1.5"></i>Historial de Actividad
         </button>
       </div>
 
@@ -4895,7 +4919,7 @@
                 <th class="py-3 px-4">ID</th>
                 <th class="py-3 px-4">Usuario</th>
                 <th class="py-3 px-4">Nombre Completo</th>
-                <th class="py-3 px-4">Rol en Organigrama</th>
+                <th class="py-3 px-4">Rol Asignado</th>
                 <th class="py-3 px-4">Email / Contacto</th>
                 <th class="py-3 px-4 text-center">Estado</th>
                 <th class="py-3 px-4">Último Acceso</th>
@@ -4913,8 +4937,8 @@
       <div id="panelUsrRoles" class="hidden bg-white rounded-2xl border border-slate-200/80 shadow-2xs p-5 space-y-4">
         <div class="flex items-center justify-between pb-3 border-b border-slate-100">
           <div>
-            <h3 class="font-extrabold text-sm text-slate-900">Matriz de Control de Acceso Granular (RBAC)</h3>
-            <p class="text-xs text-slate-500">Configure los procesos críticos permitidos por cada nivel del organigrama.</p>
+            <h3 class="font-extrabold text-sm text-slate-900">Permisos por Rol</h3>
+            <p class="text-xs text-slate-500">Active o desactive las funciones autorizadas para cada perfil de usuario.</p>
           </div>
         </div>
         <div class="overflow-x-auto">
@@ -5070,8 +5094,8 @@
               <button type="button" onclick="aplicarPresetTema('zen_fresco')" class="flex items-center p-2 rounded-xl border-2 border-sky-500 bg-sky-50/70 hover:bg-sky-100 text-left transition col-span-2 sm:col-span-1 shadow-xs">
                 <span class="w-4 h-4 rounded-full bg-sky-600 mr-2 flex-shrink-0"></span>
                 <div>
-                  <strong class="font-bold text-sky-950 block text-[11px]">Brisa Zen (Predeterminado)</strong>
-                  <span class="text-[9px] text-sky-700">Fresco, calmado & proactivo</span>
+                  <strong class="font-bold text-sky-950 block text-[11px]">Azul Corporativo (Predeterminado)</strong>
+                  <span class="text-[9px] text-sky-700">Limpio, moderno y ejecutivo</span>
                 </div>
               </button>
               <button type="button" onclick="aplicarPresetTema('indigo')" class="flex items-center p-2 rounded-xl border border-slate-200 hover:border-indigo-500 hover:shadow-sm text-left transition">
@@ -5466,7 +5490,7 @@
         <!-- 2. Switches de Columnas y Renglones Condicionales -->
         <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
           <span class="font-bold text-slate-700 text-xs uppercase tracking-wider block flex items-center">
-            <i class="fa-solid fa-table-columns text-emerald-600 mr-2"></i>2. Estructura de Renglones & Columnas (Renderizado Condicional)
+            <i class="fa-solid fa-table-columns text-emerald-600 mr-2"></i>2. Columnas Visibles en el Comprobante
           </span>
 
           <div class="space-y-2.5">
@@ -5636,7 +5660,7 @@
         </div>
         <div class="flex justify-between items-center pt-2">
           <button type="button" onclick="closeConfigModal(); openDatabaseModal();" class="text-xs text-emerald-600 hover:text-emerald-700 font-semibold flex items-center">
-            <i class="fa-solid fa-database mr-1.5"></i>Gestionar Base de Datos / Beta Tester &rarr;
+            <i class="fa-solid fa-database mr-1.5"></i>Respaldos y Base de Datos &rarr;
           </button>
           <div class="flex space-x-2">
             <button type="button" onclick="closeConfigModal()" class="px-4 py-2 border rounded-xl text-slate-600 text-xs">Cancelar</button>
@@ -5647,13 +5671,13 @@
     </div>
   </div>
 
-  <!-- Modal Base de Datos, Respaldos & Beta Tester -->
+  <!-- Modal Base de Datos y Respaldos -->
   <div id="modalBaseDatos" class="modal-overlay hidden">
     <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-5 m-4 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between border-b pb-3">
         <h3 class="font-bold text-lg text-slate-800 flex items-center">
           <i class="fa-solid fa-database text-emerald-600 mr-2.5"></i>
-          Base de Datos & Beta Tester
+          Base de Datos y Respaldos
         </h3>
         <button onclick="closeDatabaseModal()" class="text-slate-400 hover:text-slate-600">
           <i class="fa-solid fa-xmark text-lg"></i>
@@ -5679,10 +5703,10 @@
           <span id="dbSupabaseTestResult" class="text-[11px] text-slate-500 font-mono"></span>
         </div>
 
-        <!-- Alerta de Render si no está conectado Supabase -->
+        <!-- Alerta de Persistencia en Servidores Efímeros -->
         <div id="dbWarningNotice" class="hidden bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg p-3 space-y-1">
-          <p class="font-bold flex items-center"><i class="fa-solid fa-triangle-exclamation mr-1.5 text-amber-600"></i>Aviso sobre Render (Plan Gratuito):</p>
-          <p>En el plan gratis de Render, el disco es temporal y se reinicia si no hay visitas por 15 min. Para que los datos de tu Beta Tester <strong>NUNCA</strong> se borren en Render, configura las 2 variables de Supabase Storage en Render o descarga tus respaldos antes de salir.</p>
+          <p class="font-bold flex items-center"><i class="fa-solid fa-triangle-exclamation mr-1.5 text-amber-600"></i>Aviso sobre Persistencia en la Nube:</p>
+          <p>Si aloja el sistema en entornos sin disco persistente, configure las credenciales de almacenamiento en la nube o descargue respaldos periódicos para asegurar la preservación de su información histórica.</p>
         </div>
 
         <!-- Métricas Rápidas -->
@@ -5755,20 +5779,20 @@
         </div>
       </div>
 
-      <!-- Guía de Persistencia en Render con Supabase -->
+      <!-- Guía de Persistencia y Sincronización en la Nube -->
       <details class="border-t pt-3 text-xs text-slate-600">
         <summary class="font-bold text-teal-600 cursor-pointer flex items-center select-none py-1">
-          <i class="fa-solid fa-cloud-arrow-up mr-1.5"></i>¿Cómo activar la persistencia permanente con Supabase en Render?
+          <i class="fa-solid fa-cloud-arrow-up mr-1.5"></i>¿Cómo activar la sincronización automática de respaldos en la nube?
         </summary>
         <div class="bg-slate-50 border rounded-xl p-3 mt-2 space-y-2 text-[11px] leading-relaxed">
-          <p><strong>Paso 1:</strong> Entra a tu cuenta gratuita en <a href="https://supabase.com" target="_blank" class="text-teal-600 underline font-semibold">Supabase.com</a> y en tu proyecto ve a <strong>Storage &gt; New bucket</strong>. Nómbralo <code>database</code>.</p>
-          <p><strong>Paso 2:</strong> Ve a <strong>Project Settings &gt; API</strong> y copia la <code>Project URL</code> y la clave <code>anon / public</code>.</p>
-          <p><strong>Paso 3:</strong> En tu panel de <strong>Render</strong>, abre tu servicio web, entra a <strong>Environment Variables</strong> y agrega:</p>
+          <p><strong>Paso 1:</strong> En su proveedor de almacenamiento en la nube (ej. Supabase), cree un depósito (bucket) denominado <code>database</code>.</p>
+          <p><strong>Paso 2:</strong> En la configuración del proyecto, obtenga la URL del proyecto y su clave de acceso API.</p>
+          <p><strong>Paso 3:</strong> Configure las siguientes variables de entorno en el servidor:</p>
           <ul class="list-disc pl-4 space-y-1 font-mono text-[10px] text-slate-700">
-            <li><code>SUPABASE_URL</code> = Tu URL de Supabase</li>
-            <li><code>SUPABASE_KEY</code> = Tu clave de Supabase</li>
+            <li><code>SUPABASE_URL</code> = URL de su proyecto en la nube</li>
+            <li><code>SUPABASE_KEY</code> = Clave de acceso autorizada</li>
           </ul>
-          <p class="text-emerald-700 font-semibold pt-1">¡Listo! Al reiniciar Render, el sistema descargará y mantendrá la base de datos de tu Beta Tester siempre guardada en la nube sin borrarse jamás.</p>
+          <p class="text-emerald-700 font-semibold pt-1">¡Configuración completa! El servidor sincronizará automáticamente cada transacción y mantendrá copias de seguridad continuas y cifradas en la nube.</p>
         </div>
       </details>
 
@@ -7023,7 +7047,7 @@
             <i class="fa-solid fa-boxes-stacked text-amber-600"></i>
             Ajuste Formal de Inventario
           </h3>
-          <p class="text-xs text-slate-500">Módulo auditable de cargos y descargos con taxonomía canónica y valoración por Motor CPP.</p>
+          <p class="text-xs text-slate-500">Registro de entradas y salidas extraordinarias de mercancía con valoración de costo promedio.</p>
         </div>
         <button onclick="closeAjusteModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
       </div>
@@ -7135,7 +7159,7 @@
             <i class="fa-solid fa-receipt text-teal-600"></i>
             Detalle de Movimiento de Inventario
           </h3>
-          <p class="text-xs text-slate-500">Asiento inmutable auditado en inventario_movimientos</p>
+          <p class="text-xs text-slate-500">Registro histórico auditado del movimiento de inventario</p>
         </div>
         <button onclick="cerrarModalDetalleMovimiento()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
       </div>
@@ -7166,7 +7190,7 @@
             <i class="fa-solid fa-file-invoice text-teal-600"></i>
             Comprobante Oficial de Movimiento
           </h3>
-          <p class="text-xs text-slate-500">Documento auditable registrado en inventario_movimientos</p>
+          <p class="text-xs text-slate-500">Comprobante generado para respaldo administrativo y contable</p>
         </div>
         <button onclick="cerrarModalComprobanteAjuste()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
       </div>
@@ -7335,7 +7359,7 @@
       <div class="bg-gradient-to-r from-amber-600 to-amber-700 px-6 py-4 text-white flex justify-between items-center">
         <div class="flex items-center space-x-2.5">
           <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center"><i class="fa-solid fa-calculator text-base"></i></div>
-          <div><h3 class="font-bold text-base leading-tight">Cierre y Arqueo Ciego de Caja (Cierre Z)</h3><p class="text-xs text-amber-100">Conciliación hermética de dinero físico vs sistema</p></div>
+          <div><h3 class="font-bold text-base leading-tight">Cierre y Arqueo de Caja (Cierre Z)</h3><p class="text-xs text-amber-100">Conciliación de valores físicos en caja contra el registro del sistema</p></div>
         </div>
         <button onclick="closeModalCierreCaja()" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
       </div>
@@ -7687,7 +7711,7 @@
       <div class="bg-gradient-to-r from-teal-600 to-emerald-700 px-6 py-4 text-white flex justify-between items-center">
         <div class="flex items-center space-x-2.5">
           <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center"><i class="fa-solid fa-hand-holding-dollar text-base"></i></div>
-          <div><h3 class="font-bold text-base leading-tight">Cobro N:M Multimoneda & Anticipos</h3><p class="text-xs text-teal-100">Liquidación múltiple de facturas con pagos mixtos</p></div>
+          <div><h3 class="font-bold text-base leading-tight">Cobro Múltiple Multimoneda y Anticipos</h3><p class="text-xs text-teal-100">Liquidación múltiple de facturas con pagos combinados</p></div>
         </div>
         <button onclick="closeModalPagoMultipleNM()" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
       </div>
@@ -7909,7 +7933,7 @@
 
   <!-- Scripts -->
   <script src="master-report-layout.js?v=1.0.0"></script>
-  <script src="app.js?v=3.0.0&rev=34"></script>
+  <script src="app.js?v=3.0.0&rev=35"></script>
 
     <!-- MODAL: DETALLE Y VOUCHER IMPRIMIBLE DE NOTA DE DÉBITO A PROVEEDOR -->
     <div id="modalNotaDebitoCompra" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 hidden">
@@ -8003,7 +8027,7 @@
               Control Operativo, Inventario y Finanzas de Precisión
             </h2>
             <p class="text-xs xl:text-sm text-slate-300 leading-relaxed max-w-lg">
-              Infraestructura blindada para facturación multimoneda, auditoría de costos CPP, tesorería y fuerza de ventas con trazabilidad completa.
+              Plataforma integral para facturación multimoneda, control de inventarios, tesorería y fuerza de ventas con trazabilidad completa.
             </p>
           </div>
 
@@ -8014,8 +8038,8 @@
                 <i class="fa-solid fa-shield-halved text-xs"></i>
               </div>
               <div>
-                <h3 class="text-[11px] font-bold text-white uppercase tracking-wide">Autenticación Criptográfica & Anti-CSRF</h3>
-                <p class="text-[11px] text-slate-300/90 mt-0.5 leading-snug">Sesiones firmadas HMAC-SHA256 con rotación atómica e invalidación ante anomalías.</p>
+                <h3 class="text-[11px] font-bold text-white uppercase tracking-wide">Seguridad y Control de Acceso</h3>
+                <p class="text-[11px] text-slate-300/90 mt-0.5 leading-snug">Sesiones protegidas con control de concurrencia e invalidación automática ante anomalías.</p>
               </div>
             </div>
 
@@ -8024,7 +8048,7 @@
                 <i class="fa-solid fa-user-lock text-xs"></i>
               </div>
               <div>
-                <h3 class="text-[11px] font-bold text-white uppercase tracking-wide">Segregación Estricta por Roles (RBAC)</h3>
+                <h3 class="text-[11px] font-bold text-white uppercase tracking-wide">Segregación Estricta por Roles</h3>
                 <p class="text-[11px] text-slate-300/90 mt-0.5 leading-snug">Cada operador accede únicamente a los módulos y aprobaciones autorizadas por su perfil.</p>
               </div>
             </div>
@@ -8034,8 +8058,8 @@
                 <i class="fa-solid fa-database text-xs"></i>
               </div>
               <div>
-                <h3 class="text-[11px] font-bold text-white uppercase tracking-wide">Transaccionalidad Atómica & Auditoría</h3>
-                <p class="text-[11px] text-slate-300/90 mt-0.5 leading-snug">Bitácora inmutable de eventos y respaldo sincronizado en la nube.</p>
+                <h3 class="text-[11px] font-bold text-white uppercase tracking-wide">Transacciones Seguras y Auditoría</h3>
+                <p class="text-[11px] text-slate-300/90 mt-0.5 leading-snug">Bitácora inalterable de operaciones comerciales y respaldos programados.</p>
               </div>
             </div>
           </div>
@@ -8044,7 +8068,7 @@
         <!-- Pie Corporativo Izquierdo -->
         <div class="relative z-10 flex items-center justify-between border-t border-white/10 pt-4 text-[11px] text-slate-400">
           <span>© 2026 <strong class="text-slate-200 font-semibold">D-BIAN SYSTEM COMPUTER</strong></span>
-          <span class="font-mono text-[10px] text-cyan-300/80">OWASP Phase-1 Hardened</span>
+          <span class="text-[10px] text-cyan-300/80 font-medium">Conexión Segura & Cifrada</span>
         </div>
       </aside>
 
