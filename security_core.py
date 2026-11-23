@@ -271,8 +271,17 @@ def validar_y_rotar_sesion(conn: sqlite3.Connection, incoming_jwt: str, client_i
                 conn.commit()
             return None, "Acceso denegado: Usuario suspendido o inactivo", 403
 
+        def _parse_utc_ts(ts_raw: str) -> int:
+            s = str(ts_raw or "").strip()
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.astimezone(timezone.utc).timestamp())
+
         estado = row_dict["estado"]
-        expira_en_ts = int(datetime.fromisoformat(row_dict["expira_en"]).timestamp())
+        expira_en_ts = _parse_utc_ts(row_dict["expira_en"])
 
         # Invariante 3: Sesiones en estado terminal
         if estado in ("REVOCADA", "EXPIRADA"):
@@ -284,7 +293,7 @@ def validar_y_rotar_sesion(conn: sqlite3.Connection, incoming_jwt: str, client_i
         # CAMINO DEL PERDEDOR (REPLAY SEGURO EN VENTANA DE GRACIA <= 30 SEGUNDOS)
         # =====================================================================
         if estado == "ROTADA":
-            rotada_ts = int(datetime.fromisoformat(row_dict["rotada_en"]).timestamp())
+            rotada_ts = _parse_utc_ts(row_dict["rotada_en"])
             delta = ahora_ts - rotada_ts
 
             if delta > GRACE_WINDOW_SECONDS:
@@ -375,12 +384,13 @@ def validar_y_rotar_sesion(conn: sqlite3.Connection, incoming_jwt: str, client_i
                 nuevo_csrf, nueva_expira, client_ip, encrypted_jwt_payload
             ))
 
-            # 2. Actualizar padre
+            # 2. Actualizar padre con timestamp explícito UTC ISO-8601
+            rotada_en_iso = datetime.now(timezone.utc).isoformat()
             cur.execute("""
                 UPDATE sesiones_activas 
-                SET estado = 'ROTADA', rotada_en = CURRENT_TIMESTAMP, reemplazado_por_jti = ?
+                SET estado = 'ROTADA', rotada_en = ?, reemplazado_por_jti = ?
                 WHERE jti = ? AND estado = 'ACTIVA'
-            """, (nuevo_jti, jti))
+            """, (rotada_en_iso, nuevo_jti, jti))
 
             if started_tx:
                 conn.commit()

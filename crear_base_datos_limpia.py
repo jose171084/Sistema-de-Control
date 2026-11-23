@@ -582,7 +582,17 @@ def crear_base_limpia(destino_path=DB_LIMPIA):
 
     conn.commit()
     conn.close()
-    print(f"Base de datos limpia creada exitosamente en: {destino_path}")
+
+    import database as _db_mod
+    conn_mig = sqlite3.connect(destino_path)
+    conn_mig.row_factory = sqlite3.Row
+    try:
+        _db_mod.auditar_y_migrar_db(conn=conn_mig)
+        conn_mig.commit()
+    finally:
+        conn_mig.close()
+
+    print(f"Base de datos limpia creada y migrada exitosamente en: {destino_path}")
 
 def aplicar_base_limpia_al_sistema():
     """Hace backup de la base actual y la reemplaza por la limpia."""

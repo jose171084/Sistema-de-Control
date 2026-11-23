@@ -18,6 +18,8 @@ import hmac
 import base64
 import tempfile
 import logging
+import atexit
+import signal
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import datetime, timedelta
 
@@ -459,99 +461,166 @@ def sync_from_supabase_storage():
     sync_to_supabase_storage()
     return False
 
+_sync_lock = threading.Lock()
+_upload_lock = threading.Lock()
+_sync_timer = None
+_sync_pending = False
+_SYNC_DEBOUNCE_SECONDS = 2.5
+
 def sync_to_supabase_storage():
-    """Sube un snapshot consistente de inventario.db a Supabase Storage con x-upsert."""
+    """Sube un snapshot consistente de inventario.db a Supabase Storage con x-upsert y lock exclusivo."""
     global _last_cloud_sync_status
-    cfg = get_supabase_config()
-    if not cfg or not os.path.exists(DB_PATH):
-        return False
-
-    try:
-        data = None
-        for _ in range(3):
-            try:
-                data = export_consistent_db_bytes(DB_PATH)
-                if data and len(data) >= 100:
-                    break
-            except Exception:
-                time.sleep(0.1)
-
-        if not data or len(data) < 100:
-            print("[PERSISTENCIA NUBE] Error: archivo de base de datos vacío o ilegible.")
+    with _upload_lock:
+        cfg = get_supabase_config()
+        if not cfg or not os.path.exists(DB_PATH):
             return False
 
-        buckets_to_try = [cfg['bucket']]
-        for b_alt in ["database", "inventario"]:
-            if b_alt not in buckets_to_try:
-                buckets_to_try.append(b_alt)
+        try:
+            data = None
+            for _ in range(3):
+                try:
+                    data = export_consistent_db_bytes(DB_PATH)
+                    if data and len(data) >= 100:
+                        break
+                except Exception:
+                    time.sleep(0.1)
 
-        exito = False
-        ultimo_error = None
+            if not data or len(data) < 100:
+                print("[PERSISTENCIA NUBE] Error: archivo de base de datos vacío o ilegible.")
+                return False
 
-        for b in buckets_to_try:
-            url = f"{cfg['url']}/storage/v1/object/{b}/{cfg['filename']}"
-            req = urllib.request.Request(
-                url,
-                data=data,
-                headers={
-                    "apikey": cfg["key"],
-                    "Authorization": f"Bearer {cfg['key']}",
-                    "x-upsert": "true",
-                    "Content-Type": "application/x-sqlite3",
-                    "User-Agent": "SistemaInventario/1.0"
-                },
-                method="POST"
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    print(f"[PERSISTENCIA NUBE] Base de datos guardada en Supabase Storage (bucket '{b}', {len(data)} bytes).")
-                    _last_cloud_sync_status = {
-                        "ok": True,
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "error": None,
-                        "bytes": len(data),
-                        "bucket": b,
-                        "modo": "supabase_storage"
-                    }
-                    exito = True
+            buckets_to_try = [cfg['bucket']]
+            for b_alt in ["database", "inventario"]:
+                if b_alt not in buckets_to_try:
+                    buckets_to_try.append(b_alt)
+
+            exito = False
+            ultimo_error = None
+
+            for b in buckets_to_try:
+                url = f"{cfg['url']}/storage/v1/object/{b}/{cfg['filename']}"
+                req = urllib.request.Request(
+                    url,
+                    data=data,
+                    headers={
+                        "apikey": cfg["key"],
+                        "Authorization": f"Bearer {cfg['key']}",
+                        "x-upsert": "true",
+                        "Content-Type": "application/x-sqlite3",
+                        "User-Agent": "SistemaInventario/1.0"
+                    },
+                    method="POST"
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=15) as resp:
+                        print(f"[PERSISTENCIA NUBE] Base de datos guardada en Supabase Storage (bucket '{b}', {len(data)} bytes).")
+                        _last_cloud_sync_status = {
+                            "ok": True,
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "error": None,
+                            "bytes": len(data),
+                            "bucket": b,
+                            "modo": "supabase_storage"
+                        }
+                        exito = True
+                        break
+                except urllib.error.HTTPError as e:
+                    ultimo_error = f"HTTP {e.code}: {e.reason}"
+                    if e.code == 404:
+                        continue
+                    else:
+                        break
+                except Exception as e:
+                    ultimo_error = str(e)
                     break
-            except urllib.error.HTTPError as e:
-                ultimo_error = f"HTTP {e.code}: {e.reason}"
-                if e.code == 404:
-                    continue
-                else:
-                    break
-            except Exception as e:
-                ultimo_error = str(e)
-                break
 
-        if not exito:
-            _last_cloud_sync_status = {
-                "ok": False,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "error": ultimo_error,
-                "bytes": len(data) if data else 0,
-                "bucket": cfg['bucket'],
-                "modo": "error_sincronizacion"
-            }
-            print(f"[PERSISTENCIA NUBE] Fallo al sincronizar con Supabase Storage: {ultimo_error}")
+            if not exito:
+                _last_cloud_sync_status = {
+                    "ok": False,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "error": ultimo_error,
+                    "bytes": len(data) if data else 0,
+                    "bucket": cfg['bucket'],
+                    "modo": "error_sincronizacion"
+                }
+                print(f"[PERSISTENCIA NUBE] Fallo al sincronizar con Supabase Storage: {ultimo_error}")
+                return False
+
+            return True
+        except Exception as e:
+            print(f"[PERSISTENCIA NUBE] Error general al sincronizar: {str(e)}")
             return False
 
-        return True
-    except Exception as e:
-        print(f"[PERSISTENCIA NUBE] Error general al sincronizar: {str(e)}")
-        return False
+def _execute_debounced_cloud_sync():
+    """Ejecuta la subida pendiente disparada por el temporizador debounce."""
+    global _sync_timer, _sync_pending
+    with _sync_lock:
+        _sync_timer = None
+        should_sync = _sync_pending
+        _sync_pending = False
+    if should_sync and get_supabase_config():
+        sync_to_supabase_storage()
 
 def trigger_cloud_sync_async():
-    """Ejecuta sincronización en segundo plano de manera inmediata sin bloquear la transacción HTTP."""
+    """Agrupa commits rápidos con debounce de 2.5s y serializa la subida en segundo plano."""
+    global _sync_timer, _sync_pending
     if not get_supabase_config():
         return
-    t = threading.Thread(target=sync_to_supabase_storage, daemon=True)
-    t.start()
+    with _sync_lock:
+        if _sync_timer is not None:
+            try:
+                _sync_timer.cancel()
+            except Exception:
+                pass
+            _sync_timer = None
+        _sync_pending = True
+        timer = threading.Timer(_SYNC_DEBOUNCE_SECONDS, _execute_debounced_cloud_sync)
+        timer.daemon = True
+        timer.start()
+        _sync_timer = timer
 
 def schedule_cloud_sync():
-    """Programa o despacha sincronización inmediata/diferida hacia la nube."""
+    """Programa o despacha sincronización diferida/serializada hacia la nube."""
     trigger_cloud_sync_async()
+
+def flush_cloud_sync():
+    """Ejecuta un flush final seguro si existe una sincronización pendiente al apagar."""
+    global _sync_timer, _sync_pending
+    with _sync_lock:
+        if _sync_timer is not None:
+            try:
+                _sync_timer.cancel()
+            except Exception:
+                pass
+            _sync_timer = None
+        should_sync = _sync_pending
+        _sync_pending = False
+    if should_sync and get_supabase_config():
+        return sync_to_supabase_storage()
+    return True
+
+def _register_shutdown_sync_handlers():
+    try:
+        atexit.register(flush_cloud_sync)
+    except Exception:
+        pass
+    if threading.current_thread() is threading.main_thread() and hasattr(signal, "SIGTERM"):
+        try:
+            prev_handler = signal.getsignal(signal.SIGTERM)
+            def _sigterm_flush_handler(signum, frame):
+                try:
+                    flush_cloud_sync()
+                except Exception:
+                    pass
+                if callable(prev_handler) and prev_handler not in (signal.SIG_DFL, signal.SIG_IGN):
+                    prev_handler(signum, frame)
+                elif prev_handler == signal.SIG_DFL:
+                    raise SystemExit(0)
+            signal.signal(signal.SIGTERM, _sigterm_flush_handler)
+        except Exception:
+            pass
+
+_register_shutdown_sync_handlers()
 
 _wal_configured_paths = set()
 _wal_init_lock = threading.Lock()
@@ -729,6 +798,105 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     add_col_if_missing("devoluciones", "factura_fecha_afectada", "TEXT")
     add_col_if_missing("devoluciones", "factura_control_afectado", "TEXT")
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tenant_config_impresion (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id INTEGER NOT NULL DEFAULT 1,
+        color_primario TEXT NOT NULL DEFAULT '#0f172a',
+        mostrar_sku INTEGER NOT NULL DEFAULT 1,
+        mostrar_vendedor INTEGER NOT NULL DEFAULT 1,
+        mostrar_descuento_linea INTEGER NOT NULL DEFAULT 1,
+        logo_alineacion TEXT NOT NULL DEFAULT 'centro' CHECK(logo_alineacion IN ('izquierda', 'centro', 'derecha')),
+        texto_footer_factura TEXT NOT NULL DEFAULT 'Gracias por su compra. Conserve esta factura como comprobante de garantía.',
+        texto_header_ticket TEXT NOT NULL DEFAULT '*** COMPROBANTE DE COMPRA ***',
+        texto_footer_ticket TEXT NOT NULL DEFAULT '*** GRACIAS POR SU PREFERENCIA ***',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cursor.execute("SELECT COUNT(*) FROM tenant_config_impresion WHERE tenant_id = 1")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+        INSERT INTO tenant_config_impresion (
+            tenant_id, color_primario, mostrar_sku, mostrar_vendedor, mostrar_descuento_linea,
+            logo_alineacion, texto_footer_factura, texto_header_ticket, texto_footer_ticket
+        ) VALUES (
+            1, '#0f172a', 1, 1, 1, 'centro',
+            'Gracias por su compra. Conserve esta factura como comprobante de garantía.',
+            '*** COMPROBANTE DE COMPRA ***',
+            '*** GRACIAS POR SU PREFERENCIA ***'
+        )
+        """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tenant_formatos_documentos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id INTEGER NOT NULL DEFAULT 1,
+        doc_type TEXT NOT NULL,
+        config_json TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, doc_type)
+    )
+    """)
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS cajas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id INTEGER NOT NULL DEFAULT 1,
+        nombre TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    cursor.execute("SELECT COUNT(*) FROM cajas WHERE id = 1")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO cajas (id, tenant_id, nombre, is_active) VALUES (1, 1, 'Caja Principal', 1)")
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS turnos_caja (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id INTEGER NOT NULL DEFAULT 1,
+        caja_id INTEGER NOT NULL DEFAULT 1,
+        usuario_id INTEGER NOT NULL,
+        fecha_apertura TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        fecha_cierre TIMESTAMP NULL,
+        fondo_inicial_usd REAL NOT NULL DEFAULT 0.0,
+        fondo_inicial_ves REAL NOT NULL DEFAULT 0.0,
+        estado TEXT NOT NULL CHECK(estado IN ('ABIERTO', 'CERRADO')) DEFAULT 'ABIERTO',
+        totales_esperados_json TEXT NULL,
+        totales_declarados_json TEXT NULL,
+        diferencias_json TEXT NULL,
+        notas TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (caja_id) REFERENCES cajas(id),
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS movimientos_caja (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        turno_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL CHECK(tipo IN ('INGRESO', 'EGRESO')),
+        concepto TEXT NOT NULL,
+        metodo_pago TEXT NOT NULL,
+        moneda TEXT NOT NULL CHECK(moneda IN ('USD', 'VES', 'COP')),
+        monto REAL NOT NULL,
+        referencia TEXT NULL,
+        factura_id_ref INTEGER NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (turno_id) REFERENCES turnos_caja(id) ON DELETE CASCADE
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS login_intentos (
+        clave TEXT PRIMARY KEY,
+        intentos INTEGER NOT NULL DEFAULT 0,
+        bloqueado_hasta INTEGER NOT NULL DEFAULT 0,
+        ultimo_intento INTEGER NOT NULL DEFAULT 0
+    )
+    ''')
+
     add_col_if_missing("abonos_cxc", "numero_recibo", "TEXT")
     add_col_if_missing("abonos_cxp", "numero_recibo", "TEXT")
     add_col_if_missing("turnos_caja", "numero_cierre", "TEXT")
@@ -755,14 +923,7 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     except Exception:
         pass
 
-    add_col_if_missing("roles", "facturar_directo", "INTEGER DEFAULT 1")
-    try:
-        cursor.execute("UPDATE roles SET facturar_directo = 0 WHERE nombre = 'Vendedor Comercial' AND es_sistema = 1")
-        cursor.execute("UPDATE roles SET facturar_directo = 0 WHERE nombre = 'Almacenista / Inventario' AND es_sistema = 1")
-    except Exception:
-        pass
-
-        # 13.5 GESTION DE TERRITORIOS Y ZONAS COMERCIALES (ERP)
+    # 13.5 GESTION DE TERRITORIOS Y ZONAS COMERCIALES (ERP)
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS zonas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -777,8 +938,6 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     add_col_if_missing("clientes", "zona_id", "INTEGER REFERENCES zonas(id)")
     add_col_if_missing("clientes", "vendedor_id", "INTEGER REFERENCES vendedores(id)")
     add_col_if_missing("productos", "stock_comprometido", "REAL DEFAULT 0.0")
-    add_col_if_missing("pedido_items", "cantidad_aprobada", "REAL")
-    add_col_if_missing("pedidos", "fecha_vencimiento", "TIMESTAMP")
 
     # 14. TABLAS DE PEDIDOS Y PREVENTAS (FUERZA DE VENTAS CON AUTORIZACIÓN)
     cursor.execute('''
@@ -803,6 +962,7 @@ def auditar_y_migrar_db(conn=None, cursor=None):
         aprobado_por_usuario_id INTEGER,
         motivo_rechazo TEXT,
         notas TEXT,
+        fecha_vencimiento TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (cliente_id) REFERENCES clientes(id),
         FOREIGN KEY (vendedor_id) REFERENCES vendedores(id),
@@ -816,12 +976,15 @@ def auditar_y_migrar_db(conn=None, cursor=None):
         pedido_id INTEGER NOT NULL,
         producto_id INTEGER NOT NULL,
         cantidad REAL NOT NULL,
+        cantidad_aprobada REAL,
         precio_unitario REAL NOT NULL,
         subtotal REAL NOT NULL,
         FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,
         FOREIGN KEY (producto_id) REFERENCES productos(id)
     )
     ''')
+    add_col_if_missing("pedido_items", "cantidad_aprobada", "REAL")
+    add_col_if_missing("pedidos", "fecha_vencimiento", "TIMESTAMP")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON pedidos(estado, fecha DESC)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_vendedor ON pedidos(vendedor_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON pedidos(cliente_id)")
@@ -1385,9 +1548,16 @@ def auditar_y_migrar_db(conn=None, cursor=None):
         modificar_precios INTEGER DEFAULT 0,
         ver_costos_utilidad INTEGER DEFAULT 0,
         anular_transacciones INTEGER DEFAULT 0,
+        facturar_directo INTEGER DEFAULT 1,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
+    add_col_if_missing("roles", "facturar_directo", "INTEGER DEFAULT 1")
+    try:
+        cursor.execute("UPDATE roles SET facturar_directo = 0 WHERE nombre = 'Vendedor Comercial' AND es_sistema = 1")
+        cursor.execute("UPDATE roles SET facturar_directo = 0 WHERE nombre = 'Almacenista / Inventario' AND es_sistema = 1")
+    except Exception:
+        pass
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS usuarios (
@@ -3421,7 +3591,9 @@ def validar_movimiento_no_retroactivo(cursor, producto_id, fecha_movimiento):
         return True
     f_mov_str = str(fecha_movimiento).strip()
 
-    # 1. Bloquear períodos históricos cerrados (anteriores o iguales al corte certificado de apertura CPP)
+    # 1. Bloquear períodos históricos cerrados:
+    #    (a) cierre explícito en inventario_saldos_apertura_cpp para este producto_id
+    #    (b) período financiero con estado = 'cerrado' que cubra la fecha del movimiento
     try:
         cursor.execute("""
             SELECT fecha_corte FROM inventario_saldos_apertura_cpp
@@ -3431,7 +3603,7 @@ def validar_movimiento_no_retroactivo(cursor, producto_id, fecha_movimiento):
         ap_row = cursor.fetchone()
         if ap_row:
             fecha_corte = ap_row["fecha_corte"] if isinstance(ap_row, sqlite3.Row) else ap_row[0]
-            if f_mov_str <= str(fecha_corte).strip():
+            if fecha_corte and f_mov_str <= str(fecha_corte).strip():
                 raise ErrorMovimientoRetroactivoNoPermitido(
                     f"PERIODO_CERRADO_BLOQUEADO: La fecha del movimiento ({f_mov_str}) "
                     f"pertenece a un período histórico cerrado (<= {fecha_corte}) para el producto ID {producto_id}."
@@ -3441,10 +3613,26 @@ def validar_movimiento_no_retroactivo(cursor, producto_id, fecha_movimiento):
     except Exception:
         pass
 
-    if f_mov_str <= "2026-04-11 23:59:59":
-        raise ErrorMovimientoRetroactivoNoPermitido(
-            f"PERIODO_CERRADO_BLOQUEADO: La fecha del movimiento ({f_mov_str}) pertenece a un período cerrado."
-        )
+    try:
+        fecha_solo = f_mov_str[:10]
+        cursor.execute("""
+            SELECT codigo_periodo, fecha_inicio, fecha_fin
+            FROM periodos_financieros
+            WHERE LOWER(COALESCE(estado, '')) = 'cerrado'
+              AND (? BETWEEN substr(fecha_inicio, 1, 10) AND substr(fecha_fin, 1, 10)
+                   OR substr(?, 1, 10) BETWEEN substr(fecha_inicio, 1, 10) AND substr(fecha_fin, 1, 10))
+            LIMIT 1
+        """, (fecha_solo, fecha_solo))
+        per_row = cursor.fetchone()
+        if per_row:
+            cod_per = per_row["codigo_periodo"] if isinstance(per_row, sqlite3.Row) else per_row[0]
+            raise ErrorMovimientoRetroactivoNoPermitido(
+                f"PERIODO_CERRADO_BLOQUEADO: La fecha del movimiento ({f_mov_str}) pertenece al período cerrado ({cod_per})."
+            )
+    except ErrorMovimientoRetroactivoNoPermitido:
+        raise
+    except Exception:
+        pass
 
     # 2. Bloquear retroactividad frente al último movimiento físico del SKU
     cursor.execute("""
@@ -4356,11 +4544,27 @@ def anular_ajuste_inventario(cursor, ajuste_id, motivo="Anulación directa de aj
         if estado_actual == "anulado":
             raise ValueError(f"AJUSTE_YA_ANULADO: El ajuste {aj['numero_ajuste']} ya fue anulado previamente.")
 
-        if str(aj.get("fecha") or "") <= "2026-10-23 23:59:59":
-            raise ErrorAnulacionAjusteConMovimientosPosteriores(
-                f"PERIODO_CERRADO: El ajuste {aj['numero_ajuste']} pertenece al período histórico certificado cerrado. "
-                "Prohibido anular ajustes históricos; utilice un Contra-Ajuste compensatorio."
-            )
+        aj_fecha_str = str(aj.get("fecha") or "").strip()
+        aj_fecha_solo = aj_fecha_str[:10]
+        if aj_fecha_solo:
+            try:
+                cursor.execute("""
+                    SELECT codigo_periodo FROM periodos_financieros
+                    WHERE LOWER(COALESCE(estado, '')) = 'cerrado'
+                      AND ? BETWEEN substr(fecha_inicio, 1, 10) AND substr(fecha_fin, 1, 10)
+                    LIMIT 1
+                """, (aj_fecha_solo,))
+                per_row = cursor.fetchone()
+                if per_row:
+                    cod_per = per_row["codigo_periodo"] if isinstance(per_row, sqlite3.Row) else per_row[0]
+                    raise ErrorAnulacionAjusteConMovimientosPosteriores(
+                        f"PERIODO_CERRADO: El ajuste {aj['numero_ajuste']} pertenece al período cerrado ({cod_per}). "
+                        "Prohibido anular ajustes de períodos cerrados; utilice un Contra-Ajuste compensatorio."
+                    )
+            except ErrorAnulacionAjusteConMovimientosPosteriores:
+                raise
+            except Exception:
+                pass
 
         cursor.execute("""
             SELECT * FROM inventario_ajuste_detalles
@@ -4391,10 +4595,28 @@ def anular_ajuste_inventario(cursor, ajuste_id, motivo="Anulación directa de aj
                     f"No se encontró asiento en inventario_movimientos para el ajuste {aj['numero_ajuste']} (producto ID {p_id})."
                 )
             mov_orig_dict = dict(mov_orig)
-            if int(mov_orig_dict["id"]) <= 108:
-                raise ErrorAnulacionAjusteConMovimientosPosteriores(
-                    f"PERIODO_CERRADO: El movimiento ID {mov_orig_dict['id']} pertenece al corte histórico inmutable (id <= 108)."
-                )
+
+            try:
+                cursor.execute("""
+                    SELECT fecha_corte, ultimo_movimiento_id_corte
+                    FROM inventario_saldos_apertura_cpp
+                    WHERE producto_id = ?
+                    ORDER BY id DESC LIMIT 1
+                """, (p_id,))
+                ap_row = cursor.fetchone()
+                if ap_row:
+                    ap_fecha = str((ap_row["fecha_corte"] if isinstance(ap_row, sqlite3.Row) else ap_row[0]) or "").strip()
+                    ap_mov_id = int((ap_row["ultimo_movimiento_id_corte"] if isinstance(ap_row, sqlite3.Row) else ap_row[1]) or 0)
+                    if (ap_fecha and aj_fecha_str and aj_fecha_str <= ap_fecha) or (ap_mov_id > 0 and int(mov_orig_dict["id"]) <= ap_mov_id):
+                        raise ErrorAnulacionAjusteConMovimientosPosteriores(
+                            f"PERIODO_CERRADO: El movimiento ID {mov_orig_dict['id']} del ajuste {aj['numero_ajuste']} "
+                            f"pertenece al corte de apertura certificado (<= {ap_fecha or ap_mov_id})."
+                        )
+            except ErrorAnulacionAjusteConMovimientosPosteriores:
+                raise
+            except Exception:
+                pass
+
             movimientos_originales[det_id] = mov_orig_dict
 
             # Buscar si existe cualquier movimiento posterior para este SKU
@@ -6739,12 +6961,13 @@ def anular_pago_financiero(pago_id, usuario_id=1, motivo="", conn=None):
             cur.execute("BEGIN IMMEDIATE")
             started_tx = True
 
-        cur.execute("SELECT id, estado, concepto FROM pagos WHERE id = ?", (pago_id,))
+        cur.execute("SELECT id, estado, concepto, tipo_operacion FROM pagos WHERE id = ?", (pago_id,))
         p = cur.fetchone()
         if not p:
             raise ValueError(f"Pago {pago_id} no encontrado")
         if p[1] == 'anulado':
             raise ValueError(f"El pago {pago_id} ya se encuentra anulado")
+        era_cobro = str(p[3] or 'cobro_cliente').strip().lower() in ('cobro_cliente', 'anticipo_cliente')
 
         cur.execute("SELECT id, documento_tipo, documento_id, cuenta_por_cobrar_id, cuenta_por_pagar_id, monto_aplicado_usd FROM pago_aplicaciones WHERE pago_id = ? AND estado = 'activa'", (pago_id,))
         apps = cur.fetchall()
@@ -6792,7 +7015,14 @@ def anular_pago_financiero(pago_id, usuario_id=1, motivo="", conn=None):
 
             cur.execute("SELECT saldo_actual FROM cuentas_tesoreria WHERE id = ?", (cuenta_id,))
             saldo_ant = float(cur.fetchone()[0])
-            saldo_nue = round(saldo_ant - monto_moneda, 2)
+            if era_cobro:
+                saldo_nue = round(saldo_ant - monto_moneda, 2)
+                tipo_mov_rev = 'egreso'
+                origen_mod_rev = 'cobro_cxc'
+            else:
+                saldo_nue = round(saldo_ant + monto_moneda, 2)
+                tipo_mov_rev = 'ingreso'
+                origen_mod_rev = 'pago_cxp'
             cur.execute("UPDATE cuentas_tesoreria SET saldo_actual = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (saldo_nue, cuenta_id))
 
             cur.execute("""
@@ -6800,9 +7030,10 @@ def anular_pago_financiero(pago_id, usuario_id=1, motivo="", conn=None):
                 cuenta_tesoreria_id, tipo_movimiento, origen_modulo, origen_id, pago_detalle_id,
                 fecha_movimiento, descripcion, monto_moneda, saldo_anterior, saldo_nuevo,
                 tasa_cambio, equivalente_usd, usuario_id
-            ) VALUES (?, 'egreso', 'cobro_cxc', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                cuenta_id, pago_id, det_id, now_str, f"ANULACIÓN PAGO #{pago_id}: {motivo}",
+                cuenta_id, tipo_mov_rev, origen_mod_rev, pago_id, det_id, now_str,
+                f"ANULACIÓN PAGO #{pago_id}: {motivo}",
                 monto_moneda, saldo_ant, saldo_nue, tasa, eq_usd, usuario_id
             ))
 
@@ -7074,11 +7305,54 @@ def registrar_gasto_operativo(datos, usuario_id=1, conn=None):
 
         cxp_id = None
         if tipo_pago == 'credito':
+            prov_id_resuelto = datos.get('proveedor_id')
+            if prov_id_resuelto is not None:
+                cur.execute("SELECT id FROM proveedores WHERE id = ?", (int(prov_id_resuelto),))
+                if not cur.fetchone():
+                    prov_id_resuelto = None
+            if prov_id_resuelto is None and rif:
+                cur.execute("SELECT id FROM proveedores WHERE LOWER(TRIM(cedula)) = LOWER(TRIM(?)) LIMIT 1", (str(rif),))
+                r_p = cur.fetchone()
+                if r_p:
+                    prov_id_resuelto = r_p[0]
+            if prov_id_resuelto is None and beneficiario:
+                cur.execute("SELECT id FROM proveedores WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?)) LIMIT 1", (str(beneficiario),))
+                r_p = cur.fetchone()
+                if r_p:
+                    prov_id_resuelto = r_p[0]
+            if prov_id_resuelto is None:
+                cur.execute("SELECT id FROM proveedores WHERE cedula = 'SERV-GENERICO' LIMIT 1")
+                r_gen = cur.fetchone()
+                if r_gen:
+                    prov_id_resuelto = r_gen[0]
+                else:
+                    ced_gen = str(rif).strip() if rif else 'SERV-GENERICO'
+                    nom_gen = str(beneficiario).strip() if beneficiario else 'Proveedor de Servicios Varios'
+                    tel_gen = str(datos.get('beneficiario_telefono') or '00000000000')
+                    cur.execute("""
+                        INSERT INTO proveedores (nombre, cedula, telefono, correo, direccion)
+                        VALUES (?, ?, ?, NULL, 'Servicios Operativos')
+                    """, (nom_gen, ced_gen, tel_gen))
+                    prov_id_resuelto = cur.lastrowid
+
+            fecha_emision_cxp = str(fecha_emision).strip()[:10]
+            fecha_venc_cxp = datos.get('fecha_vencimiento') or (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+            num_doc_cxp = datos.get('numero_factura_fiscal') or numero_gasto
             cur.execute("""
             INSERT INTO cuentas_por_pagar (
-                concepto, monto_total, saldo_pendiente, fecha_vencimiento, estado
-            ) VALUES (?, ?, ?, date('now', '+30 days'), 'pendiente')
-            """, (f"Gasto: {concepto} ({beneficiario})", monto_usd, monto_usd))
+                proveedor_id, descripcion_concepto, numero_factura, monto_total, monto_pagado,
+                saldo_pendiente, fecha_emision, fecha_vencimiento, estado, tipo_registro, notas
+            ) VALUES (?, ?, ?, ?, 0.0, ?, ?, ?, 'pendiente', 'directo', ?)
+            """, (
+                int(prov_id_resuelto),
+                f"Gasto: {concepto} ({beneficiario})",
+                num_doc_cxp,
+                monto_usd,
+                monto_usd,
+                fecha_emision_cxp,
+                fecha_venc_cxp,
+                f"Generado desde Gasto Operativo {numero_gasto}"
+            ))
             cxp_id = cur.lastrowid
 
         cur.execute("""
@@ -7754,6 +8028,18 @@ def obtener_pedido_detalle(pedido_id, conn=None):
             conn.close()
 
 
+def _deducir_moneda_metodo_pago(metodo_pago_contado):
+    """Deduce la moneda operativa real ('VES', 'COP', 'USD') según el nombre del método de pago."""
+    m = (metodo_pago_contado or "").strip().lower()
+    for a, b in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u")):
+        m = m.replace(a, b)
+    if any(k in m for k in ("bs", "ves", "bolivar", "pago movil", "pagomovil", "punto", "biopago")):
+        return "VES"
+    if any(k in m for k in ("cop", "peso", "nequi", "bancolombia", "daviplata")):
+        return "COP"
+    return "USD"
+
+
 def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_contado='Efectivo USD', notas_adicionales='', items_aprobados=None, conn=None, auto_commit=True):
     """
     Autoriza un pedido y lo convierte en Factura real con soporte para APROBACION PARCIAL (Backorders):
@@ -7893,7 +8179,8 @@ def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_con
         cur.execute("SELECT es_contribuyente_especial, igtf_porcentaje, tasa_ves FROM configuracion WHERE id = 1")
         cfg_fisc_row = cur.fetchone()
         cfg_fisc = dict(cfg_fisc_row) if cfg_fisc_row else {"es_contribuyente_especial": 0, "igtf_porcentaje": 3.0}
-        pagos_igtf_sim = [{"moneda": "USD", "equivalente_usd": total_usd}] if tipo_venta == "contado" else []
+        moneda_contado = _deducir_moneda_metodo_pago(metodo_pago_contado)
+        pagos_igtf_sim = [{"moneda": moneda_contado, "equivalente_usd": total_usd}] if tipo_venta == "contado" else []
         igtf_res = calcular_igtf_operacion(total_usd, pagos_igtf_sim, cfg_fisc, tasa_ves=tasa_ves)
 
         fecha_factura = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -8011,10 +8298,19 @@ def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_con
 
         # 3. Flujo Contable y Tesoreria alineado al motor oficial
         if tipo_venta == "contado":
+            tasa_pago = tasa_ves if moneda_contado == "VES" else (tasa_cop if moneda_contado == "COP" else 1.0)
+            equiv_usd_pago = float(igtf_res.get("total_operacion_usd", total_usd))
+            if moneda_contado == "VES":
+                monto_moneda_pago = round(equiv_usd_pago * tasa_ves, 2)
+            elif moneda_contado == "COP":
+                monto_moneda_pago = round(equiv_usd_pago * tasa_cop, 2)
+            else:
+                monto_moneda_pago = equiv_usd_pago
+
             cur.execute("""
                 INSERT INTO factura_pagos (factura_id, moneda, metodo, monto_moneda, tasa_cambio, equivalente_usd, referencia)
-                VALUES (?, 'USD', ?, ?, 1.0, ?, ?)
-            """, (factura_id, metodo_pago_contado, total_usd, total_usd, f"Pago de contado Pedido {ped_dict['numero_pedido']}"))
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (factura_id, moneda_contado, metodo_pago_contado, monto_moneda_pago, tasa_pago, equiv_usd_pago, f"Pago de contado Pedido {ped_dict['numero_pedido']}"))
 
             # Asentar ingreso en movimientos_caja amarrado al turno activo
             cur.execute("SELECT id FROM turnos_caja WHERE estado = 'ABIERTO' ORDER BY id DESC LIMIT 1")
@@ -8022,12 +8318,13 @@ def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_con
             if t_open:
                 cur.execute("""
                     INSERT INTO movimientos_caja (turno_id, tipo, concepto, metodo_pago, moneda, monto, referencia, factura_id_ref, created_at)
-                    VALUES (?, 'INGRESO', ?, ?, 'USD', ?, ?, ?, CURRENT_TIMESTAMP)
+                    VALUES (?, 'INGRESO', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (
                     t_open["id"],
                     f"Cobro Factura #{numero_factura} (Pedido {ped_dict['numero_pedido']})",
                     metodo_pago_contado,
-                    total_usd,
+                    moneda_contado,
+                    monto_moneda_pago,
                     f"PED-{pedido_id}",
                     factura_id
                 ))
