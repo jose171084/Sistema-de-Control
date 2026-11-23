@@ -3130,8 +3130,11 @@ function renderClientesTable() {
 
   tbody.innerHTML = AppState.clientes.map(c => {
     // Generar enlace directo de WhatsApp
-    const waPhone = (c.telefono || '').replace(/[^0-9]/g, '');
-    const waLink = `https://wa.me/${waPhone}?text=${encodeURIComponent(`Hola ${c.nombre}, te contactamos de ${AppState.config.nombre_negocio}.`)}`;
+    const negocioNombre = (AppState.config && AppState.config.nombre_negocio) ? AppState.config.nombre_negocio : 'TAVO CLOUD';
+    const saludoCliente = `Hola ${c.nombre}, te contactamos de ${negocioNombre}.`;
+    const waLink = (window.TavoWhatsApp && typeof window.TavoWhatsApp.buildUrl === 'function')
+      ? window.TavoWhatsApp.buildUrl(c.telefono || '', saludoCliente)
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(saludoCliente)}`;
     const hasVend = Boolean(c.vendedor_id);
     const hasZona = Boolean(c.zona_id);
     const vendBadge = hasVend
@@ -3152,7 +3155,7 @@ function renderClientesTable() {
           <a href="${waLink}" target="_blank" rel="noopener noreferrer" 
              class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition">
             <i class="fa-brands fa-whatsapp text-emerald-600 mr-1.5 text-sm"></i>
-            ${escapeHtml(c.telefono)}
+            ${escapeHtml(c.telefono || 'Enviar WhatsApp')}
           </a>
         </td>
         <td class="py-3 px-4 text-xs text-slate-500">${escapeHtml(c.correo || '-')}</td>
@@ -4164,35 +4167,23 @@ function compartirFacturaWhatsApp() {
   const f = AppState.ultimaFacturaEmitida;
   if (!f) return;
 
-  const waPhone = (f.cliente_telefono || '').replace(/[^0-9]/g, '');
-  if (!waPhone) {
-    alert('El cliente no tiene un número telefónico válido para WhatsApp.');
+  const cliObj = (!f.cliente_telefono && f.cliente_id)
+    ? (AppState.clientes || []).find(cl => String(cl.id) === String(f.cliente_id))
+    : null;
+  const phoneRaw = f.cliente_telefono || (cliObj ? cliObj.telefono : '') || '';
+
+  if (window.TavoWhatsApp && typeof window.TavoWhatsApp.buildMensajeFactura === 'function') {
+    const mensaje = window.TavoWhatsApp.buildMensajeFactura({
+      factura: f,
+      config: AppState.config || {}
+    });
+    window.TavoWhatsApp.enviar(phoneRaw, mensaje);
     return;
   }
 
-  let mensaje = `*FACTURA ELECTRÓNICA - ${AppState.config.nombre_negocio}*\n`;
-  mensaje += `N°: *${f.numero_factura}*\n`;
-  mensaje += `Cliente: ${f.cliente_nombre} (${f.cliente_cedula})\n`;
-  mensaje += `Condición: *${f.tipo_venta === 'credito' ? 'A CRÉDITO' : 'AL CONTADO'}*\n`;
-  if (f.tipo_venta === 'credito') {
-    mensaje += `Fecha Vencimiento: *${formatFecha(f.fecha_vencimiento)}*\n`;
-    mensaje += `Saldo por Cobrar: *$${parseFloat(f.saldo_pendiente || 0).toFixed(2)}*\n`;
-  }
-  mensaje += `Fecha: ${formatFecha(f.fecha)}\n\n`;
-  mensaje += `*DETALLE DE ÍTEMS:*\n`;
-
-  f.detalles.forEach(d => {
-    mensaje += `- ${d.cantidad}x ${d.nombre_producto}: $${parseFloat(d.total).toFixed(2)}\n`;
-  });
-
-  mensaje += `\n*TOTAL FACTURA:*\n`;
-  mensaje += `*USD: $${parseFloat(f.total_usd).toFixed(2)}*\n`;
-  mensaje += `Bolívares: ${parseFloat(f.total_ves).toFixed(2)} Bs.\n`;
-  mensaje += `Pesos: ${Math.round(f.total_cop).toLocaleString('es-CO')} COP\n\n`;
-  mensaje += `¡Gracias por su preferencia!`;
-
-  const url = `https://wa.me/${waPhone}?text=${encodeURIComponent(mensaje)}`;
-  window.open(url, '_blank');
+  const mensaje = `FACTURA N° ${f.numero_factura} — Total: $${parseFloat(f.total_usd || 0).toFixed(2)} USD`;
+  const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(mensaje)}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 function toggleHistorialFacturas() {
@@ -5673,31 +5664,23 @@ function compartirDevolucionWhatsApp() {
   const dev = AppState.ultimaDevolucionEmitida;
   if (!dev) return;
 
-  const itemsTxt = (dev.items || dev.detalles || []).map(it => `• ${it.nombre || it.nombre_producto} x${it.cantidad} = $${parseFloat(it.total || it.subtotal).toFixed(2)}`).join('\n');
-  const msg = 
-`*${AppState.config.nombre_negocio}*
-*COMPROBANTE DE DEVOLUCIÓN: ${dev.numero_devolucion}*
-----------------------------------------
-Cliente: ${dev.cliente_nombre || 'Cliente'}
-Factura de Origen: ${dev.numero_factura || 'Manual'}
-Fecha: ${formatFecha(dev.fecha_emision)}
-Motivo: ${dev.motivo}
+  const cliObj = (!dev.cliente_telefono && dev.cliente_id)
+    ? (AppState.clientes || []).find(cl => String(cl.id) === String(dev.cliente_id))
+    : null;
+  const phoneRaw = dev.cliente_telefono || (cliObj ? cliObj.telefono : '') || '';
 
-*Ítems Devueltos:*
-${itemsTxt}
+  if (window.TavoWhatsApp && typeof window.TavoWhatsApp.buildMensajeDevolucion === 'function') {
+    const msg = window.TavoWhatsApp.buildMensajeDevolucion({
+      devolucion: dev,
+      config: AppState.config || {}
+    });
+    window.TavoWhatsApp.enviar(phoneRaw, msg);
+    return;
+  }
 
-*TOTAL DEVUELTO: $${parseFloat(dev.total_usd).toFixed(2)}*
-Equiv. en Bolívares: ${parseFloat(dev.total_ves || 0).toFixed(2)} Bs.
-Equiv. en Pesos: ${Math.round(dev.total_cop || 0).toLocaleString('es-CO')} COP
-Forma de Reembolso: ${(dev.metodo_reembolso || '').replace(/_/g, ' ').toUpperCase()}
-----------------------------------------
-_Mercancía reintegrada al stock satisfactoriamente._`;
-
-  const phone = (dev.cliente_telefono || '').replace(/[^0-9]/g, '');
-  const url = phone 
-    ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
-    : `https://wa.me/?text=${encodeURIComponent(msg)}`;
-  window.open(url, '_blank');
+  const msg = `COMPROBANTE DE DEVOLUCIÓN N° ${dev.numero_devolucion} — Total: $${parseFloat(dev.total_usd || 0).toFixed(2)}`;
+  const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 // ========================================================
@@ -6276,8 +6259,10 @@ function renderProveedoresTable() {
   }
 
   tbody.innerHTML = AppState.proveedores.map(p => {
-    const waPhone = p.telefono.replace(/[^0-9]/g, '');
-    const waLink = `https://wa.me/${waPhone}?text=${encodeURIComponent(`Hola estimado proveedor ${p.nombre}.`)}`;
+    const saludoProv = `Hola estimado proveedor ${p.nombre}.`;
+    const waLink = (window.TavoWhatsApp && typeof window.TavoWhatsApp.buildUrl === 'function')
+      ? window.TavoWhatsApp.buildUrl(p.telefono || '', saludoProv)
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(saludoProv)}`;
 
     return `
       <tr class="hover:bg-slate-50 transition">
@@ -6287,7 +6272,7 @@ function renderProveedoresTable() {
           <a href="${waLink}" target="_blank" rel="noopener noreferrer" 
              class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition">
             <i class="fa-brands fa-whatsapp text-emerald-600 mr-1.5 text-sm"></i>
-            ${escapeHtml(p.telefono)}
+            ${escapeHtml(p.telefono || 'Enviar WhatsApp')}
           </a>
         </td>
         <td class="py-3 px-4 text-xs text-slate-500">${escapeHtml(p.correo || '-')}</td>
@@ -6494,7 +6479,9 @@ function renderCxcConsolidadoTable() {
   tbody.innerHTML = lista.map(c => {
     const saldoUsd = parseFloat(c.saldo_pendiente_total_usd !== undefined ? c.saldo_pendiente_total_usd : (c.saldo_pendiente_usd || 0));
     const saldoBs = (c.saldo_pendiente_total_ves !== undefined ? parseFloat(c.saldo_pendiente_total_ves) : (c.saldo_pendiente_ves !== undefined ? parseFloat(c.saldo_pendiente_ves) : (saldoUsd * tasaVes))).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const waPhone = (c.cliente_telefono || '').replace(/[^0-9]/g, '');
+    const waPhone = (window.TavoWhatsApp && typeof window.TavoWhatsApp.normalizarTelefono === 'function')
+      ? window.TavoWhatsApp.normalizarTelefono(c.cliente_telefono || '')
+      : (c.cliente_telefono || '').replace(/\D/g, '');
     const totalFacturado = parseFloat(c.total_facturado_usd !== undefined ? c.total_facturado_usd : (c.total_deuda_usd || 0));
     const totalCobrado = parseFloat(c.total_cobrado_usd !== undefined ? c.total_cobrado_usd : (c.total_pagado_usd || 0));
 
@@ -6516,7 +6503,7 @@ function renderCxcConsolidadoTable() {
           <div class="flex items-center gap-1.5">
             <i class="fa-solid fa-phone text-slate-400 text-[11px]"></i>
             <span>${escapeHtml(c.cliente_telefono || 'Sin teléfono')}</span>
-            ${waPhone ? `<a href="https://wa.me/${waPhone}" target="_blank" class="text-emerald-600 hover:text-emerald-700 ml-1"><i class="fa-brands fa-whatsapp text-sm"></i></a>` : ''}
+            ${waPhone ? `<a href="https://api.whatsapp.com/send?phone=${waPhone}" target="_blank" rel="noopener noreferrer" class="text-emerald-600 hover:text-emerald-700 ml-1"><i class="fa-brands fa-whatsapp text-sm"></i></a>` : ''}
           </div>
         </td>
         <td class="py-3 px-4 text-center">${badgeFacturas}</td>
@@ -6573,15 +6560,17 @@ async function verEstadoCuentaCliente(clienteId) {
     const nombre = cliente ? cliente.nombre : `Cliente #${clienteId}`;
     const cedula = cliente ? cliente.cedula : '-';
     const telefono = cliente ? (cliente.telefono || 'Sin teléfono') : '-';
-    const waPhone = (telefono || '').replace(/[^0-9]/g, '');
+    const waPhone = (window.TavoWhatsApp && typeof window.TavoWhatsApp.normalizarTelefono === 'function')
+      ? window.TavoWhatsApp.normalizarTelefono(cliente ? (cliente.telefono || '') : '')
+      : (telefono || '').replace(/\D/g, '');
 
     document.getElementById('cxcDetalleClienteNombre').textContent = nombre;
     document.getElementById('cxcDetalleClienteCedula').textContent = cedula;
     document.getElementById('cxcDetalleClienteTelefono').innerHTML = `<i class="fa-solid fa-phone mr-1"></i>${escapeHtml(telefono)}`;
     const waSpan = document.getElementById('cxcDetalleClienteWhatsapp');
     if (waSpan) {
-      waSpan.innerHTML = waPhone 
-        ? `<a href="https://wa.me/${waPhone}" target="_blank" class="text-emerald-600 hover:underline font-semibold flex items-center gap-1"><i class="fa-brands fa-whatsapp"></i> Chat WhatsApp</a>`
+      waSpan.innerHTML = waPhone
+        ? `<a href="https://api.whatsapp.com/send?phone=${waPhone}" target="_blank" rel="noopener noreferrer" class="text-emerald-600 hover:underline font-semibold flex items-center gap-1"><i class="fa-brands fa-whatsapp"></i> Chat WhatsApp</a>`
         : '';
     }
 
@@ -7185,7 +7174,23 @@ async function confirmarAbonoCXC() {
     if (res.ok) {
       const data = await res.json();
       closeModalAbonoCXC();
-      alert(`¡Pago de $${data.monto_abono_usd.toFixed(2)} USD registrado exitosamente!\nNuevo saldo pendiente: $${data.nuevo_saldo_pendiente.toFixed(2)}`);
+      const abonoRegistrado = {
+        id: data.abono_id || data.id || null,
+        numero_recibo: data.numero_recibo || '',
+        fecha: new Date().toISOString(),
+        monto_usd: data.monto_abono_usd,
+        nuevo_saldo_pendiente: data.nuevo_saldo_pendiente,
+        notas,
+        pagos: pagos.map(p => ({
+          ...p,
+          equivalente_usd: p.tasa_cambio > 0 ? (parseFloat(p.monto_moneda) || 0) / p.tasa_cambio : 0
+        }))
+      };
+      AppState.ultimoAbonoCxCActual = {
+        cuenta: { ...c, saldo_pendiente: data.nuevo_saldo_pendiente },
+        abono: abonoRegistrado
+      };
+      mostrarModalReciboCxCWhatsApp(data.monto_abono_usd, data.nuevo_saldo_pendiente, c.numero_factura);
       await loadCxc();
       if (AppState.cxcClienteSeleccionado) {
         await verEstadoCuentaCliente(AppState.cxcClienteSeleccionado);
@@ -7264,9 +7269,12 @@ async function verHistorialAbonosCXC(cxcId) {
               ${ab.id === 0 ? 'Anticipo Inicial' : 'Abono #' + (c.abonos.length - idx)} &bull; ${formatFecha(ab.fecha)}
               ${esAnulado ? '<span class="ml-1.5 px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">ANULADO</span>' : '<span class="ml-1.5 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">ACTIVO</span>'}
             </span>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap justify-end">
               <strong class="${esAnulado ? 'line-through text-slate-400' : 'text-emerald-700'} font-extrabold text-sm">+$${parseFloat(ab.monto_usd).toFixed(2)}</strong>
               ${!esAnulado ? `
+                <button type="button" onclick="enviarReciboAbonoWhatsApp(${idx})" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-sm transition cursor-pointer" title="Enviar recibo por WhatsApp">
+                  <i class="fa-brands fa-whatsapp mr-1"></i>Enviar Recibo por WhatsApp
+                </button>
                 <button type="button" onclick="imprimirReciboAbonoCXC(${idx})" class="px-2 py-1 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-[11px] font-bold shadow-sm transition cursor-pointer" title="Imprimir recibo de abono">
                   <i class="fa-solid fa-print mr-1"></i>Recibo
                 </button>
@@ -7302,29 +7310,123 @@ function closeModalHistorialAbonosCXC() {
   document.getElementById('modalHistorialAbonosCXC').classList.add('hidden');
 }
 
+function _buscarCuentaCxC(cxcId) {
+  const target = String(cxcId);
+  const enGeneral = (AppState.cxc || []).find(item => String(item.id) === target);
+  if (enGeneral) return enGeneral;
+  const enCliente = (AppState.cxcClienteFacturas || []).find(item => String(item.id) === target);
+  if (enCliente) return enCliente;
+  if (AppState.cxcHistorialCuentaActual && String(AppState.cxcHistorialCuentaActual.id) === target) {
+    return AppState.cxcHistorialCuentaActual;
+  }
+  return null;
+}
+
+function _resolverTelefonoCuentaCxC(cuenta) {
+  if (!cuenta) return '';
+  if (cuenta.cliente_telefono && String(cuenta.cliente_telefono).trim()) {
+    return cuenta.cliente_telefono;
+  }
+  const cli = (AppState.clientes || []).find(cl => String(cl.id) === String(cuenta.cliente_id));
+  return (cli && cli.telefono) ? cli.telefono : '';
+}
+
+function enviarReciboAbonoWhatsApp(idx) {
+  const c = AppState.cxcHistorialCuentaActual;
+  if (!c || !Array.isArray(c.abonos) || !c.abonos[idx]) return;
+  const ab = c.abonos[idx];
+  const tel = _resolverTelefonoCuentaCxC(c);
+  if (window.TavoWhatsApp && typeof window.TavoWhatsApp.buildMensajeReciboAbonoCxC === 'function') {
+    const msg = window.TavoWhatsApp.buildMensajeReciboAbonoCxC({
+      cuenta: c,
+      abono: ab,
+      config: AppState.config || {}
+    });
+    window.TavoWhatsApp.enviar(tel, msg);
+  }
+}
+
+function enviarUltimoReciboAbonoWhatsApp() {
+  const ctx = AppState.ultimoAbonoCxCActual;
+  if (!ctx || !ctx.cuenta || !ctx.abono) return;
+  const tel = _resolverTelefonoCuentaCxC(ctx.cuenta);
+  if (window.TavoWhatsApp && typeof window.TavoWhatsApp.buildMensajeReciboAbonoCxC === 'function') {
+    const msg = window.TavoWhatsApp.buildMensajeReciboAbonoCxC({
+      cuenta: ctx.cuenta,
+      abono: ctx.abono,
+      config: AppState.config || {}
+    });
+    window.TavoWhatsApp.enviar(tel, msg);
+  }
+  const modal = document.getElementById('modalReciboCxCWhatsApp');
+  if (modal) modal.remove();
+}
+
+function mostrarModalReciboCxCWhatsApp(montoAbonoUsd, nuevoSaldoUsd, numeroFactura) {
+  const prev = document.getElementById('modalReciboCxCWhatsApp');
+  if (prev) prev.remove();
+
+  const saldado = parseFloat(nuevoSaldoUsd || 0) <= 0.005;
+  const overlay = document.createElement('div');
+  overlay.id = 'modalReciboCxCWhatsApp';
+  overlay.className = 'fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4';
+  overlay.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xl shrink-0">
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+        <div>
+          <h3 class="text-base font-extrabold text-slate-900">Pago Registrado Exitosamente</h3>
+          <p class="text-xs text-slate-500">Factura #${escapeHtml(String(numeroFactura || '-'))}</p>
+        </div>
+      </div>
+      <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1 text-xs">
+        <div class="flex justify-between">
+          <span class="text-slate-500">Monto Abonado:</span>
+          <strong class="text-emerald-700 font-extrabold">$${parseFloat(montoAbonoUsd || 0).toFixed(2)} USD</strong>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-500">Nuevo Saldo Pendiente:</span>
+          <strong class="${saldado ? 'text-emerald-700' : 'text-slate-900'} font-extrabold">${saldado ? 'CUENTA SALDADA ($0.00)' : '$' + parseFloat(nuevoSaldoUsd || 0).toFixed(2) + ' USD'}</strong>
+        </div>
+      </div>
+      <div class="flex flex-col sm:flex-row gap-2 pt-1">
+        <button type="button" onclick="enviarUltimoReciboAbonoWhatsApp()" class="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold shadow-sm flex items-center justify-center gap-2 transition cursor-pointer">
+          <i class="fa-brands fa-whatsapp text-base"></i> Enviar Recibo por WhatsApp
+        </button>
+        <button type="button" onclick="document.getElementById('modalReciboCxCWhatsApp')?.remove()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
 function enviarRecordatorioWhatsAppCXC(cxcId) {
-  const c = AppState.cxc.find(item => item.id === cxcId);
+  const c = _buscarCuentaCxC(cxcId);
   if (!c) return;
 
-  const waPhone = (c.cliente_telefono || '').replace(/[^0-9]/g, '');
-  if (!waPhone) {
-    alert('El cliente no tiene un número telefónico válido para WhatsApp.');
+  const tel = _resolverTelefonoCuentaCxC(c);
+  if (window.TavoWhatsApp && typeof window.TavoWhatsApp.buildMensajeRecordatorioCxC === 'function') {
+    const mensaje = window.TavoWhatsApp.buildMensajeRecordatorioCxC({
+      cuenta: c,
+      config: AppState.config || {}
+    });
+    window.TavoWhatsApp.enviar(tel, mensaje);
     return;
   }
 
-  const saldoBs = (c.saldo_pendiente * AppState.config.tasa_ves).toFixed(2);
-  let mensaje = `*RECORDATORIO DE PAGO - ${AppState.config.nombre_negocio}*\n`;
-  mensaje += `Estimado(a) *${c.cliente_nombre}*,\n`;
-  mensaje += `Le escribimos cordialmente para recordarle el saldo pendiente de su Factura *#${c.numero_factura}*.\n\n`;
-  mensaje += `*DATOS DE LA CUENTA:*\n`;
-  mensaje += `- Total Factura: $${parseFloat(c.monto_total).toFixed(2)}\n`;
-  mensaje += `- Total Abonado: $${parseFloat(c.monto_pagado).toFixed(2)}\n`;
-  mensaje += `- *SALDO PENDIENTE:* *$${parseFloat(c.saldo_pendiente).toFixed(2)}* (≈ ${saldoBs} Bs.)\n`;
-  mensaje += `- *Fecha de Vencimiento:* ${c.fecha_vencimiento}\n\n`;
-  mensaje += `Agradecemos gestionar su pago a la brevedad. ¡Que tenga un excelente día!`;
-
-  const url = `https://wa.me/${waPhone}?text=${encodeURIComponent(mensaje)}`;
-  window.open(url, '_blank');
+  const saldoBs = (parseFloat(c.saldo_pendiente || 0) * (AppState.config?.tasa_ves || 0)).toFixed(2);
+  let mensaje = `*RECORDATORIO DE PAGO - ${AppState.config?.nombre_negocio || 'TAVO CLOUD'}*\n`;
+  mensaje += `Estimado(a) *${c.cliente_nombre || 'Cliente'}*,\n`;
+  mensaje += `Saldo pendiente Factura *#${c.numero_factura}*: *$${parseFloat(c.saldo_pendiente || 0).toFixed(2)} USD* (Bs. ${saldoBs}).`;
+  const waPhone = (tel || '').replace(/\D/g, '');
+  const url = waPhone
+    ? `https://api.whatsapp.com/send?phone=${waPhone}&text=${encodeURIComponent(mensaje)}`
+    : `https://api.whatsapp.com/send?text=${encodeURIComponent(mensaje)}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 // ========================================================
@@ -7427,7 +7529,9 @@ function renderCxpConsolidadoTable() {
   tbody.innerHTML = lista.map(c => {
     const saldoUsd = parseFloat(c.saldo_pendiente_total_usd !== undefined ? c.saldo_pendiente_total_usd : (c.saldo_pendiente_usd || 0));
     const saldoBs = (c.saldo_pendiente_total_ves !== undefined ? parseFloat(c.saldo_pendiente_total_ves) : (c.saldo_pendiente_ves !== undefined ? parseFloat(c.saldo_pendiente_ves) : (saldoUsd * tasaVes))).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const waPhone = (c.proveedor_telefono || '').replace(/[^0-9]/g, '');
+    const waPhone = (window.TavoWhatsApp && typeof window.TavoWhatsApp.normalizarTelefono === 'function')
+      ? window.TavoWhatsApp.normalizarTelefono(c.proveedor_telefono || '')
+      : (c.proveedor_telefono || '').replace(/\D/g, '');
     const totalFacturado = parseFloat(c.total_facturado_usd !== undefined ? c.total_facturado_usd : (c.total_deuda_usd || 0));
     const totalCobrado = parseFloat(c.total_pagado_usd !== undefined ? c.total_pagado_usd : (c.total_cobrado_usd || 0));
 
@@ -7449,7 +7553,7 @@ function renderCxpConsolidadoTable() {
           <div class="flex items-center gap-1.5">
             <i class="fa-solid fa-phone text-slate-400 text-[11px]"></i>
             <span>${escapeHtml(c.proveedor_telefono || 'Sin teléfono')}</span>
-            ${waPhone ? `<a href="https://wa.me/${waPhone}" target="_blank" class="text-emerald-600 hover:text-emerald-700 ml-1"><i class="fa-brands fa-whatsapp text-sm"></i></a>` : ''}
+            ${waPhone ? `<a href="https://api.whatsapp.com/send?phone=${waPhone}" target="_blank" rel="noopener noreferrer" class="text-emerald-600 hover:text-emerald-700 ml-1"><i class="fa-brands fa-whatsapp text-sm"></i></a>` : ''}
           </div>
         </td>
         <td class="py-3 px-4 text-center">${badgeCuentas}</td>
@@ -7506,15 +7610,17 @@ async function verEstadoCuentaProveedor(proveedorId) {
     const nombre = proveedor ? proveedor.nombre : `Proveedor #${proveedorId}`;
     const cedula = proveedor ? proveedor.cedula : '-';
     const telefono = proveedor ? (proveedor.telefono || 'Sin teléfono') : '-';
-    const waPhone = (telefono || '').replace(/[^0-9]/g, '');
+    const waPhone = (window.TavoWhatsApp && typeof window.TavoWhatsApp.normalizarTelefono === 'function')
+      ? window.TavoWhatsApp.normalizarTelefono(proveedor ? (proveedor.telefono || '') : '')
+      : (telefono || '').replace(/\D/g, '');
 
     document.getElementById('cxpDetalleProveedorNombre').textContent = nombre;
     document.getElementById('cxpDetalleProveedorCedula').textContent = cedula;
     document.getElementById('cxpDetalleProveedorTelefono').innerHTML = `<i class="fa-solid fa-phone mr-1"></i>${escapeHtml(telefono)}`;
     const waSpan = document.getElementById('cxpDetalleProveedorWhatsapp');
     if (waSpan) {
-      waSpan.innerHTML = waPhone 
-        ? `<a href="https://wa.me/${waPhone}" target="_blank" class="text-emerald-600 hover:underline font-semibold flex items-center gap-1"><i class="fa-brands fa-whatsapp"></i> Chat WhatsApp</a>`
+      waSpan.innerHTML = waPhone
+        ? `<a href="https://api.whatsapp.com/send?phone=${waPhone}" target="_blank" rel="noopener noreferrer" class="text-emerald-600 hover:underline font-semibold flex items-center gap-1"><i class="fa-brands fa-whatsapp"></i> Chat WhatsApp</a>`
         : '';
     }
 
@@ -8636,28 +8742,30 @@ function closeModalHistorialAbonosCXP() {
 }
 
 function enviarRecordatorioWhatsAppCXP(cxpId) {
-  const c = AppState.cxp.find(item => item.id === cxpId);
+  const c = (AppState.cxp || []).find(item => item.id === cxpId);
   if (!c) return;
 
-  const waPhone = (c.proveedor_telefono || '').replace(/[^0-9]/g, '');
-  if (!waPhone) {
-    alert('El proveedor no tiene un número telefónico registrado para WhatsApp.');
-    return;
-  }
-
-  const saldoBs = parseFloat(c.saldo_ves || 0).toLocaleString('es-VE');
-  let mensaje = `*NOTIFICACIÓN COMERCIAL - ${AppState.config.nombre_negocio}*\n`;
-  mensaje += `Estimados *${c.proveedor_nombre}*,\n`;
+  const saldoBs = parseFloat(c.saldo_ves || 0).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const negocio = (AppState.config && AppState.config.nombre_negocio) ? AppState.config.nombre_negocio : 'TAVO CLOUD';
+  let mensaje = `*NOTIFICACIÓN COMERCIAL - ${negocio}*\n`;
+  mensaje += `Estimados *${c.proveedor_nombre || 'Proveedor'}*,\n`;
   mensaje += `Nos comunicamos con relación a la Factura/Cuenta *#${c.numero_factura || 'Gasto'}* (${c.descripcion_concepto || 'Mercancía'}).\n\n`;
   mensaje += `*ESTADO DE LA CUENTA:*\n`;
-  mensaje += `- Monto Total: $${parseFloat(c.monto_total).toFixed(2)}\n`;
-  mensaje += `- Monto Amortizado: $${parseFloat(c.monto_pagado).toFixed(2)}\n`;
-  mensaje += `- Saldo Pendiente: *$${parseFloat(c.saldo_pendiente).toFixed(2)}* (≈ ${saldoBs} Bs.)\n`;
-  mensaje += `- Vencimiento: ${c.fecha_vencimiento}\n\n`;
+  mensaje += `• Monto Total: $${parseFloat(c.monto_total || 0).toFixed(2)}\n`;
+  mensaje += `• Monto Amortizado: $${parseFloat(c.monto_pagado || 0).toFixed(2)}\n`;
+  mensaje += `• Saldo Pendiente: *$${parseFloat(c.saldo_pendiente || 0).toFixed(2)}* (Bs. ${saldoBs})\n`;
+  mensaje += `• Vencimiento: ${c.fecha_vencimiento || '-'}\n\n`;
   mensaje += `Por favor envíenos sus datos bancarios actualizados si aplican. ¡Muchas gracias!`;
 
-  const url = `https://wa.me/${waPhone}?text=${encodeURIComponent(mensaje)}`;
-  window.open(url, '_blank');
+  if (window.TavoWhatsApp && typeof window.TavoWhatsApp.enviar === 'function') {
+    window.TavoWhatsApp.enviar(c.proveedor_telefono || '', mensaje);
+  } else {
+    const waPhone = (c.proveedor_telefono || '').replace(/\D/g, '');
+    const url = waPhone
+      ? `https://api.whatsapp.com/send?phone=${waPhone}&text=${encodeURIComponent(mensaje)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(mensaje)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
 }
 
 // ========================================================
@@ -17200,26 +17308,17 @@ window.anularDevolucionCompra = anularDevolucionCompra;
 // ========================================================
 
 function normalizarTelefonoWhatsApp(phoneStr, defaultCountry = '58') {
+  if (window.TavoWhatsApp && typeof window.TavoWhatsApp.normalizarTelefono === 'function') {
+    return window.TavoWhatsApp.normalizarTelefono(phoneStr);
+  }
   if (!phoneStr) return '';
-  let str = String(phoneStr).trim();
-  let digits = str.replace(/[^0-9]/g, '');
+  let digits = String(phoneStr).replace(/\D/g, '');
   if (!digits) return '';
-
-  // Si ya tiene código 58 y longitud >= 12 (ej: 584121234567)
-  if (digits.startsWith('58') && digits.length >= 12) {
-    return digits;
-  }
-
-  // Si empieza con 0 (ej: 0412, 0414, 0424, 0416, 0426, 0212), remover el 0 y anteponer 58
-  if (digits.startsWith('0')) {
-    return defaultCountry + digits.substring(1);
-  }
-
-  // Si tiene 10 dígitos y empieza por 412, 414, 424, 416, 426, 212
-  if (digits.length === 10 && (digits.startsWith('412') || digits.startsWith('414') || digits.startsWith('424') || digits.startsWith('416') || digits.startsWith('426') || digits.startsWith('212'))) {
-    return defaultCountry + digits;
-  }
-
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.length === 11 && digits.startsWith('0')) return defaultCountry + digits.slice(1);
+  if (digits.length === 10 && /^(412|414|416|424|426|2)/.test(digits)) return defaultCountry + digits;
+  if (digits.length === 10 && digits.startsWith('3')) return '57' + digits;
+  if (digits.length < 10) return '';
   return digits;
 }
 
@@ -17319,13 +17418,19 @@ function actualizarContadorCatalogo() {
 }
 
 function seleccionarClienteParaWhatsAppCatalogo(clienteId) {
-  if (!clienteId) return;
+  const telInput = document.getElementById('catalogoTelefonoWhatsApp');
+  if (!clienteId) {
+    if (telInput) telInput.value = '';
+    actualizarPreviewWhatsAppCatalogo('');
+    return;
+  }
   const c = (AppState.clientes || []).find(cl => String(cl.id) === String(clienteId));
   if (!c) return;
 
-  const telInput = document.getElementById('catalogoTelefonoWhatsApp');
   if (telInput) {
-    const norm = normalizarTelefonoWhatsApp(c.telefono || '');
+    const norm = (window.TavoWhatsApp && typeof window.TavoWhatsApp.normalizarTelefono === 'function')
+      ? window.TavoWhatsApp.normalizarTelefono(c.telefono || '')
+      : normalizarTelefonoWhatsApp(c.telefono || '');
     telInput.value = norm;
   }
   actualizarPreviewWhatsAppCatalogo(c.nombre);
@@ -17340,35 +17445,32 @@ function blobToBase64(blob) {
   });
 }
 
-function construirMensajeWhatsAppCatalogo(nombreCliente, config, pdfUrl = '') {
+function construirMensajeWhatsAppCatalogo(nombreCliente, config, _legacyUrl = '') {
   const cfg = config || AppState.config || {};
-  const nombreEmpresa = (cfg.nombre_negocio || 'Empresa Comercial').trim().toUpperCase();
-  const rif = (cfg.documento_fiscal || '').trim();
-  const lineaRif = rif ? `📋 *RIF:* ${rif}\n` : '';
-  const clienteStr = (nombreCliente && nombreCliente.trim()) ? `*${nombreCliente.trim()}*` : '';
-  const saludoCliente = clienteStr ? `Estimado/a cliente ${clienteStr}` : `Estimado/a cliente`;
+  const catSel = document.getElementById('catalogoFilterCategoria');
+  const categoriaId = catSel ? (catSel.value || '').trim() : '';
+  const categoriaNombre = (catSel && categoriaId && catSel.selectedIndex >= 0)
+    ? catSel.options[catSel.selectedIndex].text.trim()
+    : '';
+  const opts = typeof obtenerOpcionesCatalogoActual === 'function' ? obtenerOpcionesCatalogoActual() : { mostrarStock: false };
+  const modo = opts && opts.mostrarStock ? 'con_stock' : 'sin_stock';
 
-  const origin = window.location.origin;
-  const finalPdfUrl = pdfUrl || `${origin}/uploads/Catalogo_Oficial_Productos.pdf`;
-  const finalWebUrl = `${origin}/catalogo.html`;
+  const params = new URLSearchParams();
+  params.set('modo', modo);
+  if (categoriaId) params.set('categoria_id', categoriaId);
+  const urlCatalogo = `${window.location.origin}/catalogo?${params.toString()}`;
 
-  return `🏢 *${nombreEmpresa}*
-${lineaRif}━━━━━━━━━━━━━━━━━━━━━
-${saludoCliente} 👋
-
-Nos complace compartirle nuestro **Catálogo Oficial de Productos** 📄✨.
-
-Le invitamos cordialmente a explorar nuestra oferta con precios actualizados en dólares ($ USD) 💵📈:
-
-📥 *Descargar Catálogo (PDF Carta):*
-${finalPdfUrl}
-
-🌐 *Ver Catálogo Online Interactivo:*
-${finalWebUrl}
-
-Quedamos a su entera disposición para responder cualquier consulta y atender sus pedidos con la máxima prontitud 🤝💼.
-
-¡Le deseamos un excelente día y el mayor de los éxitos! ⭐`;
+  if (window.TavoWhatsApp && typeof window.TavoWhatsApp.buildMensajeCatalogo === 'function') {
+    return window.TavoWhatsApp.buildMensajeCatalogo({
+      config: cfg,
+      clienteNombre: nombreCliente || '',
+      categoriaNombre,
+      modo,
+      urlCatalogo
+    });
+  }
+  const saludo = nombreCliente && nombreCliente.trim() ? `¡Hola, *${nombreCliente.trim()}*!` : '¡Hola!';
+  return `${saludo}\nTe compartimos nuestro Catálogo Oficial de Productos:\n${urlCatalogo}`;
 }
 
 function actualizarPreviewWhatsAppCatalogo(nombreCliente = '') {
@@ -17601,152 +17703,31 @@ async function verPdfEnPantalla() {
   }
 }
 
-async function compartirCatalogoPdfWhatsApp() {
+function compartirCatalogoPdfWhatsApp() {
   const prods = obtenerProductosFiltradosCatalogo();
   if (prods.length === 0) {
-    alert('No hay productos que coincidan con los filtros para generar el catálogo.');
-    return;
+    alert('No hay productos que coincidan con los filtros para compartir en el catálogo.');
+    return false;
   }
 
   const telInput = document.getElementById('catalogoTelefonoWhatsApp');
   const telRaw = telInput ? telInput.value.trim() : '';
-  const telNorm = normalizarTelefonoWhatsApp(telRaw);
+  const textarea = document.getElementById('catalogoMensajeWhatsAppPreview');
+  let mensajeFinal = textarea ? textarea.value.trim() : '';
 
-  // 1. ABRIR VENTANA SÍNCRONAMENTE EN EL CLIC (CERO BLOQUEOS POR POPUP BLOCKER DE CHROME/FIREFOX/SAFARI)
-  let waTab = null;
-  try {
-    waTab = window.open('about:blank', '_blank');
-    if (waTab) {
-      waTab.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head><title>Conectando con WhatsApp...</title><meta charset="utf-8"></head>
-        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0; background:#071B49; color:#fff;">
-          <div style="text-align:center; padding:32px 40px; background:rgba(255,255,255,0.08); border-radius:20px; border:1px solid rgba(255,255,255,0.15); max-width:420px; box-shadow: 0 20px 40px rgba(0,0,0,0.4);">
-            <div style="font-size:32px; color:#00C6E8; margin-bottom:14px;"><i class="fa-solid fa-spinner fa-spin"></i></div>
-            <h3 style="margin:0 0 8px 0; font-size:16px; font-weight:800;">Generando Catálogo Carta...</h3>
-            <p style="margin:0; color:#94A3B8; font-size:12px; line-height:1.5;">Compilando documento en alta resolución y abriendo WhatsApp con el mensaje corporativo.</p>
-          </div>
-        </body>
-        </html>
-      `);
-      waTab.document.close();
-    }
-  } catch (eTab) {
-    console.warn('[Catalogo] Ventana síncrona prevenida:', eTab);
-  }
-
-  const btn = document.getElementById('btnCompartirWhatsApp');
-  const origText = btn ? btn.innerHTML : '';
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Compilando PDF...';
-  }
-
-  try {
-    // 2. Compilar PDF Carta Oficial
-    const { blob, fileName, htmlDoc } = await generarPdfCatalogoBlob(prods);
-
-    // 3. Subir PDF al servidor para generar enlace público permanente
-    let publicPdfUrl = `${window.location.origin}/uploads/Catalogo_Oficial_Productos.pdf`;
-    try {
-      const b64 = await blobToBase64(blob);
-      const resUpload = await fetch('/api/catalogo/subir-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pdf_base64: b64, filename: fileName })
-      });
-      if (resUpload.ok) {
-        const uploadData = await resUpload.json();
-        if (uploadData.url) {
-          publicPdfUrl = window.location.origin + uploadData.url;
-        }
-      }
-    } catch (eUpload) {
-      console.warn('[Catalogo] No se pudo subir el PDF al servidor:', eUpload);
-    }
-
-    // 4. Redactar Mensaje WhatsApp con Enlace Público al PDF y al Catálogo Digital
+  if (!mensajeFinal) {
     const cliSel = document.getElementById('catalogoClienteSelect');
     let nombreCli = '';
     if (cliSel && cliSel.value) {
       const cl = (AppState.clientes || []).find(c => String(c.id) === String(cliSel.value));
       if (cl) nombreCli = cl.nombre;
     }
-    const mensajeFinal = construirMensajeWhatsAppCatalogo(nombreCli, AppState.config, publicPdfUrl);
-
-    // 5. Copiar texto al portapapeles de forma garantizada
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      try {
-        await navigator.clipboard.writeText(mensajeFinal);
-      } catch (eClip) {}
-    }
-
-    // 6. EN DISPOSITIVOS MÓVILES (Android / iOS): Invocar Web Share API con el archivo PDF real adjunto
-    let pdfFile = null;
-    if (blob && blob.size > 5000) {
-      pdfFile = new File([blob], fileName, { type: 'application/pdf' });
-    }
-    if (pdfFile && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-      if (waTab && !waTab.closed) waTab.close();
-      try {
-        await navigator.share({
-          files: [pdfFile],
-          title: fileName,
-          text: mensajeFinal
-        });
-        return;
-      } catch (eShare) {
-        if (eShare.name === 'AbortError') return;
-      }
-    }
-
-    // 7. EN ESCRITORIO (Windows / Mac):
-    // Descarga automática inmediata del PDF en el computador
-    if (blob && blob.size > 5000) {
-      const blobUrl = URL.createObjectURL(blob);
-      const dl = document.createElement('a');
-      dl.href = blobUrl;
-      dl.download = fileName;
-      document.body.appendChild(dl);
-      dl.click();
-      document.body.removeChild(dl);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 45000);
-    }
-
-    // 8. Abrir WhatsApp con número y mensaje precargado directamente
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    let waUrl = '';
-    if (isMobile) {
-      waUrl = telNorm
-        ? `https://wa.me/${telNorm}?text=${encodeURIComponent(mensajeFinal)}`
-        : `https://wa.me/?text=${encodeURIComponent(mensajeFinal)}`;
-    } else {
-      // En escritorio, usamos https://web.whatsapp.com/send/?phone=...&text=... (con trailing slash / después de send)
-      // para evitar que el servidor de WhatsApp haga redirect y descarte los parámetros de texto
-      waUrl = telNorm
-        ? `https://web.whatsapp.com/send/?phone=${telNorm}&text=${encodeURIComponent(mensajeFinal)}`
-        : `https://web.whatsapp.com/send/?text=${encodeURIComponent(mensajeFinal)}`;
-    }
-
-    if (waTab && !waTab.closed) {
-      waTab.location.href = waUrl;
-    } else {
-      window.open(waUrl, '_blank');
-    }
-
-    // 9. Mostrar modal corporativo de confirmación y guía
-    mostrarModalPdfListoWhatsApp(fileName, telNorm, publicPdfUrl);
-
-  } catch (err) {
-    console.error('Error al compartir catálogo por WhatsApp:', err);
-    alert('Error generando catálogo: ' + (err.message || err));
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = origText;
-    }
+    mensajeFinal = construirMensajeWhatsAppCatalogo(nombreCli, AppState.config);
+    if (textarea) textarea.value = mensajeFinal;
   }
+
+  TavoWhatsApp.enviar(telRaw, mensajeFinal);
+  return true;
 }
 
 function mostrarModalPdfListoWhatsApp(fileName, phone, publicPdfUrl = '') {
@@ -19177,12 +19158,35 @@ async function procesarPedidoPreventa() {
     });
     const data = await res.json();
     if (res.ok) {
-      alert(`¡Pedido ${data.numero_pedido} registrado exitosamente!\n\nMonto Total: $${parseFloat(data.total_usd).toFixed(2)} USD\n\nEl pedido ha sido enviado a la Administración para su aprobación y facturación.`);
+      const cliSel = AppState.posClienteSeleccionado || {};
+      const vendObj = (AppState.vendedores || []).find(v => String(v.id) === String(vendedorId));
+      const pedConfirm = {
+        id: data.id,
+        numero_pedido: data.numero_pedido,
+        fecha: data.fecha || new Date().toISOString().slice(0, 16).replace('T', ' '),
+        fecha_vencimiento: data.fecha_vencimiento || '',
+        cliente_id: cliSel.id,
+        cliente_nombre: cliSel.nombre || 'Cliente',
+        cliente_telefono: cliSel.telefono || '',
+        vendedor_nombre: vendObj ? vendObj.nombre : (AppState.usuarioActual?.nombre_completo || 'Mostrador'),
+        condicion_pago: condicionPago,
+        dias_credito: diasCredito,
+        total_usd: data.total_usd,
+        items: (AppState.posCart || []).map(i => ({
+          producto_id: i.producto_id,
+          producto_nombre: i.nombre,
+          cantidad: i.cantidad,
+          precio_unitario: i.precio_unitario,
+          subtotal: i.subtotal
+        }))
+      };
+      AppState.ultimoPedidoCreado = pedConfirm;
       AppState.posCart = [];
       renderPosCart();
       if (document.getElementById('posNotasVenta')) document.getElementById('posNotasVenta').value = '';
       if (typeof loadProductos === 'function') await loadProductos();
       if (typeof cargarPedidosAdmin === 'function') await cargarPedidosAdmin();
+      mostrarModalPedidoConfirmadoWhatsApp(pedConfirm);
     } else {
       alert('Error registrando pedido: ' + (data.error || 'No se pudo crear el pedido'));
     }
@@ -19258,6 +19262,9 @@ async function cargarPedidosAdmin() {
           <td class="py-3 px-4 text-center space-x-1">
             <button onclick="abrirModalDetallePedido(${p.id})" class="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold" title="Ver Detalle">
               <i class="fa-solid fa-eye"></i>
+            </button>
+            <button onclick="compartirPedidoWhatsApp(${p.id})" class="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold" title="Enviar por WhatsApp">
+              <i class="fa-brands fa-whatsapp"></i>
             </button>
             ${p.estado === 'PENDIENTE' && puedeFacturarPedido ? `
               <button onclick="autorizarYFacturarPedido(${p.id})" class="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold" title="Autorizar y Facturar">
@@ -19521,6 +19528,81 @@ function closeModalDetallePedido() {
   document.getElementById('modalPedidoDetalle')?.classList.add('hidden');
 }
 window.closeModalDetallePedido = closeModalDetallePedido;
+
+async function compartirPedidoWhatsApp(pedidoId = null) {
+  let ped = null;
+  if (pedidoId !== null && pedidoId !== undefined) {
+    const pidStr = String(pedidoId);
+    if (AppState.pedidoDetalleActual && String(AppState.pedidoDetalleActual.id) === pidStr) {
+      ped = AppState.pedidoDetalleActual;
+    } else if (AppState.ultimoPedidoCreado && String(AppState.ultimoPedidoCreado.id) === pidStr) {
+      ped = AppState.ultimoPedidoCreado;
+    } else if (Array.isArray(AppState.pedidosLista)) {
+      ped = AppState.pedidosLista.find(p => String(p.id) === pidStr) || null;
+    }
+    if (!ped || !Array.isArray(ped.items) || ped.items.length === 0) {
+      try {
+        const res = await fetch(`/api/pedidos/${pedidoId}`);
+        if (res.ok) ped = await res.json();
+      } catch (ePed) {
+        console.warn('[WhatsApp Pedido] Usando datos parciales:', ePed);
+      }
+    }
+  } else {
+    ped = AppState.pedidoDetalleActual || AppState.ultimoPedidoCreado;
+  }
+
+  if (!ped) {
+    alert('No hay pedido seleccionado para enviar por WhatsApp.');
+    return false;
+  }
+
+  let tel = ped.cliente_telefono || '';
+  if (!tel && ped.cliente_id && Array.isArray(AppState.clientes)) {
+    const cli = AppState.clientes.find(c => String(c.id) === String(ped.cliente_id));
+    if (cli && cli.telefono) tel = cli.telefono;
+  }
+
+  const msg = TavoWhatsApp.buildMensajePedido({ pedido: ped, config: AppState.config || {} });
+  TavoWhatsApp.enviar(tel, msg);
+  return true;
+}
+window.compartirPedidoWhatsApp = compartirPedidoWhatsApp;
+
+function mostrarModalPedidoConfirmadoWhatsApp(ped) {
+  const prev = document.getElementById('modalPedidoConfirmadoWA');
+  if (prev) prev.remove();
+  const ov = document.createElement('div');
+  ov.id = 'modalPedidoConfirmadoWA';
+  ov.className = 'modal-overlay';
+  ov.style.zIndex = '95';
+  const pedId = ped.id || '';
+  ov.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 m-4 border border-slate-200">
+      <div class="flex items-center space-x-3">
+        <div class="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 text-xl">
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+        <div>
+          <h4 class="font-extrabold text-slate-900 text-base">Pedido ${escapeHtml(ped.numero_pedido || '')} Registrado</h4>
+          <p class="text-xs text-slate-500">Enviado a Administración para aprobación y facturación.</p>
+        </div>
+      </div>
+      <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-1">
+        <div class="flex justify-between"><span class="text-slate-500">Cliente:</span><strong class="text-slate-800">${escapeHtml(ped.cliente_nombre || 'Cliente')}</strong></div>
+        <div class="flex justify-between"><span class="text-slate-500">Total Estimado:</span><strong class="text-emerald-700">$${parseFloat(ped.total_usd || 0).toFixed(2)} USD</strong></div>
+      </div>
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button type="button" onclick="document.getElementById('modalPedidoConfirmadoWA')?.remove()" class="px-4 py-2 border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Cerrar</button>
+        <button type="button" onclick="compartirPedidoWhatsApp(${pedId ? JSON.stringify(pedId) : 'null'}); document.getElementById('modalPedidoConfirmadoWA')?.remove();" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-sm flex items-center">
+          <i class="fa-brands fa-whatsapp mr-1.5 text-sm"></i>Enviar por WhatsApp
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
+}
+window.mostrarModalPedidoConfirmadoWhatsApp = mostrarModalPedidoConfirmadoWhatsApp;
 
 // ==============================================================================
 // CONTROLADOR DEL ESTUDIO UNIVERSAL DE FORMATOS DE IMPRESIÓN

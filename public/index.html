@@ -6502,13 +6502,13 @@
             <label class="block text-xs font-bold text-slate-700 flex items-center">
               <i class="fa-solid fa-comment-dots mr-1 text-emerald-600"></i>Mensaje Oficial de Presentación:
             </label>
-            <button type="button" onclick="copiarMensajeWhatsAppCatalogo()" class="text-[11px] text-blue-700 hover:text-blue-800 font-bold flex items-center hover:underline cursor-pointer">
-              <i class="fa-regular fa-copy mr-1"></i>Copiar Mensaje
+            <button type="button" onclick="copiarMensajeWhatsAppCatalogo()" class="text-[11px] text-slate-400 hover:text-slate-600 font-medium flex items-center hover:underline cursor-pointer" title="Copiar mensaje como respaldo">
+              <i class="fa-regular fa-copy mr-1"></i>Copiar texto (opcional)
             </button>
           </div>
           <textarea id="catalogoMensajeWhatsAppPreview" rows="4" class="w-full bg-slate-50 text-slate-800 font-sans text-xs p-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed font-normal shadow-2xs resize-none"></textarea>
           <div class="flex items-center justify-between text-[10px] text-slate-400 mt-1">
-            <span>Personalizado con nombre de empresa, RIF y cliente.</span>
+            <span>Personalizado con nombre de empresa y cliente. Funciona con o sin número.</span>
             <span class="flex items-center text-blue-600 font-medium">
               <i class="fa-solid fa-globe mr-1"></i>Catálogo en vivo: <strong class="ml-1">/catalogo</strong>
             </span>
@@ -6531,7 +6531,7 @@
             <span>Ver PDF en Pantalla</span>
           </button>
 
-          <!-- 3. Enviar Catálogo por WhatsApp (Compila PDF + abre WhatsApp con mensaje y archivo en 1 clic) -->
+          <!-- 3. Enviar Catálogo por WhatsApp (Nivel 1 directo en 1 clic) -->
           <button type="button" onclick="compartirCatalogoPdfWhatsApp()" id="btnCompartirWhatsApp" class="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold shadow-md hover:shadow-lg transition flex items-center justify-center cursor-pointer">
             <i class="fa-brands fa-whatsapp text-base mr-2"></i>
             <span>Enviar Catálogo por WhatsApp</span>
@@ -8432,7 +8432,8 @@
 
   <!-- Scripts -->
   <script src="master-report-layout.js?v=3.0.0"></script>
-  <script src="app.js?v=3.0.0&rev=37"></script>
+  <script src="whatsapp-service.js?v=1.0.0"></script>
+  <script src="app.js?v=3.0.0&rev=38"></script>
 
     <!-- MODAL: DETALLE Y VOUCHER IMPRIMIBLE DE NOTA DE DÉBITO A PROVEEDOR -->
     <div id="modalNotaDebitoCompra" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 hidden">
@@ -8965,11 +8966,16 @@
         </table>
       </div>
 
-      <div class="flex items-center justify-between pt-3 border-t border-slate-100">
-        <div id="modalPedAccionesAdmin" class="flex items-center space-x-2">
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100">
+        <div id="modalPedAccionesAdmin" class="flex flex-wrap items-center gap-2">
           <!-- Botones dinámicos de Facturar o Rechazar -->
         </div>
-        <button type="button" onclick="closeModalDetallePedido()" class="px-4 py-2 border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Cerrar</button>
+        <div class="flex items-center gap-2 ml-auto">
+          <button type="button" onclick="compartirPedidoWhatsApp()" id="btnModalPedidoWhatsApp" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center whitespace-nowrap">
+            <i class="fa-brands fa-whatsapp mr-1.5 text-sm"></i>Enviar por WhatsApp
+          </button>
+          <button type="button" onclick="closeModalDetallePedido()" class="px-4 py-2 border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">Cerrar</button>
+        </div>
       </div>
     </div>
   </div>
