@@ -967,42 +967,44 @@ input[type="color"]::-webkit-color-swatch {
     max-width: 80mm !important;
     margin: 0 auto !important;
     padding: 3mm 4mm !important;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace, sans-serif !important;
+    font-family: 'Courier New', Courier, monospace !important;
     font-size: 11px !important;
     line-height: 1.35 !important;
     color: #000000 !important;
   }
 
-  body.document-printing #areaImpresionOficial.doc-letterPortrait {
-    page: letterPortrait;
+  body.document-printing #areaImpresionOficial.doc-ticket58 {
+    page: ticket58;
+    width: 58mm !important;
+    max-width: 58mm !important;
+    margin: 0 auto !important;
+    padding: 2mm 2mm !important;
+    font-family: 'Courier New', Courier, monospace !important;
+    font-size: 9.5px !important;
+    line-height: 1.28 !important;
+    color: #000000 !important;
+  }
+
+  body.document-printing #areaImpresionOficial.doc-letterPortrait,
+  body.document-printing #areaImpresionOficial.doc-letterLandscape,
+  body.document-printing #areaImpresionOficial.doc-a4Portrait,
+  body.document-printing #areaImpresionOficial.doc-a4Landscape,
+  body.document-printing #areaImpresionOficial.doc-halfLetterPortrait,
+  body.document-printing #areaImpresionOficial.doc-halfLetterLandscape,
+  body.document-printing #areaImpresionOficial.doc-legalPortrait,
+  body.document-printing #areaImpresionOficial.doc-legalLandscape,
+  body.document-printing #areaImpresionOficial.doc-universal {
     width: 100% !important;
     max-width: 100% !important;
     margin: 0 auto !important;
     padding: 0 !important;
   }
 
-  body.document-printing #areaImpresionOficial.doc-letterLandscape {
-    page: letterLandscape;
+  body.document-printing #areaImpresionOficial .doc-sheet {
     width: 100% !important;
     max-width: 100% !important;
-    margin: 0 auto !important;
     padding: 0 !important;
-  }
-
-  body.document-printing #areaImpresionOficial.doc-a4Portrait {
-    page: a4Portrait;
-    width: 100% !important;
-    max-width: 100% !important;
-    margin: 0 auto !important;
-    padding: 0 !important;
-  }
-
-  body.document-printing #areaImpresionOficial.doc-a4Landscape {
-    page: a4Landscape;
-    width: 100% !important;
-    max-width: 100% !important;
-    margin: 0 auto !important;
-    padding: 0 !important;
+    box-shadow: none !important;
   }
 
   /* ========================================================

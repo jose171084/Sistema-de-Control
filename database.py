@@ -6,6 +6,8 @@ Utiliza únicamente la librería estándar de Python (sqlite3).
 import sqlite3
 import os
 import json
+import copy
+import re
 import urllib.request
 import urllib.error
 import threading
@@ -705,6 +707,54 @@ def auditar_y_migrar_db(conn=None, cursor=None):
     add_col_if_missing("facturas", "comision_monto_usd", "REAL DEFAULT 0.0")
     add_col_if_missing("facturas", "comision_estado", "TEXT DEFAULT 'PENDIENTE'")
     add_col_if_missing("facturas", "usuario_id", "INTEGER DEFAULT 1")
+    # Perfil Fiscal e IGTF 3% Condicionado (SENIAT / GO 42.339)
+    add_col_if_missing("configuracion", "tipo_contribuyente", "TEXT DEFAULT 'ordinario'")
+    add_col_if_missing("configuracion", "es_contribuyente_especial", "INTEGER DEFAULT 0")
+    add_col_if_missing("configuracion", "igtf_porcentaje", "REAL DEFAULT 3.0")
+
+    add_col_if_missing("facturas", "base_igtf_usd", "REAL DEFAULT 0.0")
+    add_col_if_missing("facturas", "igtf_porcentaje", "REAL DEFAULT 0.0")
+    add_col_if_missing("facturas", "igtf_monto_usd", "REAL DEFAULT 0.0")
+    add_col_if_missing("facturas", "igtf_monto_ves", "REAL DEFAULT 0.0")
+    add_col_if_missing("facturas", "total_operacion_usd", "REAL DEFAULT 0.0")
+    add_col_if_missing("facturas", "total_operacion_ves", "REAL DEFAULT 0.0")
+
+    add_col_if_missing("devoluciones", "base_igtf_usd", "REAL DEFAULT 0.0")
+    add_col_if_missing("devoluciones", "igtf_porcentaje", "REAL DEFAULT 0.0")
+    add_col_if_missing("devoluciones", "igtf_monto_usd", "REAL DEFAULT 0.0")
+    add_col_if_missing("devoluciones", "igtf_monto_ves", "REAL DEFAULT 0.0")
+    add_col_if_missing("devoluciones", "total_operacion_usd", "REAL DEFAULT 0.0")
+    add_col_if_missing("devoluciones", "total_operacion_ves", "REAL DEFAULT 0.0")
+    add_col_if_missing("devoluciones", "factura_numero_afectada", "TEXT")
+    add_col_if_missing("devoluciones", "factura_fecha_afectada", "TEXT")
+    add_col_if_missing("devoluciones", "factura_control_afectado", "TEXT")
+
+    add_col_if_missing("abonos_cxc", "numero_recibo", "TEXT")
+    add_col_if_missing("abonos_cxp", "numero_recibo", "TEXT")
+    add_col_if_missing("turnos_caja", "numero_cierre", "TEXT")
+
+    try:
+        cursor.execute("""
+            UPDATE facturas
+            SET total_operacion_usd = total_usd,
+                total_operacion_ves = total_ves
+            WHERE COALESCE(total_operacion_usd, 0) = 0 AND COALESCE(total_usd, 0) > 0
+        """)
+        cursor.execute("""
+            UPDATE devoluciones
+            SET factura_numero_afectada = COALESCE(NULLIF(factura_numero_afectada, ''), numero_factura),
+                factura_fecha_afectada = COALESCE(NULLIF(factura_fecha_afectada, ''), fecha_factura_original),
+                total_operacion_usd = CASE WHEN COALESCE(total_operacion_usd, 0) = 0 THEN total_usd ELSE total_operacion_usd END,
+                total_operacion_ves = CASE WHEN COALESCE(total_operacion_ves, 0) = 0 THEN total_ves ELSE total_operacion_ves END
+        """)
+    except Exception:
+        pass
+
+    try:
+        sembrar_correlativos_sistema(cursor, tenant_id=1)
+    except Exception:
+        pass
+
     add_col_if_missing("roles", "facturar_directo", "INTEGER DEFAULT 1")
     try:
         cursor.execute("UPDATE roles SET facturar_directo = 0 WHERE nombre = 'Vendedor Comercial' AND es_sistema = 1")
@@ -1599,7 +1649,10 @@ def init_db():
         tasa_cop REAL DEFAULT 4100.00,
         moneda_principal TEXT DEFAULT 'USD',
         sincronizacion_tasas_auto INTEGER DEFAULT 1,
-        logo_url TEXT DEFAULT NULL
+        logo_url TEXT DEFAULT NULL,
+        tipo_contribuyente TEXT DEFAULT 'ordinario',
+        es_contribuyente_especial INTEGER DEFAULT 0,
+        igtf_porcentaje REAL DEFAULT 3.0
     )
     """)
     try:
@@ -1683,6 +1736,12 @@ def init_db():
         tasa_cop REAL NOT NULL DEFAULT 0.0,
         total_ves REAL NOT NULL DEFAULT 0.0,
         total_cop REAL NOT NULL DEFAULT 0.0,
+        base_igtf_usd REAL DEFAULT 0.0,
+        igtf_porcentaje REAL DEFAULT 0.0,
+        igtf_monto_usd REAL DEFAULT 0.0,
+        igtf_monto_ves REAL DEFAULT 0.0,
+        total_operacion_usd REAL DEFAULT 0.0,
+        total_operacion_ves REAL DEFAULT 0.0,
         estado TEXT DEFAULT 'pagada' CHECK(estado IN ('pagada', 'pendiente', 'anulada')),
         tipo_venta TEXT DEFAULT 'contado' CHECK(tipo_venta IN ('contado', 'credito')),
         fecha_vencimiento TEXT,
@@ -1922,6 +1981,15 @@ def init_db():
         tasa_cop REAL NOT NULL DEFAULT 0.0,
         total_ves REAL NOT NULL DEFAULT 0.0,
         total_cop REAL NOT NULL DEFAULT 0.0,
+        base_igtf_usd REAL DEFAULT 0.0,
+        igtf_porcentaje REAL DEFAULT 0.0,
+        igtf_monto_usd REAL DEFAULT 0.0,
+        igtf_monto_ves REAL DEFAULT 0.0,
+        total_operacion_usd REAL DEFAULT 0.0,
+        total_operacion_ves REAL DEFAULT 0.0,
+        factura_numero_afectada TEXT,
+        factura_fecha_afectada TEXT,
+        factura_control_afectado TEXT,
         metodo_reembolso TEXT DEFAULT 'efectivo',
         notas TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -2479,6 +2547,21 @@ def init_db():
             '*** GRACIAS POR SU PREFERENCIA ***'
         )
         """)
+
+    # Tabla Escalable de Formatos de Impresión Independientes por Documento (Estudio Universal)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tenant_formatos_documentos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id INTEGER NOT NULL DEFAULT 1,
+        doc_type TEXT NOT NULL,
+        config_json TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, doc_type)
+    )
+    """)
+
+    # Motor Centralizado de Correlativos Modificables de 8 Caracteres
+    sembrar_correlativos_sistema(cursor, tenant_id=1)
 
     # Sembrar 1 cliente genérico de contado para facturación rápida
     
@@ -3965,12 +4048,10 @@ def procesar_ajuste_inventario_cpp(cursor, payload, conn=None, auto_commit=True)
             # Regla 8: Validar no retroactividad y períodos cerrados
             validar_movimiento_no_retroactivo(cursor, p_id, fecha_ajuste)
 
-        # Generar número correlativo de ajuste si no fue provisto
+        # Generar número correlativo de ajuste centralizado si no fue provisto
         if not numero_ajuste:
-            prefix = "CAR" if tipo_ajuste == "CARGO" else "DES"
-            cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM inventario_ajustes")
-            next_id = cursor.fetchone()[0]
-            numero_ajuste = f"{prefix}-{next_id:06d}"
+            corr_type = "nota_debito" if tipo_ajuste == "DESCARGO" else "nota_credito"
+            numero_ajuste = obtener_y_avanzar_correlativo(corr_type, tenant_id=1, cursor=cursor)
 
         observaciones_final = observaciones
         if idempotency_key and f"[IDEMPOTENCY:{idempotency_key}]" not in observaciones_final:
@@ -4991,10 +5072,8 @@ def procesar_devolucion_compra(cursor, data):
     total_ves = round(total_usd * tasa_ves, 2)
     total_cop = round(total_usd * tasa_cop, 2)
 
-    # 5. Generar número correlativo DEV-COM-000001
-    cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM devoluciones_compras")
-    correlativo = cursor.fetchone()[0]
-    numero_devolucion = f"DEV-COM-{correlativo:06d}"
+    # 5. Generar número correlativo centralizado
+    numero_devolucion = obtener_y_avanzar_correlativo("nota_debito", tenant_id=1, cursor=cursor)
 
     # 6. Descuento en Cuenta por Pagar (CXP)
     monto_descontado_cxp = 0.0
@@ -7423,10 +7502,8 @@ def crear_pedido(cliente_id, vendedor_id=None, items=None, condicion_pago='conta
 
         total_usd = (subtotal + iva_total).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        # Generar numero correlativo
-        cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM pedidos")
-        next_id = cur.fetchone()[0]
-        numero_pedido = f"PED-{next_id:06d}"
+        # Generar numero correlativo centralizado
+        numero_pedido = obtener_y_avanzar_correlativo("pedido", tenant_id=1, cursor=cur)
 
         # 3. Calcular vigencia / fecha_vencimiento (default 48 horas)
         if not fecha_vencimiento:
@@ -7800,10 +7877,8 @@ def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_con
 
         total_usd_aprob = (subtotal_aprob + iva_total_aprob).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        # Generar numero correlativo de factura
-        cur.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM facturas")
-        correlativo = cur.fetchone()[0]
-        numero_factura = f"FAC-{correlativo:06d}"
+        # Generar numero correlativo de factura centralizado de 8 caracteres
+        numero_factura = obtener_y_avanzar_correlativo("factura", tenant_id=1, cursor=cur)
 
         subtotal = float(subtotal_aprob)
         iva_total = float(iva_total_aprob)
@@ -7814,6 +7889,12 @@ def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_con
         total_cop = round(total_usd * tasa_cop, 2)
         tipo_venta = ped_dict["condicion_pago"] or "contado"
         dias_cred = int(ped_dict["dias_credito"] or 15)
+
+        cur.execute("SELECT es_contribuyente_especial, igtf_porcentaje, tasa_ves FROM configuracion WHERE id = 1")
+        cfg_fisc_row = cur.fetchone()
+        cfg_fisc = dict(cfg_fisc_row) if cfg_fisc_row else {"es_contribuyente_especial": 0, "igtf_porcentaje": 3.0}
+        pagos_igtf_sim = [{"moneda": "USD", "equivalente_usd": total_usd}] if tipo_venta == "contado" else []
+        igtf_res = calcular_igtf_operacion(total_usd, pagos_igtf_sim, cfg_fisc, tasa_ves=tasa_ves)
 
         fecha_factura = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         fecha_venc = (datetime.now() + timedelta(days=dias_cred)).strftime("%Y-%m-%d") if tipo_venta == "credito" else None
@@ -7843,14 +7924,18 @@ def aprobar_y_facturar_pedido(pedido_id, usuario_aprobador_id=1, metodo_pago_con
         cur.execute("""
             INSERT INTO facturas (
                 numero_factura, cliente_id, subtotal, iva_total, total_usd, total,
-                tasa_ves, tasa_cop, total_ves, total_cop, estado, tipo_venta,
-                fecha_vencimiento, saldo_pendiente, notas, fecha,
+                tasa_ves, tasa_cop, total_ves, total_cop,
+                base_igtf_usd, igtf_porcentaje, igtf_monto_usd, igtf_monto_ves,
+                total_operacion_usd, total_operacion_ves,
+                estado, tipo_venta, fecha_vencimiento, saldo_pendiente, notas, fecha,
                 vendedor_id, comision_porcentaje, comision_monto_usd, comision_estado, usuario_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             numero_factura, ped_dict["cliente_id"], subtotal, iva_total, total_usd, total_usd,
-            tasa_ves, tasa_cop, total_ves, total_cop, estado_factura, tipo_venta,
-            fecha_venc, saldo_pendiente, notas_fac, fecha_factura,
+            tasa_ves, tasa_cop, total_ves, total_cop,
+            igtf_res["base_igtf_usd"], igtf_res["igtf_porcentaje"], igtf_res["igtf_monto_usd"], igtf_res["igtf_monto_ves"],
+            igtf_res["total_operacion_usd"], igtf_res["total_operacion_ves"],
+            estado_factura, tipo_venta, fecha_venc, saldo_pendiente, notas_fac, fecha_factura,
             vendedor_id, comision_pct, comision_monto_usd, comision_estado, usuario_aprobador_id
         ))
         factura_id = cur.lastrowid
@@ -8165,6 +8250,1130 @@ def guardar_config_impresion(datos, tenant_id=1, conn=None):
             ))
         conn.commit()
         return obtener_config_impresion(tenant_id=tenant_id, conn=conn)
+    finally:
+        if should_close:
+            conn.close()
+
+
+# ==============================================================================
+# ESTUDIO UNIVERSAL DE FORMATOS DE IMPRESIÓN POR DOCUMENTO (JSON POR DOC_TYPE)
+# ==============================================================================
+VALID_PAPER_SIZES = ("letter", "a4", "half_letter", "legal", "ticket_80", "ticket_58")
+VALID_ORIENTATIONS = ("portrait", "landscape")
+VALID_FONT_SCALES = ("compacto", "normal", "grande")
+VALID_FONT_FAMILIES = ("sans", "serif", "mono")
+VALID_LOGO_SIZES = ("sm", "md", "lg")
+VALID_LOGO_ALIGNS = ("izquierda", "centro", "derecha")
+VALID_ROW_DENSITIES = ("compacta", "normal", "amplia")
+
+
+def _base_formato_doc(
+    doc_type,
+    categoria,
+    etiqueta,
+    tamano_papel="letter",
+    orientacion="portrait",
+    margen_mm=10,
+    titulo_documento="DOCUMENTO OFICIAL",
+    subtitulo_documento="",
+    columnas=None,
+    firmas=None,
+    mostrar_firmas=False,
+    mostrar_desglose_pagos=True,
+    escala_fuente="normal",
+    familia_fuente="sans",
+    logo_alineacion="izquierda",
+    texto_encabezado_extra="",
+    texto_pie_pagina="Documento oficial emitido por el sistema.",
+    **extra_overrides,
+):
+    result = {
+        "doc_type": doc_type,
+        "categoria": categoria,
+        "etiqueta": etiqueta,
+        # Papel y Maquetación
+        "tamano_papel": tamano_papel,
+        "orientacion": orientacion,
+        "margen_mm": margen_mm,
+        "escala_fuente": escala_fuente,
+        "familia_fuente": familia_fuente,
+        "modo_forma_libre": False,
+        "margen_superior_forma_libre_mm": 35,
+        # Identidad y Encabezado
+        "titulo_documento": titulo_documento,
+        "subtitulo_documento": subtitulo_documento,
+        "color_primario": "#0f172a",
+        "color_secundario": "#0284c7",
+        "mostrar_logo": True,
+        "logo_tamano": "md",
+        "logo_alineacion": logo_alineacion,
+        "mostrar_rif": True,
+        "mostrar_direccion": True,
+        "mostrar_telefono": True,
+        "mostrar_fecha_impresion": True,
+        "mostrar_paginacion": True,
+        # Columnas Dinámicas y Tabla
+        "columnas": dict(columnas or {}),
+        "densidad_filas": "normal",
+        "zebra_striping": True,
+        # Multimoneda & Finanzas
+        "mostrar_equivalente_ves": True,
+        "mostrar_equivalente_cop": False,
+        "mostrar_tasas_cambio": True,
+        "mostrar_desglose_pagos": bool(mostrar_desglose_pagos),
+        "mostrar_cuentas_bancarias": False,
+        "texto_cuentas_bancarias": "Banco Mercantil / Banesco • Pago Móvil: 0412-0000000 / RIF J-00000000-0",
+        # Compatibilidad Comercial Legacy
+        "mostrar_sku": True,
+        "mostrar_vendedor": True,
+        "mostrar_descuento_linea": True,
+        # Firmas, Leyendas y Avanzado
+        "texto_encabezado_extra": texto_encabezado_extra,
+        "texto_pie_pagina": texto_pie_pagina,
+        "mostrar_firmas": bool(mostrar_firmas),
+        "firmas": list(firmas if firmas is not None else ["Elaborado por", "Revisado / Contabilidad", "Recibido Conforme"]),
+        "mostrar_marca_saas": True,
+        "css_personalizado": "",
+    }
+    if extra_overrides:
+        result.update(extra_overrides)
+    return result
+
+
+def obtener_catalogo_formatos_default():
+    """Retorna los 20 esquemas de documentos de fábrica + perfil global."""
+    return {
+        "global": _base_formato_doc(
+            "global", "Sistema", "Perfil Global de Marca",
+            tamano_papel="letter", orientacion="portrait", margen_mm=12,
+            titulo_documento="DOCUMENTO COMERCIAL",
+            subtitulo_documento="Plantilla corporativa base",
+            columnas={"codigo": True, "descripcion": True, "cantidad": True, "precio_unitario": True, "subtotal": True},
+            texto_pie_pagina="Gracias por su compra. Conserve este documento como comprobante.",
+        ),
+        # --- COMERCIALES (8) ---
+        "factura_a4": _base_formato_doc(
+            "factura_a4", "Comerciales", "Factura / Nota (Hoja A4/Carta)",
+            tamano_papel="letter", orientacion="portrait", margen_mm=12,
+            titulo_documento="FACTURA DE VENTA",
+            subtitulo_documento="Comprobante Fiscal y Comercial",
+            columnas={"num": True, "sku": True, "descripcion": True, "vendedor": True, "cantidad": True, "precio_unitario": True, "descuento": True, "iva": True, "total": True},
+            firmas=["Emisor / Facturación", "Recibido Conforme"],
+            mostrar_firmas=True,
+            texto_pie_pagina="Gracias por su compra. Conserve esta factura como comprobante de garantía.",
+        ),
+        "factura_ticket": _base_formato_doc(
+            "factura_ticket", "Comerciales", "Ticket Térmico Venta (POS 80/58mm)",
+            tamano_papel="ticket_80", orientacion="portrait", margen_mm=2,
+            escala_fuente="compacto", familia_fuente="mono",
+            titulo_documento="FACTURA DE VENTA",
+            subtitulo_documento="*** COMPROBANTE DE COMPRA ***",
+            columnas={"sku": True, "descripcion": True, "vendedor": True, "cantidad": True, "precio_unitario": True, "descuento": True, "iva": True, "total": True},
+            firmas=[],
+            mostrar_firmas=False,
+            texto_encabezado_extra="*** COMPROBANTE DE COMPRA ***",
+            texto_pie_pagina="*** GRACIAS POR SU PREFERENCIA ***",
+        ),
+        "pedido_preventa": _base_formato_doc(
+            "pedido_preventa", "Comerciales", "Pedido / Preventa Comercial",
+            tamano_papel="letter", orientacion="portrait", margen_mm=12,
+            titulo_documento="ORDEN DE PEDIDO / PREVENTA",
+            subtitulo_documento="Solicitud Comercial Sujeta a Aprobación",
+            columnas={"num": True, "sku": True, "descripcion": True, "cant_pedida": True, "cant_aprobada": True, "precio_unitario": True, "iva": True, "subtotal": True},
+            firmas=["Asesor de Ventas", "Cliente / Solicitante", "Aprobación Despacho"],
+            mostrar_firmas=True,
+            mostrar_desglose_pagos=False,
+            texto_pie_pagina="Presupuesto / Preventa sujeto a disponibilidad de inventario al momento de facturar.",
+        ),
+        "nota_credito_devolucion": _base_formato_doc(
+            "nota_credito_devolucion", "Comerciales", "Nota de Crédito / Devolución",
+            tamano_papel="letter", orientacion="portrait", margen_mm=12,
+            titulo_documento="NOTA OFICIAL DE DEVOLUCIÓN",
+            subtitulo_documento="Reintegro de Mercancía y Crédito a Cliente",
+            columnas={"num": True, "sku": True, "descripcion": True, "tipo": True, "cantidad": True, "precio_unitario": True, "iva": True, "total": True},
+            firmas=["Responsable Almacén / Caja", "Cliente / Beneficiario"],
+            mostrar_firmas=True,
+            texto_pie_pagina="Mercancía reingresada conforme a inventario.",
+        ),
+        "nota_debito_ajuste": _base_formato_doc(
+            "nota_debito_ajuste", "Comerciales", "Nota de Débito / Ajuste Inventario",
+            tamano_papel="letter", orientacion="portrait", margen_mm=10,
+            titulo_documento="COMPROBANTE DE AJUSTE / NOTA DÉBITO",
+            subtitulo_documento="Movimiento Formal de Almacén y Costeo CPP",
+            columnas={"num": True, "codigo": True, "descripcion": True, "unidad": True, "cantidad": True, "stock_anterior": True, "stock_nuevo": True, "cpp_anterior": True, "costo_unitario": True, "cpp_nuevo": True, "valuacion": True},
+            firmas=["Responsable de Inventario", "Autorizado por / Auditoría"],
+            mostrar_firmas=True,
+            mostrar_desglose_pagos=False,
+            texto_pie_pagina="Asiento formal auditado en el libro de movimientos de inventario.",
+        ),
+        "recibo_pago_cxc": _base_formato_doc(
+            "recibo_pago_cxc", "Comerciales", "Recibo de Cobro / Abono CxC",
+            tamano_papel="half_letter", orientacion="portrait", margen_mm=10,
+            titulo_documento="RECIBO OFICIAL DE COBRO (CXC)",
+            subtitulo_documento="Comprobante de Amortización de Deuda Cliente",
+            columnas={"metodo": True, "moneda": True, "monto_moneda": True, "tasa_cambio": True, "equivalente_usd": True, "referencia": True},
+            firmas=["Recibido por (Caja / Cobranza)", "Cliente Pagador"],
+            mostrar_firmas=True,
+            texto_pie_pagina="Abono aplicado satisfactoriamente al estado de cuenta del cliente.",
+        ),
+        "recibo_pago_cxp": _base_formato_doc(
+            "recibo_pago_cxp", "Comerciales", "Comprobante de Pago CxP",
+            tamano_papel="half_letter", orientacion="portrait", margen_mm=10,
+            titulo_documento="COMPROBANTE DE EGRESO / PAGO (CXP)",
+            subtitulo_documento="Soporte de Amortización a Proveedor",
+            columnas={"metodo": True, "moneda": True, "monto_moneda": True, "tasa_cambio": True, "equivalente_usd": True, "referencia": True},
+            firmas=["Pagado por (Tesorería)", "Recibido Conforme (Proveedor)"],
+            mostrar_firmas=True,
+            texto_pie_pagina="Pago registrado en cuentas por pagar a proveedores.",
+        ),
+        "catalogo_productos": _base_formato_doc(
+            "catalogo_productos", "Comerciales", "Catálogo Visual de Productos",
+            tamano_papel="letter", orientacion="portrait", margen_mm=10,
+            titulo_documento="CATÁLOGO DE PRODUCTOS",
+            subtitulo_documento="Lista Oficial de Precios al Cliente",
+            columnas={"foto": True, "codigo": True, "descripcion": True, "stock": True, "precio_usd": True, "precio_ves": False},
+            firmas=[],
+            mostrar_firmas=False,
+            mostrar_desglose_pagos=False,
+            texto_pie_pagina="Precios sujetos a cambio sin previo aviso según tasa BCV del día.",
+        ),
+        # --- TESORERÍA (2) ---
+        "cierre_z_a4": _base_formato_doc(
+            "cierre_z_a4", "Tesorería", "Cierre Z & Arqueo (Hoja A4/Carta)",
+            tamano_papel="letter", orientacion="portrait", margen_mm=10,
+            titulo_documento="REPORTE DE CIERRE Z & ARQUEO",
+            subtitulo_documento="Conciliación Multimoneda y Cierre de Turno",
+            columnas={"moneda": True, "fondo_inicial": True, "saldo_teorico": True, "declarado": True, "diferencia": True, "auditoria": True, "movimientos_detalle": True},
+            firmas=["Cajero / Operador de Turno", "Administración / Auditoría"],
+            mostrar_firmas=True,
+            texto_pie_pagina="Arqueo cerrado y auditado en el módulo de tesorería.",
+        ),
+        "cierre_z_ticket": _base_formato_doc(
+            "cierre_z_ticket", "Tesorería", "Ticket Térmico Cierre Z (POS 80/58mm)",
+            tamano_papel="ticket_80", orientacion="portrait", margen_mm=2,
+            escala_fuente="compacto", familia_fuente="mono",
+            titulo_documento="CIERRE DE CAJA & ARQUEO Z",
+            subtitulo_documento="Resumen Térmico de Turno",
+            columnas={"conciliacion_divisas": True, "detalle_metodos": True, "diferencias": True},
+            firmas=["Firma Cajero / Responsable"],
+            mostrar_firmas=True,
+            texto_pie_pagina="Cierre Z emitido desde terminal POS.",
+        ),
+        # --- LIBROS FISCALES SENIAT (3 - LANDSCAPE POR DEFECTO) ---
+        "libro_ventas_seniat": _base_formato_doc(
+            "libro_ventas_seniat", "Libros SENIAT", "Libro de Ventas SENIAT",
+            tamano_papel="letter", orientacion="landscape", margen_mm=8,
+            escala_fuente="compacto",
+            titulo_documento="LIBRO DE VENTAS FISCALES (SENIAT)",
+            subtitulo_documento="Reglamento de la Ley del IVA — Art. 76 y 77 (Venezuela)",
+            columnas={
+                "num_oper": True, "fecha": True, "rif_cedula": True, "razon_social": True,
+                "num_factura": True, "num_control": True, "nota_deb_cred": True,
+                "tipo_transaccion": True, "total_ventas_iva": True, "ventas_exentas": True,
+                "base_imponible": True, "alicuota_iva": True, "debito_fiscal_iva": True,
+                "iva_retenido": True, "equiv_usd": True,
+            },
+            firmas=["Elaborado por", "Revisado / Contador Público", "Gerencia / Representante Legal"],
+            mostrar_firmas=True,
+            mostrar_desglose_pagos=False,
+            texto_pie_pagina="Libro auxiliar de ventas conforme a normativa SENIAT vigente.",
+        ),
+        "libro_compras_seniat": _base_formato_doc(
+            "libro_compras_seniat", "Libros SENIAT", "Libro de Compras SENIAT",
+            tamano_papel="letter", orientacion="landscape", margen_mm=8,
+            escala_fuente="compacto",
+            titulo_documento="LIBRO DE COMPRAS FISCALES (SENIAT)",
+            subtitulo_documento="Reglamento de la Ley del IVA — Art. 75 (Venezuela)",
+            columnas={
+                "num_oper": True, "fecha": True, "rif_proveedor": True, "razon_social": True,
+                "num_factura": True, "num_control": True, "num_planilla_import": False,
+                "total_compras_iva": True, "compras_exentas": True, "base_imponible": True,
+                "alicuota_iva": True, "credito_fiscal_iva": True, "retencion_iva": True,
+                "equiv_usd": True,
+            },
+            firmas=["Elaborado por", "Revisado / Contador Público", "Gerencia / Representante Legal"],
+            mostrar_firmas=True,
+            mostrar_desglose_pagos=False,
+            texto_pie_pagina="Libro auxiliar de compras conforme a normativa SENIAT vigente.",
+        ),
+        "libro_inventario_art177": _base_formato_doc(
+            "libro_inventario_art177", "Libros SENIAT", "Libro de Inventario Art. 177 R-LISLR",
+            tamano_papel="letter", orientacion="landscape", margen_mm=8,
+            escala_fuente="compacto",
+            titulo_documento="LIBRO DE INVENTARIO DE MERCANCÍAS (ART. 177 R-LISLR)",
+            subtitulo_documento="Registro Detallado Mensual de Entradas, Salidas y Existencias Valoradas",
+            columnas={
+                "codigo": True, "descripcion": True, "unid_inicial": True, "costo_inicial": True,
+                "entradas_cant_monto": True, "salidas_cant_monto": True,
+                "unid_final": True, "costo_cpp": True, "valor_final_bs_usd": True,
+            },
+            firmas=["Almacén / Inventario", "Contador Público", "Representante Legal"],
+            mostrar_firmas=True,
+            mostrar_desglose_pagos=False,
+            texto_pie_pagina="Registro emitido en cumplimiento del Artículo 177 del Reglamento de la LISLR.",
+        ),
+        # --- REPORTES GERENCIALES & ESTADOS DE CUENTA (7) ---
+        "kardex": _base_formato_doc(
+            "kardex", "Reportes", "Kardex Físico y Valorado CPP",
+            tamano_papel="letter", orientacion="landscape", margen_mm=8,
+            escala_fuente="compacto",
+            titulo_documento="KARDEX DETALLADO DE INVENTARIO",
+            subtitulo_documento="Trazabilidad de Entradas, Salidas y Costo Promedio Ponderado",
+            columnas={
+                "fecha": True, "tipo_mov": True, "documento": True, "tercero": True,
+                "concepto": True, "entradas": True, "salidas": True,
+                "saldo_cant": True, "costo_cpp": True, "saldo_valor": True,
+            },
+            firmas=["Elaborado por", "Auditoría de Inventario"],
+            mostrar_firmas=True,
+            mostrar_desglose_pagos=False,
+            texto_pie_pagina="Movimiento auditado desde el libro mayor de inventario.",
+        ),
+        "inventario_valorado": _base_formato_doc(
+            "inventario_valorado", "Reportes", "Inventario General Valorado",
+            tamano_papel="letter", orientacion="portrait", margen_mm=10,
+            titulo_documento="REPORTE GENERAL DE VALORACIÓN DE INVENTARIO",
+            subtitulo_documento="Catálogo Consolidado con Costo CPP, Precio y Margen Proyectado",
+            columnas={
+                "codigo": True, "descripcion": True, "categoria": True, "tipo": True,
+                "existencia": True, "costo_unitario": True, "costo_total": True,
+                "precio_venta": True, "valor_venta": True,
+            },
+            firmas=["Elaborado por", "Revisado por", "Gerencia General"],
+            mostrar_firmas=True,
+            mostrar_desglose_pagos=False,
+            texto_pie_pagina="Valoración calculada al costo promedio ponderado vigente.",
+        ),
+        "inventario_simple": _base_formato_doc(
+            "inventario_simple", "Reportes", "Inventario Rápido de Existencias",
+            tamano_papel="letter", orientacion="portrait", margen_mm=10,
+            titulo_documento="INFORME SIMPLIFICADO DE STOCK Y EXISTENCIAS",
+            subtitulo_documento="Listado Operativo de Conteo Físico de Almacén",
+            columnas={"codigo": True, "descripcion": True, "categoria": True, "existencia": True},
+            firmas=["Responsable de Conteo", "Supervisor de Almacén"],
+            mostrar_firmas=True,
+            mostrar_desglose_pagos=False,
+            texto_pie_pagina="Hoja de conteo operativo de almacén.",
+        ),
+        "ventas_diarias": _base_formato_doc(
+            "ventas_diarias", "Reportes", "Reporte de Ventas Diarias",
+            tamano_papel="letter", orientacion="portrait", margen_mm=10,
+            titulo_documento="REPORTE DE VENTAS DIARIAS",
+            subtitulo_documento="Desglose de Facturación y Cobros Multimoneda del Día",
+            columnas={
+                "num_factura": True, "hora": True, "cliente": True, "condicion": True,
+                "total_usd": True, "equiv_ves": True, "equiv_cop": True, "desglose_pagos": True,
+            },
+            firmas=["Cajero / Facturación", "Administración"],
+            mostrar_firmas=True,
+            mostrar_equivalente_cop=True,
+            texto_pie_pagina="Consolidado diario de facturación comercial.",
+        ),
+        "ventas_mensuales": _base_formato_doc(
+            "ventas_mensuales", "Reportes", "Reporte Consolidado Mensual",
+            tamano_papel="letter", orientacion="portrait", margen_mm=10,
+            titulo_documento="REPORTE CONSOLIDADO MENSUAL DE VENTAS",
+            subtitulo_documento="Evolución Mensual de Ingresos y Volumen de Facturas",
+            columnas={"mes": True, "num_facturas": True, "total_usd": True, "equiv_ves": True, "equiv_cop": True},
+            firmas=["Administración", "Gerencia General"],
+            mostrar_firmas=True,
+            mostrar_desglose_pagos=False,
+            mostrar_equivalente_cop=True,
+            texto_pie_pagina="Resumen gerencial anual de facturación.",
+        ),
+        "estado_cuenta_cxc": _base_formato_doc(
+            "estado_cuenta_cxc", "Reportes", "Estado de Cuenta Clientes (CxC)",
+            tamano_papel="letter", orientacion="portrait", margen_mm=10,
+            titulo_documento="ESTADO DE CUENTAS POR COBRAR (CXC)",
+            subtitulo_documento="Detalle de Créditos, Abonos Aplicados y Saldos Pendientes",
+            columnas={
+                "factura": True, "cliente": True, "emision": True, "vencimiento": True,
+                "total_usd": True, "abonado_usd": True, "saldo_usd": True, "saldo_ves": True, "estado": True,
+            },
+            firmas=["Crédito y Cobranza", "Cliente / Conformidad"],
+            mostrar_firmas=True,
+            mostrar_desglose_pagos=False,
+            texto_pie_pagina="Estado de cuenta emitido según registros vigentes de cartera.",
+        ),
+        "estado_cuenta_cxp": _base_formato_doc(
+            "estado_cuenta_cxp", "Reportes", "Estado de Cuenta Proveedores (CxP)",
+            tamano_papel="letter", orientacion="portrait", margen_mm=10,
+            titulo_documento="ESTADO DE CUENTAS POR PAGAR (CXP)",
+            subtitulo_documento="Detalle de Obligaciones, Pagos Realizados y Saldo a Proveedores",
+            columnas={
+                "documento": True, "proveedor": True, "concepto": True, "vencimiento": True,
+                "total_usd": True, "pagado_usd": True, "saldo_usd": True, "saldo_ves": True, "estado": True,
+            },
+            firmas=["Tesorería / Cuentas por Pagar", "Contabilidad"],
+            mostrar_firmas=True,
+            mostrar_desglose_pagos=False,
+            texto_pie_pagina="Estado de pasivos comerciales emitido por tesorería.",
+        ),
+    }
+
+
+def sanitizar_css_personalizado(css_text):
+    """Elimina directivas peligrosas (XSS / url js / expression / @import / script) del CSS opcional."""
+    if not css_text:
+        return ""
+    s = str(css_text)
+    s = re.sub(r"</?\s*script[^>]*>", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"<\s*style[^>]*>|</\s*style\s*>", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"expression\s*\(", "/*blocked*/(", s, flags=re.IGNORECASE)
+    s = re.sub(r"javascript\s*:", "blocked:", s, flags=re.IGNORECASE)
+    s = re.sub(r"vbscript\s*:", "blocked:", s, flags=re.IGNORECASE)
+    s = re.sub(r"@import\b", "/*@import*/", s, flags=re.IGNORECASE)
+    s = re.sub(r"behavior\s*:", "/*behavior*/:", s, flags=re.IGNORECASE)
+    s = s.replace("<", "").replace(">", "")
+    return s[:4000].strip()
+
+
+def _limpiar_hex_color(color, fallback="#0f172a"):
+    c = str(color or "").strip()
+    if re.match(r"^#[0-9A-Fa-f]{6}$", c):
+        return c.lower()
+    if re.match(r"^#[0-9A-Fa-f]{3}$", c):
+        return c.lower()
+    return fallback
+
+
+def normalizar_config_formato(doc_type, raw_cfg, legacy_imp=None):
+    """Fusiona valores recibidos o guardados con los defaults de fábrica del doc_type."""
+    catalogo = obtener_catalogo_formatos_default()
+    base = copy.deepcopy(catalogo.get(doc_type) or catalogo["global"])
+    base["doc_type"] = doc_type
+
+    # Aplicar valores heredados de legacy tenant_config_impresion si existe y es la base
+    if legacy_imp and isinstance(legacy_imp, dict):
+        if legacy_imp.get("color_primario"):
+            base["color_primario"] = _limpiar_hex_color(legacy_imp.get("color_primario"), base["color_primario"])
+        if legacy_imp.get("logo_alineacion") in VALID_LOGO_ALIGNS:
+            base["logo_alineacion"] = legacy_imp["logo_alineacion"]
+        if "mostrar_sku" in legacy_imp:
+            base["mostrar_sku"] = bool(legacy_imp["mostrar_sku"])
+            if "sku" in base["columnas"]:
+                base["columnas"]["sku"] = bool(legacy_imp["mostrar_sku"])
+        if "mostrar_vendedor" in legacy_imp:
+            base["mostrar_vendedor"] = bool(legacy_imp["mostrar_vendedor"])
+            if "vendedor" in base["columnas"]:
+                base["columnas"]["vendedor"] = bool(legacy_imp["mostrar_vendedor"])
+        if "mostrar_descuento_linea" in legacy_imp:
+            base["mostrar_descuento_linea"] = bool(legacy_imp["mostrar_descuento_linea"])
+            if "descuento" in base["columnas"]:
+                base["columnas"]["descuento"] = bool(legacy_imp["mostrar_descuento_linea"])
+        if doc_type in ("global", "factura_a4") and legacy_imp.get("texto_footer_factura"):
+            base["texto_pie_pagina"] = str(legacy_imp["texto_footer_factura"])
+        if doc_type == "factura_ticket":
+            if legacy_imp.get("texto_header_ticket") is not None:
+                base["texto_encabezado_extra"] = str(legacy_imp["texto_header_ticket"])
+            if legacy_imp.get("texto_footer_ticket") is not None:
+                base["texto_pie_pagina"] = str(legacy_imp["texto_footer_ticket"])
+
+    if not isinstance(raw_cfg, dict):
+        return base
+
+    if raw_cfg.get("tamano_papel") in VALID_PAPER_SIZES:
+        base["tamano_papel"] = raw_cfg["tamano_papel"]
+    if raw_cfg.get("orientacion") in VALID_ORIENTATIONS:
+        base["orientacion"] = raw_cfg["orientacion"]
+    if raw_cfg.get("margen_mm") is not None:
+        try:
+            m = int(float(raw_cfg["margen_mm"]))
+            base["margen_mm"] = max(0, min(40, m))
+        except Exception:
+            pass
+    if raw_cfg.get("escala_fuente") in VALID_FONT_SCALES:
+        base["escala_fuente"] = raw_cfg["escala_fuente"]
+    if raw_cfg.get("familia_fuente") in VALID_FONT_FAMILIES:
+        base["familia_fuente"] = raw_cfg["familia_fuente"]
+
+    for txt_key in ("titulo_documento", "subtitulo_documento", "texto_cuentas_bancarias", "texto_encabezado_extra", "texto_pie_pagina"):
+        if txt_key in raw_cfg and raw_cfg[txt_key] is not None:
+            base[txt_key] = str(raw_cfg[txt_key])[:1000]
+
+    if "color_primario" in raw_cfg:
+        base["color_primario"] = _limpiar_hex_color(raw_cfg["color_primario"], base["color_primario"])
+    if "color_secundario" in raw_cfg:
+        base["color_secundario"] = _limpiar_hex_color(raw_cfg["color_secundario"], base["color_secundario"])
+    if raw_cfg.get("logo_tamano") in VALID_LOGO_SIZES:
+        base["logo_tamano"] = raw_cfg["logo_tamano"]
+    if raw_cfg.get("logo_alineacion") in VALID_LOGO_ALIGNS:
+        base["logo_alineacion"] = raw_cfg["logo_alineacion"]
+
+    if raw_cfg.get("densidad_filas") in VALID_ROW_DENSITIES:
+        base["densidad_filas"] = raw_cfg["densidad_filas"]
+
+    for bool_key in (
+        "mostrar_logo", "mostrar_rif", "mostrar_direccion", "mostrar_telefono",
+        "mostrar_fecha_impresion", "mostrar_paginacion", "zebra_striping",
+        "mostrar_equivalente_ves", "mostrar_equivalente_cop", "mostrar_tasas_cambio",
+        "mostrar_desglose_pagos", "mostrar_cuentas_bancarias",
+        "mostrar_sku", "mostrar_vendedor", "mostrar_descuento_linea",
+        "mostrar_firmas", "mostrar_marca_saas", "modo_forma_libre",
+    ):
+        if bool_key in raw_cfg:
+            base[bool_key] = bool(raw_cfg[bool_key])
+    if raw_cfg.get("margen_superior_forma_libre_mm") is not None:
+        try:
+            ms = int(float(raw_cfg["margen_superior_forma_libre_mm"]))
+            base["margen_superior_forma_libre_mm"] = max(0, min(120, ms))
+        except Exception:
+            pass
+
+    if isinstance(raw_cfg.get("columnas"), dict):
+        merged_cols = dict(base.get("columnas") or {})
+        for ck, cv in raw_cfg["columnas"].items():
+            merged_cols[str(ck)] = bool(cv)
+        base["columnas"] = merged_cols
+
+    # Sincronizar aliases SKU/Vendedor/Descuento <-> columnas
+    if "sku" in base["columnas"]:
+        if "columnas" in raw_cfg and "sku" in raw_cfg["columnas"]:
+            base["mostrar_sku"] = bool(base["columnas"]["sku"])
+        elif "mostrar_sku" in raw_cfg:
+            base["columnas"]["sku"] = bool(base["mostrar_sku"])
+    if "vendedor" in base["columnas"]:
+        if "columnas" in raw_cfg and "vendedor" in raw_cfg["columnas"]:
+            base["mostrar_vendedor"] = bool(base["columnas"]["vendedor"])
+        elif "mostrar_vendedor" in raw_cfg:
+            base["columnas"]["vendedor"] = bool(base["mostrar_vendedor"])
+    if "descuento" in base["columnas"]:
+        if "columnas" in raw_cfg and "descuento" in raw_cfg["columnas"]:
+            base["mostrar_descuento_linea"] = bool(base["columnas"]["descuento"])
+        elif "mostrar_descuento_linea" in raw_cfg:
+            base["columnas"]["descuento"] = bool(base["mostrar_descuento_linea"])
+
+    if isinstance(raw_cfg.get("firmas"), list):
+        clean_firmas = [str(x).strip()[:80] for x in raw_cfg["firmas"] if str(x).strip()][:3]
+        base["firmas"] = clean_firmas
+
+    if "css_personalizado" in raw_cfg:
+        base["css_personalizado"] = sanitizar_css_personalizado(raw_cfg["css_personalizado"])
+
+    return base
+
+
+def migrar_config_impresion_a_formatos(tenant_id=1, conn=None):
+    """
+    Si existe tenant_config_impresion y aún no existe perfil 'global' en tenant_formatos_documentos,
+    migra automáticamente los valores legados al perfil 'global' sin pisar formatos ya guardados.
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='tenant_formatos_documentos'"
+        )
+        if not cur.fetchone():
+            return False
+
+        cur.execute(
+            "SELECT 1 FROM tenant_formatos_documentos WHERE tenant_id = ? AND doc_type = 'global'",
+            (tenant_id,),
+        )
+        if cur.fetchone():
+            return False
+
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='tenant_config_impresion'"
+        )
+        if not cur.fetchone():
+            return False
+
+        row_legacy = cur.execute(
+            "SELECT * FROM tenant_config_impresion WHERE tenant_id = ?", (tenant_id,)
+        ).fetchone()
+        if not row_legacy:
+            return False
+
+        legacy_dict = dict(row_legacy)
+        for seed_dt in ("global", "factura_a4", "factura_ticket"):
+            migrated_cfg = normalizar_config_formato(seed_dt, None, legacy_imp=legacy_dict)
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO tenant_formatos_documentos (tenant_id, doc_type, config_json, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (tenant_id, seed_dt, json.dumps(migrated_cfg, ensure_ascii=False)),
+            )
+        conn.commit()
+        return True
+    finally:
+        if should_close:
+            conn.close()
+
+
+def obtener_todos_formatos_documentos(tenant_id=1, conn=None):
+    """
+    Retorna el diccionario completo de todos los doc_type del Estudio Universal,
+    fusionando defaults de fábrica + JSON personalizado por documento.
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    try:
+        migrar_config_impresion_a_formatos(tenant_id=tenant_id, conn=conn)
+        cur = conn.cursor()
+
+        saved_rows = {}
+        try:
+            for r in cur.execute(
+                "SELECT doc_type, config_json, updated_at FROM tenant_formatos_documentos WHERE tenant_id = ?",
+                (tenant_id,),
+            ).fetchall():
+                try:
+                    saved_rows[r["doc_type"]] = {
+                        "data": json.loads(r["config_json"]),
+                        "updated_at": r["updated_at"],
+                    }
+                except Exception:
+                    pass
+        except Exception:
+            saved_rows = {}
+
+        catalogo = obtener_catalogo_formatos_default()
+        resultado = {}
+        for doc_type in catalogo.keys():
+            raw_saved = saved_rows.get(doc_type, {}).get("data")
+            cfg_norm = normalizar_config_formato(doc_type, raw_saved, legacy_imp=None)
+            cfg_norm["customizado"] = doc_type in saved_rows and doc_type != "global"
+            if doc_type in saved_rows:
+                cfg_norm["updated_at"] = saved_rows[doc_type]["updated_at"]
+            resultado[doc_type] = cfg_norm
+        return resultado
+    finally:
+        if should_close:
+            conn.close()
+
+
+def _sincronizar_legacy_impresion_si_aplica(doc_type, cfg_norm, tenant_id, cur):
+    """Mantiene sincronizada la tabla legacy tenant_config_impresion cuando se edita factura_a4, factura_ticket o global."""
+    if doc_type not in ("global", "factura_a4", "factura_ticket"):
+        return
+    try:
+        row = cur.execute("SELECT * FROM tenant_config_impresion WHERE tenant_id = ?", (tenant_id,)).fetchone()
+        if not row:
+            return
+        cur_vals = dict(row)
+        color_p = cfg_norm.get("color_primario") or cur_vals.get("color_primario", "#0f172a")
+        alig = cfg_norm.get("logo_alineacion") or cur_vals.get("logo_alineacion", "centro")
+        m_sku = 1 if cfg_norm.get("mostrar_sku", True) else 0
+        m_vend = 1 if cfg_norm.get("mostrar_vendedor", True) else 0
+        m_desc = 1 if cfg_norm.get("mostrar_descuento_linea", True) else 0
+        t_foot_fac = cur_vals.get("texto_footer_factura", "")
+        t_head_tkt = cur_vals.get("texto_header_ticket", "")
+        t_foot_tkt = cur_vals.get("texto_footer_ticket", "")
+        if doc_type in ("global", "factura_a4"):
+            t_foot_fac = cfg_norm.get("texto_pie_pagina", t_foot_fac)
+        if doc_type == "factura_ticket":
+            t_head_tkt = cfg_norm.get("texto_encabezado_extra", t_head_tkt)
+            t_foot_tkt = cfg_norm.get("texto_pie_pagina", t_foot_tkt)
+        cur.execute(
+            """
+            UPDATE tenant_config_impresion
+            SET color_primario = ?, logo_alineacion = ?, mostrar_sku = ?, mostrar_vendedor = ?,
+                mostrar_descuento_linea = ?, texto_footer_factura = ?, texto_header_ticket = ?,
+                texto_footer_ticket = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE tenant_id = ?
+            """,
+            (color_p, alig, m_sku, m_vend, m_desc, t_foot_fac, t_head_tkt, t_foot_tkt, tenant_id),
+        )
+    except Exception:
+        pass
+
+
+def guardar_formato_documento(doc_type, datos, tenant_id=1, conn=None):
+    """Guarda la configuración JSON validada de un doc_type específico."""
+    catalogo = obtener_catalogo_formatos_default()
+    if doc_type not in catalogo:
+        raise ValueError(f"Tipo de documento no registrado: {doc_type}")
+
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    try:
+        cfg_norm = normalizar_config_formato(doc_type, datos or {})
+        payload_store = {k: v for k, v in cfg_norm.items() if k not in ("customizado", "updated_at")}
+        cfg_json = json.dumps(payload_store, ensure_ascii=False)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO tenant_formatos_documentos (tenant_id, doc_type, config_json, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(tenant_id, doc_type)
+            DO UPDATE SET config_json = excluded.config_json, updated_at = CURRENT_TIMESTAMP
+            """,
+            (tenant_id, doc_type, cfg_json),
+        )
+        _sincronizar_legacy_impresion_si_aplica(doc_type, cfg_norm, tenant_id, cur)
+        conn.commit()
+        todos = obtener_todos_formatos_documentos(tenant_id=tenant_id, conn=conn)
+        return todos[doc_type], todos
+    finally:
+        if should_close:
+            conn.close()
+
+
+def restablecer_formato_documento(doc_type, tenant_id=1, conn=None):
+    """Elimina la personalización de un documento específico restaurando sus valores de fábrica."""
+    catalogo = obtener_catalogo_formatos_default()
+    if doc_type not in catalogo:
+        raise ValueError(f"Tipo de documento no registrado: {doc_type}")
+
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM tenant_formatos_documentos WHERE tenant_id = ? AND doc_type = ?",
+            (tenant_id, doc_type),
+        )
+        # Si se restablece, devolvemos el default puro de fábrica para que el reset sea real
+        # incluso si existiera configuración previa en perfil global/legacy
+        if doc_type in ("global", "factura_a4", "factura_ticket"):
+            factory_cfg = copy.deepcopy(catalogo[doc_type])
+            _sincronizar_legacy_impresion_si_aplica(doc_type, factory_cfg, tenant_id, cur)
+        conn.commit()
+        factory_out = copy.deepcopy(catalogo[doc_type])
+        factory_out["customizado"] = False
+        return factory_out
+    finally:
+        if should_close:
+            conn.close()
+
+
+def aplicar_marca_global_formatos(datos, tenant_id=1, conn=None):
+    """
+    Propaga color primario/secundario, configuración de logo, familia de fuente,
+    pie corporativo y atribución SaaS a TODOS los documentos registrados en un clic.
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    try:
+        src = datos if isinstance(datos, dict) else {}
+        brand_patch = {}
+        if "color_primario" in src:
+            brand_patch["color_primario"] = _limpiar_hex_color(src.get("color_primario"), "#0f172a")
+        if "color_secundario" in src:
+            brand_patch["color_secundario"] = _limpiar_hex_color(src.get("color_secundario"), "#0284c7")
+        if src.get("familia_fuente") in VALID_FONT_FAMILIES:
+            brand_patch["familia_fuente"] = src["familia_fuente"]
+        if src.get("logo_alineacion") in VALID_LOGO_ALIGNS:
+            brand_patch["logo_alineacion"] = src["logo_alineacion"]
+        if src.get("logo_tamano") in VALID_LOGO_SIZES:
+            brand_patch["logo_tamano"] = src["logo_tamano"]
+        if "mostrar_logo" in src:
+            brand_patch["mostrar_logo"] = bool(src["mostrar_logo"])
+        if "mostrar_marca_saas" in src:
+            brand_patch["mostrar_marca_saas"] = bool(src["mostrar_marca_saas"])
+        if "texto_pie_pagina" in src and src["texto_pie_pagina"] is not None:
+            brand_patch["texto_pie_pagina"] = str(src["texto_pie_pagina"])[:1000]
+
+        cur = conn.cursor()
+        actuales = obtener_todos_formatos_documentos(tenant_id=tenant_id, conn=conn)
+        for doc_type, doc_cfg in actuales.items():
+            merged = copy.deepcopy(doc_cfg)
+            for k, v in brand_patch.items():
+                # No sobrescribir fuente monoespaciada térmica de tickets a menos que sea explícito, salvo color/logo/pie
+                if k == "familia_fuente" and doc_type in ("factura_ticket", "cierre_z_ticket"):
+                    continue
+                merged[k] = v
+            norm = normalizar_config_formato(doc_type, merged)
+            payload_store = {k: v for k, v in norm.items() if k not in ("customizado", "updated_at")}
+            cur.execute(
+                """
+                INSERT INTO tenant_formatos_documentos (tenant_id, doc_type, config_json, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(tenant_id, doc_type)
+                DO UPDATE SET config_json = excluded.config_json, updated_at = CURRENT_TIMESTAMP
+                """,
+                (tenant_id, doc_type, json.dumps(payload_store, ensure_ascii=False)),
+            )
+            if doc_type == "global":
+                _sincronizar_legacy_impresion_si_aplica("global", norm, tenant_id, cur)
+
+        conn.commit()
+        return obtener_todos_formatos_documentos(tenant_id=tenant_id, conn=conn)
+    finally:
+        if should_close:
+            conn.close()
+
+
+# ==============================================================================
+# MOTOR FISCAL VENEZOLANO (IGTF 3% CONDICIONADO + CORRELATIVOS 8 CARACTERES)
+# ==============================================================================
+
+class CorrelativoColisionError(ValueError):
+    """Se lanza cuando el número correlativo configurado colisiona con un documento ya emitido (HTTP 409)."""
+
+
+CORRELATIVOS_DEFAULT = (
+    ("factura", "Factura de Venta", "", 1, 8),
+    ("nota_credito", "Nota de Crédito / Devolución", "", 1, 8),
+    ("nota_debito", "Nota de Débito / Ajuste", "", 1, 8),
+    ("pedido", "Pedido / Preventa", "", 1, 8),
+    ("recibo_cxc", "Recibo de Cobro CxC", "", 1, 8),
+    ("recibo_cxp", "Comprobante de Pago CxP", "", 1, 8),
+    ("compra", "Registro de Compra", "", 1, 8),
+    ("cierre_z", "Cierre Z / Arqueo de Caja", "", 1, 8),
+)
+
+
+def calcular_igtf_operacion(total_usd, pagos_procesados, cfg, tasa_ves=None):
+    """
+    Regla Matemática Estricta de IGTF (Gaceta Oficial N° 42.339 / SNAT/2022/000013):
+    - Si es_contribuyente_especial == 0: base=0, igtf=0, total_operacion=total_usd.
+    - Si es_contribuyente_especial == 1: suma pagos cuya moneda != 'VES', topada al total_usd;
+      calcula igtf_monto_usd = round(base * (igtf_pct / 100), 2) y total_operacion = total_usd + igtf_monto_usd.
+    """
+    def _d(v, default="0"):
+        try:
+            if v is None or v == "":
+                return Decimal(default)
+            return Decimal(str(v))
+        except Exception:
+            return Decimal(default)
+
+    cfg_d = dict(cfg) if cfg else {}
+    total_dec = _d(total_usd, "0").quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    tasa_dec = _d(tasa_ves if tasa_ves is not None else cfg_d.get("tasa_ves"), "1")
+    if tasa_dec <= Decimal("0"):
+        tasa_dec = Decimal("1")
+
+    es_especial = 1 if int(cfg_d.get("es_contribuyente_especial") or 0) == 1 else 0
+    if es_especial == 0 or total_dec <= Decimal("0"):
+        tot_ves = float((total_dec * tasa_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+        return {
+            "es_contribuyente_especial": es_especial,
+            "base_igtf_usd": 0.0,
+            "igtf_porcentaje": 0.0,
+            "igtf_monto_usd": 0.0,
+            "igtf_monto_ves": 0.0,
+            "total_operacion_usd": float(total_dec),
+            "total_operacion_ves": tot_ves,
+        }
+
+    igtf_pct_dec = _d(cfg_d.get("igtf_porcentaje"), "3.0")
+    if igtf_pct_dec < Decimal("0"):
+        igtf_pct_dec = Decimal("0")
+
+    pagos_divisas_dec = Decimal("0")
+    for p in (pagos_procesados or []):
+        mon = str(p.get("moneda") or "USD").strip().upper()
+        if mon == "VES":
+            continue
+        eq = p.get("equivalente_usd")
+        if eq is None:
+            m_mon = _d(p.get("monto_moneda", p.get("monto", 0)), "0")
+            t_c = _d(p.get("tasa_cambio"), "1")
+            if mon == "USD":
+                eq_dec = m_mon
+            elif t_c > Decimal("0"):
+                eq_dec = (m_mon / t_c).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            else:
+                eq_dec = Decimal("0")
+        else:
+            eq_dec = _d(eq, "0")
+        if eq_dec > Decimal("0"):
+            pagos_divisas_dec += eq_dec
+
+    base_igtf_dec = min(pagos_divisas_dec, total_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    igtf_monto_dec = (base_igtf_dec * igtf_pct_dec / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    total_op_dec = (total_dec + igtf_monto_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    igtf_ves = float((igtf_monto_dec * tasa_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    total_op_ves = float((total_op_dec * tasa_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+    return {
+        "es_contribuyente_especial": 1,
+        "base_igtf_usd": float(base_igtf_dec),
+        "igtf_porcentaje": float(igtf_pct_dec) if base_igtf_dec > Decimal("0") else float(igtf_pct_dec),
+        "igtf_monto_usd": float(igtf_monto_dec),
+        "igtf_monto_ves": igtf_ves,
+        "total_operacion_usd": float(total_op_dec),
+        "total_operacion_ves": total_op_ves,
+    }
+
+
+def _extract_trailing_int(val):
+    if not val:
+        return 0
+    m = re.search(r"(\d+)$", str(val).strip())
+    return int(m.group(1)) if m else 0
+
+
+def _max_existente_correlativo(cursor, tipo_documento):
+    checks = {
+        "factura": ("facturas", "numero_factura"),
+        "nota_credito": ("devoluciones", "numero_devolucion"),
+        "nota_debito": ("notas_ajuste_comercial", "numero_nota"),
+        "pedido": ("pedidos", "numero_pedido"),
+        "recibo_cxc": ("abonos_cxc", "numero_recibo"),
+        "recibo_cxp": ("abonos_cxp", "numero_recibo"),
+        "compra": ("compras", "numero_control"),
+        "cierre_z": ("turnos_caja", "numero_cierre"),
+    }
+    tbl_col = checks.get(tipo_documento)
+    if not tbl_col:
+        return 0
+    tbl, col = tbl_col
+    max_num = 0
+    try:
+        rows = cursor.execute(f"SELECT {col} FROM {tbl} WHERE {col} IS NOT NULL").fetchall()
+        for r in rows:
+            n = _extract_trailing_int(r[0])
+            if 0 < n <= 99999999 and n > max_num:
+                max_num = n
+    except Exception:
+        pass
+    try:
+        r_id = cursor.execute(f"SELECT COALESCE(MAX(id), 0) FROM {tbl}").fetchone()
+        if r_id and int(r_id[0] or 0) > max_num:
+            max_num = int(r_id[0])
+    except Exception:
+        pass
+    return max_num
+
+
+def sembrar_correlativos_sistema(cursor, tenant_id=1):
+    """Garantiza la existencia de los 8 tipos de correlativos en correlativos_sistema."""
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS correlativos_sistema (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id INTEGER NOT NULL DEFAULT 1,
+        tipo_documento TEXT NOT NULL,
+        etiqueta TEXT NOT NULL,
+        prefijo TEXT NOT NULL DEFAULT '',
+        siguiente_numero INTEGER NOT NULL DEFAULT 1,
+        longitud INTEGER NOT NULL DEFAULT 8,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, tipo_documento)
+    )
+    """)
+    for tipo_doc, etiqueta, prefijo, sig_default, longitud in CORRELATIVOS_DEFAULT:
+        exists = cursor.execute(
+            "SELECT 1 FROM correlativos_sistema WHERE tenant_id = ? AND tipo_documento = ?",
+            (tenant_id, tipo_doc),
+        ).fetchone()
+        if not exists:
+            max_prev = _max_existente_correlativo(cursor, tipo_doc)
+            sig_init = max(int(sig_default), min(99999999, max_prev + 1)) if max_prev > 0 else int(sig_default)
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO correlativos_sistema (
+                    tenant_id, tipo_documento, etiqueta, prefijo, siguiente_numero, longitud, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (tenant_id, tipo_doc, etiqueta, prefijo, sig_init, int(longitud)),
+            )
+
+
+def _formatear_correlativo(prefijo, numero, longitud=8):
+    lon = max(1, min(12, int(longitud or 8)))
+    num_str = str(int(numero)).zfill(lon)
+    pref = (prefijo or "").strip()
+    return f"{pref}{num_str}" if pref else num_str
+
+
+def _existe_correlativo_emitido(cursor, tipo_documento, formatted_val, raw_num, longitud=8):
+    plain_8 = str(int(raw_num)).zfill(int(longitud or 8))
+    candidates = {formatted_val, plain_8}
+    table_map = {
+        "factura": [("facturas", "numero_factura")],
+        "nota_credito": [("devoluciones", "numero_devolucion"), ("notas_ajuste_comercial", "numero_nota")],
+        "nota_debito": [("notas_ajuste_comercial", "numero_nota"), ("inventario_ajustes", "numero_ajuste")],
+        "pedido": [("pedidos", "numero_pedido")],
+        "recibo_cxc": [("abonos_cxc", "numero_recibo")],
+        "recibo_cxp": [("abonos_cxp", "numero_recibo")],
+        "compra": [("compras", "numero_control"), ("compras", "numero_factura")],
+        "cierre_z": [("turnos_caja", "numero_cierre")],
+    }
+    for tbl, col in table_map.get(tipo_documento, []):
+        try:
+            for cand in candidates:
+                row = cursor.execute(
+                    f"SELECT 1 FROM {tbl} WHERE {col} = ? LIMIT 1",
+                    (cand,),
+                ).fetchone()
+                if row:
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+def obtener_y_avanzar_correlativo(tipo_documento, tenant_id=1, cursor=None):
+    """
+    Obtiene el correlativo formateado a 8 dígitos (p.ej. '00000899' o prefijo + 8 dígitos)
+    y avanza el contador atómicamente bajo transacción BEGIN IMMEDIATE.
+    """
+    should_close = False
+    started_tx = False
+    conn_local = None
+    if cursor is None:
+        conn_local = get_connection()
+        should_close = True
+        cursor = conn_local.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        started_tx = True
+
+    try:
+        row = cursor.execute(
+            "SELECT id, prefijo, siguiente_numero, longitud FROM correlativos_sistema WHERE tenant_id = ? AND tipo_documento = ?",
+            (tenant_id, tipo_documento),
+        ).fetchone()
+        if not row:
+            sembrar_correlativos_sistema(cursor, tenant_id=tenant_id)
+            row = cursor.execute(
+                "SELECT id, prefijo, siguiente_numero, longitud FROM correlativos_sistema WHERE tenant_id = ? AND tipo_documento = ?",
+                (tenant_id, tipo_documento),
+            ).fetchone()
+        if not row:
+            raise ValueError(f"Tipo de documento correlativo desconocido: {tipo_documento}")
+
+        row_d = dict(row)
+        sig = int(row_d["siguiente_numero"] or 1)
+        lon = int(row_d.get("longitud") or 8)
+        pref = row_d.get("prefijo") or ""
+
+        # Evitar colisión si se insertaron documentos manualmente por fuera
+        guard = 0
+        formatted = _formatear_correlativo(pref, sig, lon)
+        while _existe_correlativo_emitido(cursor, tipo_documento, formatted, sig, lon) and guard < 1000:
+            sig += 1
+            formatted = _formatear_correlativo(pref, sig, lon)
+            guard += 1
+
+        cursor.execute(
+            "UPDATE correlativos_sistema SET siguiente_numero = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (sig + 1, row_d["id"]),
+        )
+        if started_tx and conn_local is not None:
+            conn_local.commit()
+        return formatted
+    except Exception:
+        if started_tx and conn_local is not None and conn_local.in_transaction:
+            conn_local.rollback()
+        raise
+    finally:
+        if should_close and conn_local is not None:
+            conn_local.close()
+
+
+def obtener_correlativos_sistema(tenant_id=1, conn=None):
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    try:
+        cur = conn.cursor()
+        sembrar_correlativos_sistema(cur, tenant_id=tenant_id)
+        if should_close:
+            conn.commit()
+        rows = cur.execute(
+            """
+            SELECT id, tenant_id, tipo_documento, etiqueta, prefijo, siguiente_numero, longitud, updated_at
+            FROM correlativos_sistema
+            WHERE tenant_id = ?
+            ORDER BY id ASC
+            """,
+            (tenant_id,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["preview"] = _formatear_correlativo(d.get("prefijo", ""), d.get("siguiente_numero", 1), d.get("longitud", 8))
+            out.append(d)
+        return out
+    finally:
+        if should_close:
+            conn.close()
+
+
+def actualizar_correlativos_sistema(payload, tenant_id=1, conn=None):
+    """
+    Actualiza uno o múltiples correlativos validando rango [1..99999999]
+    y bloqueando con CorrelativoColisionError (HTTP 409) ante colisión con documentos emitidos.
+    """
+    items = []
+    if isinstance(payload, dict) and isinstance(payload.get("correlativos"), list):
+        items = payload["correlativos"]
+    elif isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict) and payload.get("tipo_documento"):
+        items = [payload]
+    else:
+        raise ValueError("Payload inválido para actualizar correlativos.")
+
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+    started_tx = False
+    try:
+        cur = conn.cursor()
+        if not conn.in_transaction:
+            cur.execute("BEGIN IMMEDIATE")
+            started_tx = True
+
+        sembrar_correlativos_sistema(cur, tenant_id=tenant_id)
+        valid_types = {row[0] for row in CORRELATIVOS_DEFAULT}
+
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            tipo_doc = str(it.get("tipo_documento") or "").strip()
+            if tipo_doc not in valid_types:
+                raise ValueError(f"Tipo de documento inválido: '{tipo_doc}'")
+
+            try:
+                sig = int(it.get("siguiente_numero"))
+            except Exception:
+                raise ValueError(f"Número correlativo inválido para {tipo_doc}.")
+
+            if sig < 1 or sig > 99999999:
+                raise ValueError(f"El correlativo de '{tipo_doc}' debe estar entre 1 y 99999999.")
+
+            raw_pref = "" if it.get("prefijo") is None else str(it.get("prefijo")).strip().upper()
+            pref = re.sub(r"[^A-Z0-9_-]", "", raw_pref)[:10]
+
+            row_cur = cur.execute(
+                "SELECT longitud FROM correlativos_sistema WHERE tenant_id = ? AND tipo_documento = ?",
+                (tenant_id, tipo_doc),
+            ).fetchone()
+            lon = int(row_cur[0] or 8) if row_cur else 8
+            formatted = _formatear_correlativo(pref, sig, lon)
+
+            if _existe_correlativo_emitido(cur, tipo_doc, formatted, sig, lon):
+                raise CorrelativoColisionError(
+                    f"COLISIÓN DE CORRELATIVO: El número '{formatted}' para '{tipo_doc}' ya fue emitido anteriormente. "
+                    f"Configure un correlativo superior que no colisione con documentos históricos."
+                )
+
+            cur.execute(
+                """
+                UPDATE correlativos_sistema
+                SET prefijo = ?, siguiente_numero = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE tenant_id = ? AND tipo_documento = ?
+                """,
+                (pref, sig, tenant_id, tipo_doc),
+            )
+
+        if started_tx and conn.in_transaction:
+            conn.commit()
+        return obtener_correlativos_sistema(tenant_id=tenant_id, conn=conn)
+    except Exception:
+        if started_tx and conn.in_transaction:
+            conn.rollback()
+        raise
     finally:
         if should_close:
             conn.close()
@@ -8637,16 +9846,18 @@ def cerrar_turno_caja_ciego(declarado, usuario_id=1, turno_id=None, notas='', co
         dec_json = json.dumps(totales_declarados_payload, ensure_ascii=False)
         dif_json = json.dumps(diferencias_payload, ensure_ascii=False)
 
+        numero_cierre = obtener_y_avanzar_correlativo("cierre_z", tenant_id=1, cursor=cur)
         cur.execute("""
             UPDATE turnos_caja
             SET estado = 'CERRADO',
+                numero_cierre = COALESCE(NULLIF(numero_cierre, ''), ?),
                 fecha_cierre = CURRENT_TIMESTAMP,
                 totales_esperados_json = ?,
                 totales_declarados_json = ?,
                 diferencias_json = ?,
                 notas = ?
             WHERE id = ?
-        """, (esp_json, dec_json, dif_json, notas, turno_id))
+        """, (numero_cierre, esp_json, dec_json, dif_json, notas, turno_id))
 
         # Auditoría
         try:

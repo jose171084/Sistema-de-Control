@@ -64,6 +64,7 @@ RBAC_RULES = {
     r"^/api/usuarios": "perm_configuracion",
     r"^/api/seguridad": "perm_configuracion",
     r"^/api/configuracion": "perm_configuracion",
+    r"^/api/formatos": "perm_configuracion",
     r"^/api/catalogo/subir-pdf": "perm_configuracion",
     r"^/api/database": "perm_configuracion",
 }
@@ -91,7 +92,7 @@ class SecurityMiddleware:
         # Rutas con "Autenticado General" (configuración de tasas/impresión de solo lectura necesaria al iniciar sesión)
         if path in ("/api/auth/me", "/api/auth/logout"):
             return None  # Cualquier usuario autenticado tiene acceso
-        if method == "GET" and path in ("/api/config", "/api/configuracion/impresion", "/api/tasas/oficiales"):
+        if method == "GET" and path in ("/api/config", "/api/configuracion/impresion", "/api/formatos", "/api/tasas/oficiales"):
             return None
 
         # Tratamiento específico para notas de ajuste

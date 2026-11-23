@@ -444,10 +444,31 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json("Configuración no encontrada", 404)
 
                         # --- RUTAS DE AUTENTICACIÓN, USUARIOS, ROLES Y FUERZA DE VENTAS (GET) ---
-            # --- CONFIGURACIÓN DE IMPRESIÓN ---
+            # --- CONFIGURACIÓN DE IMPRESIÓN Y ESTUDIO UNIVERSAL DE FORMATOS ---
             elif path == "/api/configuracion/impresion":
                 cfg_imp = database.obtener_config_impresion(tenant_id=1, conn=conn)
                 self.send_json(cfg_imp)
+                return
+
+            elif path == "/api/formatos":
+                formatos_map = database.obtener_todos_formatos_documentos(tenant_id=1, conn=conn)
+                self.send_json({
+                    "success": True,
+                    "formatos": formatos_map,
+                })
+                return
+
+            elif path == "/api/configuracion/correlativos":
+                user_tok, perms = self.get_current_user_and_perms()
+                is_super = bool(perms and (int(perms.get("rol_id") or 0) == 1 or str(perms.get("rol_nombre") or "").strip().lower() == "superadmin"))
+                if not is_super:
+                    self.send_error_json("ACCESO DENEGADO: Solo SuperAdmin puede consultar y gestionar correlativos.", 403)
+                    return
+                corrs = database.obtener_correlativos_sistema(tenant_id=1, conn=conn)
+                self.send_json({
+                    "success": True,
+                    "correlativos": corrs,
+                })
                 return
 
             elif path == "/api/auth/me":
@@ -2405,13 +2426,17 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             # 17. Libro de Ventas Fiscal SENIAT (Venezuela)
             elif path == "/api/reportes/seniat/libro-ventas":
                 mes = query.get("mes", [None])[0] or datetime.now().strftime("%Y-%m")
+                anio_q = query.get("anio", [None])[0]
+                if anio_q and "-" not in str(mes):
+                    mes = f"{int(anio_q):04d}-{int(mes):02d}"
                 desde = query.get("desde", [None])[0]
                 hasta = query.get("hasta", [None])[0]
 
-                cursor.execute("SELECT nombre_negocio, documento_fiscal, tasa_ves FROM configuracion WHERE id = 1")
+                cursor.execute("SELECT nombre_negocio, documento_fiscal, tasa_ves, tipo_contribuyente, es_contribuyente_especial, igtf_porcentaje FROM configuracion WHERE id = 1")
                 cfg_row = cursor.fetchone()
-                cfg = dict(cfg_row) if cfg_row else {"nombre_negocio": "Comercio", "documento_fiscal": "J-00000000-0", "tasa_ves": 45.0}
+                cfg = dict(cfg_row) if cfg_row else {"nombre_negocio": "Comercio", "documento_fiscal": "J-00000000-0", "tasa_ves": 45.0, "es_contribuyente_especial": 0, "igtf_porcentaje": 3.0}
                 t_ves = float(cfg.get("tasa_ves") or 45.0)
+                es_esp = 1 if int(cfg.get("es_contribuyente_especial") or 0) == 1 else 0
 
                 sql_fac = """
                     SELECT f.*, cl.nombre as cliente_nombre, cl.cedula as cliente_cedula
@@ -2448,11 +2473,16 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 cursor.execute(sql_dev, tuple(params_dev))
                 devoluciones_raw = [dict(r) for r in cursor.fetchall()]
 
+                cursor.execute("SELECT DISTINCT factura_id FROM devoluciones WHERE factura_id IS NOT NULL AND (estado IS NULL OR estado != 'anulada')")
+                dev_factura_ids_activas = {int(r[0]) for r in cursor.fetchall() if r[0] is not None}
+
                 registros = []
                 num_op = 1
 
                 for f in facturas_raw:
-                    es_anulada = (f.get("estado") == "anulada")
+                    # En normativa SENIAT, si la factura dio origen a una Nota de Crédito (devolución),
+                    # la factura conserva su monto original y la NC lo reversa; solo va en 0 si fue anulada sin NC.
+                    es_anulada = (f.get("estado") == "anulada") and (int(f["id"]) not in dev_factura_ids_activas)
                     if es_anulada:
                         registros.append({
                             "operacion_num": num_op,
@@ -2475,6 +2505,11 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                             "base_imponible_ves": 0.0,
                             "iva_causado_ves": 0.0,
                             "iva_retenido_ves": 0.0,
+                            "base_igtf_usd": 0.0,
+                            "igtf_monto_usd": 0.0,
+                            "igtf_monto_ves": 0.0,
+                            "total_operacion_usd": 0.0,
+                            "total_operacion_ves": 0.0,
                             "estado": "ANULADA"
                         })
                         num_op += 1
@@ -2494,6 +2529,11 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     iva_usd = float(det_row[2] or f.get("iva_total", 0.0))
                     tot_usd = float(f.get("total_usd") or (exento_usd + base_usd + iva_usd))
                     t_ves_fac = float(f.get("tasa_ves") or t_ves)
+                    f_base_igtf = float(f.get("base_igtf_usd") or 0.0)
+                    f_igtf_usd = float(f.get("igtf_monto_usd") or 0.0)
+                    f_igtf_ves = float(f.get("igtf_monto_ves") or (f_igtf_usd * t_ves_fac))
+                    f_tot_op_usd = float(f.get("total_operacion_usd") or (tot_usd + f_igtf_usd))
+                    f_tot_op_ves = float(f.get("total_operacion_ves") or (f_tot_op_usd * t_ves_fac))
 
                     registros.append({
                         "operacion_num": num_op,
@@ -2515,17 +2555,44 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         "ventas_exentas_ves": round(exento_usd * t_ves_fac, 2),
                         "base_imponible_ves": round(base_usd * t_ves_fac, 2),
                         "iva_causado_ves": round(iva_usd * t_ves_fac, 2),
-                        "iva_retenido_ves": 0.0
+                        "iva_retenido_ves": 0.0,
+                        "base_igtf_usd": round(f_base_igtf, 2),
+                        "igtf_monto_usd": round(f_igtf_usd, 2),
+                        "igtf_monto_ves": round(f_igtf_ves, 2),
+                        "total_operacion_usd": round(f_tot_op_usd, 2),
+                        "total_operacion_ves": round(f_tot_op_ves, 2),
                     })
                     num_op += 1
 
                 for d in devoluciones_raw:
-                    tot_usd = float(d.get("total_usd") or 0.0)
-                    sub_usd = float(d.get("subtotal_usd") or 0.0)
-                    iva_usd = float(d.get("iva_usd") or 0.0)
-                    exento_usd = max(0.0, round(tot_usd - sub_usd - iva_usd, 2))
+                    cursor.execute("""
+                        SELECT
+                            COUNT(*) as cnt,
+                            SUM(CASE WHEN impuesto_tipo = 'exento' THEN total ELSE 0 END) as exento,
+                            SUM(CASE WHEN impuesto_tipo = 'gravado' THEN subtotal ELSE 0 END) as base_gravada,
+                            SUM(CASE WHEN impuesto_tipo = 'gravado' THEN (iva_unitario * cantidad) ELSE 0 END) as iva_gravado
+                        FROM devolucion_detalles
+                        WHERE devolucion_id = ?
+                    """, (d["id"],))
+                    dd_row = cursor.fetchone()
+                    if dd_row and int(dd_row[0] or 0) > 0:
+                        exento_usd = float(dd_row[1] or 0.0)
+                        base_grav_usd = float(dd_row[2] or 0.0)
+                        iva_usd = float(dd_row[3] or d.get("iva_usd") or 0.0)
+                        tot_usd = float(d.get("total_usd") or (exento_usd + base_grav_usd + iva_usd))
+                    else:
+                        tot_usd = float(d.get("total_usd") or 0.0)
+                        base_grav_usd = float(d.get("subtotal_usd") or 0.0)
+                        iva_usd = float(d.get("iva_usd") or 0.0)
+                        exento_usd = max(0.0, round(tot_usd - base_grav_usd - iva_usd, 2))
                     t_ves_dev = float(d.get("tasa_ves") or t_ves)
+                    d_base_igtf = float(d.get("base_igtf_usd") or 0.0)
+                    d_igtf_usd = float(d.get("igtf_monto_usd") or 0.0)
+                    d_igtf_ves = float(d.get("igtf_monto_ves") or (d_igtf_usd * t_ves_dev))
+                    d_tot_op_usd = float(d.get("total_operacion_usd") or (tot_usd + d_igtf_usd))
+                    d_tot_op_ves = float(d.get("total_operacion_ves") or (d_tot_op_usd * t_ves_dev))
 
+                    fact_afect = d.get("factura_numero_afectada") or d.get("numero_factura") or ""
                     registros.append({
                         "operacion_num": num_op,
                         "fecha": str(d.get("fecha_emision") or "")[:10],
@@ -2535,18 +2602,24 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         "numero_control": d.get("numero_devolucion"),
                         "nota_debito": "",
                         "nota_credito": d.get("numero_devolucion"),
-                        "factura_afectada": d.get("numero_factura") or "",
+                        "factura_afectada": fact_afect,
+                        "factura_fecha_afectada": d.get("factura_fecha_afectada") or d.get("fecha_factura_original") or "",
                         "tipo_transaccion": "03-NC",
                         "total_ventas_usd": round(-tot_usd, 2),
                         "ventas_exentas_usd": round(-exento_usd, 2),
-                        "base_imponible_usd": round(-sub_usd, 2),
+                        "base_imponible_usd": round(-base_grav_usd, 2),
                         "alicuota": 16.0,
                         "iva_causado_usd": round(-iva_usd, 2),
                         "total_ventas_ves": round(-tot_usd * t_ves_dev, 2),
                         "ventas_exentas_ves": round(-exento_usd * t_ves_dev, 2),
-                        "base_imponible_ves": round(-sub_usd * t_ves_dev, 2),
+                        "base_imponible_ves": round(-base_grav_usd * t_ves_dev, 2),
                         "iva_causado_ves": round(-iva_usd * t_ves_dev, 2),
-                        "iva_retenido_ves": 0.0
+                        "iva_retenido_ves": 0.0,
+                        "base_igtf_usd": round(-d_base_igtf, 2),
+                        "igtf_monto_usd": round(-d_igtf_usd, 2),
+                        "igtf_monto_ves": round(-d_igtf_ves, 2),
+                        "total_operacion_usd": round(-d_tot_op_usd, 2),
+                        "total_operacion_ves": round(-d_tot_op_ves, 2),
                     })
                     num_op += 1
 
@@ -2560,6 +2633,8 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 exento_usd = sum(r["ventas_exentas_usd"] for r in registros)
                 base_usd = sum(r["base_imponible_usd"] for r in registros)
                 iva_usd = sum(r["iva_causado_usd"] for r in registros)
+                igtf_base_usd = sum(r.get("base_igtf_usd", 0.0) for r in registros)
+                igtf_usd_tot = sum(r.get("igtf_monto_usd", 0.0) for r in registros)
 
                 bruto_ves = sum(r["total_ventas_ves"] for r in registros if r["tipo_transaccion"] == "01-Reg")
                 nc_ves = abs(sum(r["total_ventas_ves"] for r in registros if r["tipo_transaccion"] == "03-NC"))
@@ -2567,6 +2642,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 exento_ves = sum(r["ventas_exentas_ves"] for r in registros)
                 base_ves = sum(r["base_imponible_ves"] for r in registros)
                 iva_ves = sum(r["iva_causado_ves"] for r in registros)
+                igtf_ves_tot = sum(r.get("igtf_monto_ves", 0.0) for r in registros)
 
                 items_ventas = [
                     {
@@ -2575,7 +2651,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         "es_devolucion": r["tipo_transaccion"] == "03-NC",
                         "numero_nota_credito": r.get("nota_credito", ""),
                         "iva_debito_ves": r.get("iva_causado_ves", 0.0),
-                        "iva_debito_usd": r.get("iva_causado_usd", 0.0)
+                        "iva_debito_usd": r.get("iva_causado_usd", 0.0),
                     }
                     for r in registros
                 ]
@@ -2585,9 +2661,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
                 self.send_json({
                     "contribuyente": cfg,
+                    "es_contribuyente_especial": es_esp,
                     "empresa": {
                         "nombre": cfg.get("nombre_negocio"),
-                        "rif": cfg.get("documento_fiscal")
+                        "rif": cfg.get("documento_fiscal"),
+                        "es_contribuyente_especial": es_esp,
+                        "tipo_contribuyente": cfg.get("tipo_contribuyente", "ordinario"),
+                        "igtf_porcentaje": float(cfg.get("igtf_porcentaje") or 3.0),
                     },
                     "periodo": mes,
                     "mes": mes_part,
@@ -2602,12 +2682,15 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         "total_exentas_usd": round(exento_usd, 2),
                         "total_base_imponible_usd": round(base_usd, 2),
                         "total_iva_debito_usd": round(iva_usd, 2),
+                        "total_igtf_base_usd": round(igtf_base_usd, 2),
+                        "total_igtf_percibido_usd": round(igtf_usd_tot, 2),
                         "total_ventas_brutas_ves": round(bruto_ves, 2),
                         "total_notas_credito_ves": round(nc_ves, 2),
                         "total_ventas_netas_ves": round(neto_ves, 2),
                         "total_exentas_ves": round(exento_ves, 2),
                         "total_base_imponible_ves": round(base_ves, 2),
-                        "total_iva_debito_ves": round(iva_ves, 2)
+                        "total_iva_debito_ves": round(iva_ves, 2),
+                        "total_igtf_percibido_ves": round(igtf_ves_tot, 2),
                     },
                     "resumen": {
                         "total_ventas_ves": round(neto_ves, 2),
@@ -2617,7 +2700,10 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         "total_iva_ves": round(iva_ves, 2),
                         "total_iva_usd": round(iva_usd, 2),
                         "total_exento_ves": round(exento_ves, 2),
-                        "total_exento_usd": round(exento_usd, 2)
+                        "total_exento_usd": round(exento_usd, 2),
+                        "total_igtf_ves": round(igtf_ves_tot, 2),
+                        "total_igtf_usd": round(igtf_usd_tot, 2),
+                        "es_contribuyente_especial": es_esp,
                     }
                 })
 
@@ -3057,6 +3143,18 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         if path == "/api/configuracion/impresion":
             body = self.parse_body_json() or {}
             cfg_actualizada = database.guardar_config_impresion(body, tenant_id=1)
+            # Sincronizar compatibilidad hacia perfiles factura_a4 / factura_ticket / global
+            try:
+                database.guardar_formato_documento("global", {
+                    "color_primario": cfg_actualizada.get("color_primario"),
+                    "logo_alineacion": cfg_actualizada.get("logo_alineacion"),
+                    "mostrar_sku": cfg_actualizada.get("mostrar_sku"),
+                    "mostrar_vendedor": cfg_actualizada.get("mostrar_vendedor"),
+                    "mostrar_descuento_linea": cfg_actualizada.get("mostrar_descuento_linea"),
+                    "texto_pie_pagina": cfg_actualizada.get("texto_footer_factura"),
+                }, tenant_id=1)
+            except Exception:
+                pass
             schedule_cloud_sync()
             self.send_json({
                 "success": True,
@@ -3065,6 +3163,97 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 **cfg_actualizada
             })
             return
+
+        if path == "/api/formatos/aplicar-marca-global":
+            body = self.parse_body_json()
+            if body is None:
+                self.send_error_json("Formato JSON inválido", 400)
+                return
+            try:
+                todos = database.aplicar_marca_global_formatos(body, tenant_id=1)
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": "Marca corporativa aplicada a todos los documentos correctamente",
+                    "formatos": todos,
+                })
+            except Exception as e:
+                self.send_error_json(f"Error al aplicar marca global: {str(e)}", 400)
+            return
+
+        if path.startswith("/api/formatos/") and path.endswith("/reset"):
+            doc_type = path[len("/api/formatos/"):-len("/reset")].strip("/")
+            try:
+                cfg_reset = database.restablecer_formato_documento(doc_type, tenant_id=1)
+                todos = database.obtener_todos_formatos_documentos(tenant_id=1)
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Formato '{doc_type}' restablecido a valores de fábrica",
+                    "doc_type": doc_type,
+                    "config": cfg_reset,
+                    "formatos": todos,
+                })
+            except ValueError as ve:
+                self.send_error_json(str(ve), 404)
+            except Exception as e:
+                self.send_error_json(f"Error al restablecer formato: {str(e)}", 400)
+            return
+
+        if path.startswith("/api/formatos/"):
+            doc_type = path[len("/api/formatos/"):].strip("/")
+            if not doc_type or "/" in doc_type:
+                self.send_error_json("Tipo de documento inválido", 400)
+                return
+            body = self.parse_body_json()
+            if body is None:
+                self.send_error_json("Formato JSON inválido", 400)
+                return
+            try:
+                cfg_doc, todos = database.guardar_formato_documento(doc_type, body, tenant_id=1)
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": f"Formato '{doc_type}' guardado exitosamente",
+                    "doc_type": doc_type,
+                    "config": cfg_doc,
+                    "formatos": todos,
+                })
+            except ValueError as ve:
+                self.send_error_json(str(ve), 404)
+            except Exception as e:
+                self.send_error_json(f"Error al guardar formato: {str(e)}", 400)
+            return
+
+        if path == "/api/configuracion/correlativos":
+            user_tok, perms = self.get_current_user_and_perms()
+            is_super = bool(perms and (int(perms.get("rol_id") or 0) == 1 or str(perms.get("rol_nombre") or "").strip().lower() == "superadmin"))
+            if not is_super:
+                self.send_error_json("ACCESO DENEGADO: Solo SuperAdmin puede modificar los correlativos del sistema.", 403)
+                return
+            body_corr = self.parse_body_json()
+            if body_corr is None:
+                self.send_error_json("Formato JSON inválido", 400)
+                return
+            conn_c = get_connection()
+            try:
+                actualizados = database.actualizar_correlativos_sistema(body_corr, tenant_id=1, conn=conn_c)
+                schedule_cloud_sync()
+                self.send_json({
+                    "success": True,
+                    "message": "Correlativos actualizados correctamente.",
+                    "correlativos": actualizados,
+                })
+            except database.CorrelativoColisionError as ce:
+                self.send_error_json(str(ce), 409)
+            except ValueError as ve:
+                self.send_error_json(str(ve), 400)
+            except Exception as e:
+                self.send_error_json(f"Error actualizando correlativos: {str(e)}", 500)
+            finally:
+                conn_c.close()
+            return
+
         if path == "/api/config":
             self.handle_save_config(path)
             return
@@ -3837,21 +4026,23 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 total_pagado_usd = d_round(total_pagado_dec, 2)
                 total_pagado_rounded_dec = Decimal(str(total_pagado_usd))
 
+                # Cálculo estricto IGTF (3% sobre divisas distintas a VES cuando es_contribuyente_especial == 1)
+                igtf_res = database.calcular_igtf_operacion(total_usd, pagos_procesados, cfg, tasa_ves=tasa_ves)
+                total_operacion_dec = Decimal(str(igtf_res["total_operacion_usd"]))
+
                 if tipo_venta == "credito":
-                    saldo_dec = max(Decimal("0"), (total_usd_dec - total_pagado_rounded_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+                    saldo_dec = max(Decimal("0"), (total_operacion_dec - total_pagado_rounded_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
                     saldo_pendiente = float(saldo_dec)
                     estado_factura = "pagada" if saldo_dec <= Decimal("0.001") else "pendiente"
                 else:
                     saldo_pendiente = 0.0
                     estado_factura = "pagada"
 
-                # Generar número correlativo de factura protegido bajo BEGIN IMMEDIATE
+                # Generar número correlativo centralizado de factura (8 caracteres) protegido bajo BEGIN IMMEDIATE
                 if numero_factura_input:
                     numero_factura = numero_factura_input
                 else:
-                    cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM facturas")
-                    correlativo = cursor.fetchone()[0]
-                    numero_factura = f"FAC-{correlativo:06d}"
+                    numero_factura = database.obtener_y_avanzar_correlativo("factura", tenant_id=1, cursor=cursor)
 
                 notas_final = notas
                 if idempotency_key and f"[IDEMPOTENCY:{idempotency_key}]" not in notas_final:
@@ -3876,9 +4067,24 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 usuario_emisor_id = user_tok.get("uid", 1) if user_tok else 1
 
                 cursor.execute("""
-                    INSERT INTO facturas (numero_factura, cliente_id, subtotal, iva_total, total_usd, total, tasa_ves, tasa_cop, total_ves, total_cop, estado, tipo_venta, fecha_vencimiento, saldo_pendiente, notas, fecha, vendedor_id, comision_porcentaje, comision_monto_usd, comision_estado, usuario_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (numero_factura, cliente_id, subtotal, iva_total, total_usd, total_usd, tasa_ves, tasa_cop, total_ves, total_cop, estado_factura, tipo_venta, fecha_vencimiento if tipo_venta == 'credito' else None, saldo_pendiente, notas_final, fecha_factura, vendedor_id, comision_pct, comision_monto_usd, comision_estado, usuario_emisor_id))
+                    INSERT INTO facturas (
+                        numero_factura, cliente_id, subtotal, iva_total, total_usd, total,
+                        tasa_ves, tasa_cop, total_ves, total_cop,
+                        base_igtf_usd, igtf_porcentaje, igtf_monto_usd, igtf_monto_ves,
+                        total_operacion_usd, total_operacion_ves,
+                        estado, tipo_venta, fecha_vencimiento, saldo_pendiente, notas, fecha,
+                        vendedor_id, comision_porcentaje, comision_monto_usd, comision_estado, usuario_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    numero_factura, cliente_id, subtotal, iva_total, total_usd, total_usd,
+                    tasa_ves, tasa_cop, total_ves, total_cop,
+                    igtf_res["base_igtf_usd"], igtf_res["igtf_porcentaje"], igtf_res["igtf_monto_usd"], igtf_res["igtf_monto_ves"],
+                    igtf_res["total_operacion_usd"], igtf_res["total_operacion_ves"],
+                    estado_factura, tipo_venta, fecha_vencimiento if tipo_venta == 'credito' else None,
+                    saldo_pendiente, notas_final, fecha_factura,
+                    vendedor_id, comision_pct, comision_monto_usd, comision_estado, usuario_emisor_id
+                ))
                 factura_id = cursor.lastrowid
 
                 # Procesamiento secuencial renglón por renglón con integración transaccional CPP
@@ -4018,7 +4224,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     cursor.execute("""
                         INSERT INTO cuentas_por_cobrar (factura_id, cliente_id, monto_total, monto_pagado, saldo_pendiente, fecha_emision, fecha_vencimiento, estado, notas)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (factura_id, cliente_id, total_usd, total_pagado_usd, saldo_pendiente, fecha_emision, fecha_vencimiento, cxc_estado, notas_final))
+                    """, (factura_id, cliente_id, igtf_res["total_operacion_usd"], total_pagado_usd, saldo_pendiente, fecha_emision, fecha_vencimiento, cxc_estado, notas_final))
                     cxc_id = cursor.lastrowid
 
                     if total_pagado_usd > 0 and pagos_procesados:
@@ -4040,6 +4246,12 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "total_usd": total_usd,
                     "total_ves": total_ves,
                     "total_cop": total_cop,
+                    "base_igtf_usd": igtf_res["base_igtf_usd"],
+                    "igtf_porcentaje": igtf_res["igtf_porcentaje"],
+                    "igtf_monto_usd": igtf_res["igtf_monto_usd"],
+                    "igtf_monto_ves": igtf_res["igtf_monto_ves"],
+                    "total_operacion_usd": igtf_res["total_operacion_usd"],
+                    "total_operacion_ves": igtf_res["total_operacion_ves"],
                     "tipo_venta": tipo_venta,
                     "fecha_vencimiento": fecha_vencimiento,
                     "saldo_pendiente": saldo_pendiente,
@@ -4111,11 +4323,14 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json(f"El monto a pagar (${total_abono_usd:.2f}) excede el saldo pendiente (${cxc_dict['saldo_pendiente']:.2f})", 400)
                     return
 
-                # Registrar abono
+                # Registrar abono con correlativo centralizado de 8 caracteres
+                if not conn.in_transaction:
+                    cursor.execute("BEGIN IMMEDIATE")
+                numero_recibo_cxc = database.obtener_y_avanzar_correlativo("recibo_cxc", tenant_id=1, cursor=cursor)
                 cursor.execute("""
-                    INSERT INTO abonos_cxc (cxc_id, monto_usd, notas, estado)
-                    VALUES (?, ?, ?, 'activo')
-                """, (cxc_id, total_abono_usd, notas))
+                    INSERT INTO abonos_cxc (cxc_id, monto_usd, notas, estado, numero_recibo)
+                    VALUES (?, ?, ?, 'activo', ?)
+                """, (cxc_id, total_abono_usd, notas, numero_recibo_cxc))
                 abono_id = cursor.lastrowid
 
                 # Registrar pagos del abono
@@ -4157,6 +4372,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({
                     "success": True,
                     "abono_id": abono_id,
+                    "numero_recibo": numero_recibo_cxc,
                     "monto_abono_usd": total_abono_usd,
                     "nuevo_saldo_pendiente": nuevo_saldo,
                     "nuevo_estado": nuevo_estado
@@ -4165,11 +4381,11 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             # 6. Crear Compra (Integración Transaccional Motor CPP - FASE 2F-2B)
             elif path == "/api/compras":
                 proveedor_id = body.get("proveedor_id")
-                numero_control = body.get("numero_control", f"CMP-{int(time.time()) % 100000:05d}")
+                numero_control = (body.get("numero_control") or "").strip()
                 foto_factura = body.get("foto_factura", "")
                 items = body.get("items") or body.get("productos") or []
                 notas = body.get("notas", "")
-                numero_factura = body.get("numero_factura", numero_control)
+                numero_factura = (body.get("numero_factura") or numero_control or "").strip()
                 tipo_compra = body.get("tipo_compra", "contado")
                 fecha_compra_input = body.get("fecha")
 
@@ -4266,6 +4482,12 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     saldo_pendiente = max(0.0, round(total - total_pagado_usd, 2))
                 else:
                     saldo_pendiente = 0.0
+
+                # Correlativo centralizado de compra si no fue provisto por el proveedor
+                if not numero_control:
+                    numero_control = database.obtener_y_avanzar_correlativo("compra", tenant_id=1, cursor=cursor)
+                if not numero_factura:
+                    numero_factura = numero_control
 
                 # Inserción atómica de la cabecera de compra
                 cursor.execute("""
@@ -4524,10 +4746,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     self.send_error_json(f"El monto a pagar (${monto_usd:.2f}) excede el saldo pendiente (${cxp_dict['saldo_pendiente']:.2f})", 400)
                     return
 
+                if not conn.in_transaction:
+                    cursor.execute("BEGIN IMMEDIATE")
+                numero_recibo_cxp = database.obtener_y_avanzar_correlativo("recibo_cxp", tenant_id=1, cursor=cursor)
                 cursor.execute("""
-                    INSERT INTO abonos_cxp (cxp_id, monto_usd, notas, estado)
-                    VALUES (?, ?, ?, 'activo')
-                """, (cxp_id, monto_usd, notas))
+                    INSERT INTO abonos_cxp (cxp_id, monto_usd, notas, estado, numero_recibo)
+                    VALUES (?, ?, ?, 'activo', ?)
+                """, (cxp_id, monto_usd, notas, numero_recibo_cxp))
                 abono_id = cursor.lastrowid
 
                 for p in pagos:
@@ -4561,6 +4786,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({
                     "success": True,
                     "abono_id": abono_id,
+                    "numero_recibo": numero_recibo_cxp,
                     "monto_abono_usd": monto_usd,
                     "nuevo_saldo_pendiente": nuevo_saldo,
                     "nuevo_estado": nuevo_estado
@@ -4800,13 +5026,11 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 tasa_cop = cfg_row["tasa_cop"] if cfg_row else 4100.0
                 iva_pct = (cfg_row["iva_porcentaje"] / 100.0) if cfg_row else 0.16
 
-                # Generar número correlativo DEV-000001 bajo BEGIN IMMEDIATE
+                # Generar número correlativo centralizado de Nota de Crédito / Devolución (8 caracteres)
                 if numero_devolucion_input:
                     numero_devolucion = numero_devolucion_input
                 else:
-                    cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM devoluciones")
-                    correlativo = cursor.fetchone()[0]
-                    numero_devolucion = f"DEV-{correlativo:06d}"
+                    numero_devolucion = database.obtener_y_avanzar_correlativo("nota_credito", tenant_id=1, cursor=cursor)
 
                 notas_final = notas
                 if idempotency_key and f"[IDEMPOTENCY:{idempotency_key}]" not in notas_final:
@@ -4968,7 +5192,37 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
                 num_fact = factura_dict["numero_factura"] if factura_dict else None
                 fecha_fact_orig = factura_dict["fecha"] if factura_dict else None
+                factura_num_afectada = num_fact or ((body.get("factura_numero_afectada") or "").strip() or None)
+                factura_fecha_afectada = fecha_fact_orig or ((body.get("factura_fecha_afectada") or "").strip() or None)
+                factura_ctrl_afectado = (body.get("factura_control_afectado") or "").strip() or (factura_num_afectada if factura_dict else None)
+                if not num_fact and factura_num_afectada:
+                    num_fact = factura_num_afectada
                 tipo_venta_orig = factura_dict.get("tipo_venta", "contado") if factura_dict else "contado"
+
+                cfg_dev_dict = dict(cfg_row) if cfg_row else {"es_contribuyente_especial": 0, "igtf_porcentaje": 3.0}
+                if pagos_reembolso:
+                    igtf_dev_calc = database.calcular_igtf_operacion(total_usd, pagos_reembolso, cfg_dev_dict, tasa_ves=tasa_ves)
+                    dev_base_igtf_usd = igtf_dev_calc["base_igtf_usd"]
+                    dev_igtf_pct = igtf_dev_calc["igtf_porcentaje"] if igtf_dev_calc["igtf_monto_usd"] > 0 else 0.0
+                    dev_igtf_usd = igtf_dev_calc["igtf_monto_usd"]
+                    dev_igtf_ves = igtf_dev_calc["igtf_monto_ves"]
+                    dev_total_op_usd = igtf_dev_calc["total_operacion_usd"]
+                    dev_total_op_ves = igtf_dev_calc["total_operacion_ves"]
+                elif int(cfg_dev_dict.get("es_contribuyente_especial") or 0) == 1 and factura_dict and float(factura_dict.get("igtf_monto_usd") or 0) > 0:
+                    ratio = min(1.0, total_usd / max(0.01, float(factura_dict.get("total_usd") or total_usd)))
+                    dev_base_igtf_usd = round(float(factura_dict.get("base_igtf_usd") or 0) * ratio, 2)
+                    dev_igtf_pct = float(factura_dict.get("igtf_porcentaje") or cfg_dev_dict.get("igtf_porcentaje") or 3.0)
+                    dev_igtf_usd = round(float(factura_dict.get("igtf_monto_usd") or 0) * ratio, 2)
+                    dev_igtf_ves = round(dev_igtf_usd * tasa_ves, 2)
+                    dev_total_op_usd = round(total_usd + dev_igtf_usd, 2)
+                    dev_total_op_ves = round(dev_total_op_usd * tasa_ves, 2)
+                else:
+                    dev_base_igtf_usd = 0.0
+                    dev_igtf_pct = 0.0
+                    dev_igtf_usd = 0.0
+                    dev_igtf_ves = 0.0
+                    dev_total_op_usd = total_usd
+                    dev_total_op_ves = total_ves
 
                 # Evaluar si la devolución resulta en devolución total o parcial
                 totalmente_devuelta = False
@@ -4996,19 +5250,25 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                 # 1. Insertar cabecera de devolución
                 cursor.execute("""
                     INSERT INTO devoluciones (
-                        numero_devolucion, factura_id, numero_factura, cliente_id,
-                        cliente_nombre, cliente_cedula, cliente_telefono, cliente_direccion,
+                        numero_devolucion, factura_id, numero_factura,
+                        factura_numero_afectada, factura_fecha_afectada, factura_control_afectado,
+                        cliente_id, cliente_nombre, cliente_cedula, cliente_telefono, cliente_direccion,
                         fecha_emision, fecha_factura_original, tipo_devolucion, tipo_venta_original,
                         motivo, subtotal_usd, iva_usd, total_usd,
                         tasa_ves, tasa_cop, total_ves, total_cop,
+                        base_igtf_usd, igtf_porcentaje, igtf_monto_usd, igtf_monto_ves,
+                        total_operacion_usd, total_operacion_ves,
                         metodo_reembolso, notas
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    numero_devolucion, factura_id, num_fact, cliente_id,
-                    cli_dict["nombre"], cli_dict.get("cedula", ""), cli_dict.get("telefono", ""), cli_dict.get("direccion", ""),
+                    numero_devolucion, factura_id, num_fact,
+                    factura_num_afectada, factura_fecha_afectada, factura_ctrl_afectado,
+                    cliente_id, cli_dict["nombre"], cli_dict.get("cedula", ""), cli_dict.get("telefono", ""), cli_dict.get("direccion", ""),
                     fecha_devolucion, fecha_fact_orig, tipo_devolucion, tipo_venta_orig,
                     motivo, subtotal_usd, iva_usd, total_usd,
                     tasa_ves, tasa_cop, total_ves, total_cop,
+                    dev_base_igtf_usd, dev_igtf_pct, dev_igtf_usd, dev_igtf_ves,
+                    dev_total_op_usd, dev_total_op_ves,
                     metodo_reembolso, notas_final
                 ))
                 dev_id = cursor.lastrowid
@@ -5163,6 +5423,14 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     "id": dev_id,
                     "devolucion_id": dev_id,
                     "numero_devolucion": numero_devolucion,
+                    "factura_numero_afectada": factura_num_afectada,
+                    "factura_fecha_afectada": factura_fecha_afectada,
+                    "base_igtf_usd": dev_base_igtf_usd,
+                    "igtf_porcentaje": dev_igtf_pct,
+                    "igtf_monto_usd": dev_igtf_usd,
+                    "igtf_monto_ves": dev_igtf_ves,
+                    "total_operacion_usd": dev_total_op_usd,
+                    "total_operacion_ves": dev_total_op_ves,
                     "total_usd": total_usd,
                     "total_ves": total_ves,
                     "total_cop": total_cop,
@@ -5226,11 +5494,9 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
                 cursor.execute("BEGIN IMMEDIATE")
 
-                # Generar consecutivo si no fue provisto
-                prefijo = "NC" if tipo_nota == "credito" else "ND"
-                cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM notas_ajuste_comercial")
-                next_nid = cursor.fetchone()[0]
-                numero_nota = (body.get("numero_nota") or "").strip() or f"{prefijo}-{next_nid:06d}"
+                # Generar consecutivo centralizado de 8 caracteres si no fue provisto
+                corr_doc_tipo = "nota_credito" if tipo_nota == "credito" else "nota_debito"
+                numero_nota = (body.get("numero_nota") or "").strip() or database.obtener_y_avanzar_correlativo(corr_doc_tipo, tenant_id=1, cursor=cursor)
 
                 # Aplicar efecto sobre la cuenta específica
                 if cuenta_id:
@@ -6081,6 +6347,10 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
         conn = get_connection()
         cursor = conn.cursor()
         try:
+            cursor.execute("SELECT tipo_contribuyente, es_contribuyente_especial, igtf_porcentaje, logo_url FROM configuracion WHERE id = 1")
+            cur_cfg_row = cursor.fetchone()
+            cur_cfg = dict(cur_cfg_row) if cur_cfg_row else {}
+
             nombre = body_dict.get("nombre_negocio")
             doc_fiscal = body_dict.get("documento_fiscal")
             tel = body_dict.get("telefono")
@@ -6091,6 +6361,30 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             auto_sync = int(body_dict.get("sincronizacion_tasas_auto", 1)) if "sincronizacion_tasas_auto" in body_dict else None
             quitar_logo = body_dict.get("quitar_logo") == "1"
 
+            raw_tc = body_dict.get("tipo_contribuyente")
+            if raw_tc is not None and str(raw_tc).strip().lower() in ("ordinario", "formal", "especial"):
+                tipo_contrib = str(raw_tc).strip().lower()
+            else:
+                tipo_contrib = str(cur_cfg.get("tipo_contribuyente") or "ordinario").lower()
+
+            if "es_contribuyente_especial" in body_dict:
+                raw_esp = body_dict.get("es_contribuyente_especial")
+                es_esp = 1 if str(raw_esp).strip().lower() in ("1", "true", "si", "on") else 0
+            elif raw_tc is not None and str(raw_tc).strip().lower() == "especial":
+                es_esp = 1
+            elif raw_tc is not None and str(raw_tc).strip().lower() in ("ordinario", "formal"):
+                es_esp = 0
+            else:
+                es_esp = int(cur_cfg.get("es_contribuyente_especial") or 0)
+
+            if "igtf_porcentaje" in body_dict and body_dict.get("igtf_porcentaje") not in (None, ""):
+                try:
+                    igtf_pct = max(0.0, min(25.0, float(body_dict.get("igtf_porcentaje"))))
+                except Exception:
+                    igtf_pct = float(cur_cfg.get("igtf_porcentaje") if cur_cfg.get("igtf_porcentaje") is not None else 3.0)
+            else:
+                igtf_pct = float(cur_cfg.get("igtf_porcentaje") if cur_cfg.get("igtf_porcentaje") is not None else 3.0)
+
             if quitar_logo:
                 new_logo_url = None
                 if auto_sync is not None:
@@ -6098,49 +6392,55 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         UPDATE configuracion 
                         SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
                             iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?,
+                            tipo_contribuyente = ?, es_contribuyente_especial = ?, igtf_porcentaje = ?,
                             logo_url = NULL
                         WHERE id = 1
-                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync))
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync, tipo_contrib, es_esp, igtf_pct))
                 else:
                     cursor.execute("""
                         UPDATE configuracion 
                         SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
                             iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?,
+                            tipo_contribuyente = ?, es_contribuyente_especial = ?, igtf_porcentaje = ?,
                             logo_url = NULL
                         WHERE id = 1
-                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop))
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, tipo_contrib, es_esp, igtf_pct))
             elif new_logo_url:
                 if auto_sync is not None:
                     cursor.execute("""
                         UPDATE configuracion 
                         SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
                             iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?,
+                            tipo_contribuyente = ?, es_contribuyente_especial = ?, igtf_porcentaje = ?,
                             logo_url = ?
                         WHERE id = 1
-                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync, new_logo_url))
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync, tipo_contrib, es_esp, igtf_pct, new_logo_url))
                 else:
                     cursor.execute("""
                         UPDATE configuracion 
                         SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
                             iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?,
+                            tipo_contribuyente = ?, es_contribuyente_especial = ?, igtf_porcentaje = ?,
                             logo_url = ?
                         WHERE id = 1
-                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, new_logo_url))
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, tipo_contrib, es_esp, igtf_pct, new_logo_url))
             else:
                 if auto_sync is not None:
                     cursor.execute("""
                         UPDATE configuracion 
                         SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
-                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?, sincronizacion_tasas_auto = ?,
+                            tipo_contribuyente = ?, es_contribuyente_especial = ?, igtf_porcentaje = ?
                         WHERE id = 1
-                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync))
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, auto_sync, tipo_contrib, es_esp, igtf_pct))
                 else:
                     cursor.execute("""
                         UPDATE configuracion 
                         SET nombre_negocio = ?, documento_fiscal = ?, telefono = ?, direccion = ?, 
-                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?
+                            iva_porcentaje = ?, tasa_ves = ?, tasa_cop = ?,
+                            tipo_contribuyente = ?, es_contribuyente_especial = ?, igtf_porcentaje = ?
                         WHERE id = 1
-                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop))
+                    """, (nombre, doc_fiscal, tel, direc, iva, t_ves, t_cop, tipo_contrib, es_esp, igtf_pct))
 
             conn.commit()
             schedule_cloud_sync()
@@ -6152,6 +6452,9 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             self.send_json({
                 "success": True,
                 "message": "Configuración y logotipo actualizados correctamente",
+                "tipo_contribuyente": tipo_contrib,
+                "es_contribuyente_especial": es_esp,
+                "igtf_porcentaje": igtf_pct,
                 "logo_url": current_logo_url
             })
         except Exception as e:

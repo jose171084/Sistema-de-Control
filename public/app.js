@@ -994,8 +994,13 @@ async function loadConfig() {
       AppState.config = data;
       updateConfigUI();
     }
-    if (AppState.usuarioActual && typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.cargarConfigImpresion === 'function') {
-      AppState.configImpresion = await MasterReportLayout.cargarConfigImpresion();
+    if (AppState.usuarioActual && typeof MasterReportLayout !== 'undefined') {
+      if (typeof MasterReportLayout.cargarFormatos === 'function') {
+        await MasterReportLayout.cargarFormatos();
+      }
+      if (typeof MasterReportLayout.cargarConfigImpresion === 'function') {
+        AppState.configImpresion = await MasterReportLayout.cargarConfigImpresion();
+      }
     }
   } catch (err) {
     console.error("Error cargando configuración:", err);
@@ -1381,6 +1386,13 @@ function openConfigModal() {
   const swAuto = document.getElementById('cfgTasasAutoSwitch');
   if (swAuto) swAuto.checked = cfg.sincronizacion_tasas_auto !== 0;
 
+  const elTipoContrib = document.getElementById('cfgTipoContribuyente');
+  const elEsEsp = document.getElementById('cfgEsContribuyenteEspecial');
+  const elIgtfPct = document.getElementById('cfgIgtfPorcentaje');
+  if (elTipoContrib) elTipoContrib.value = cfg.tipo_contribuyente || 'ordinario';
+  if (elEsEsp) elEsEsp.checked = Number(cfg.es_contribuyente_especial || 0) === 1;
+  if (elIgtfPct) elIgtfPct.value = cfg.igtf_porcentaje !== undefined ? cfg.igtf_porcentaje : 3.0;
+
   // Hidratar vista previa del logo en el modal
   const preview = document.getElementById('cfgLogoPreview');
   const icon = document.getElementById('cfgLogoPlaceholderIcon');
@@ -1407,6 +1419,7 @@ function openConfigModal() {
     if (btnQuitar) btnQuitar.classList.add('hidden');
   }
 
+  switchConfigTab('general');
   document.getElementById('modalConfig').classList.remove('hidden');
 }
 
@@ -1414,9 +1427,131 @@ function closeConfigModal() {
   document.getElementById('modalConfig').classList.add('hidden');
 }
 
+function switchConfigTab(tabName) {
+  const tabGen = document.getElementById('cfgTabGeneral');
+  const tabCorr = document.getElementById('cfgTabCorrelativos');
+  const btnGen = document.getElementById('cfgTabBtnGeneral');
+  const btnCorr = document.getElementById('cfgTabBtnCorrelativos');
+  const isCorr = tabName === 'correlativos';
+
+  if (tabGen) tabGen.classList.toggle('hidden', isCorr);
+  if (tabCorr) tabCorr.classList.toggle('hidden', !isCorr);
+
+  if (btnGen) {
+    btnGen.className = isCorr
+      ? 'px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition'
+      : 'px-3 py-1.5 rounded-lg bg-teal-600 text-white transition';
+  }
+  if (btnCorr) {
+    btnCorr.className = isCorr
+      ? 'px-3 py-1.5 rounded-lg bg-teal-600 text-white transition'
+      : 'px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition';
+  }
+
+  if (isCorr) {
+    loadCorrelativosConfig();
+  }
+}
+
+async function loadCorrelativosConfig() {
+  const container = document.getElementById('cfgCorrelativosList');
+  if (!container) return;
+  container.innerHTML = '<div class="text-xs text-slate-400 text-center py-4">Cargando correlativos del sistema...</div>';
+  try {
+    const res = await fetch('/api/configuracion/correlativos');
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      container.innerHTML = `<div class="text-xs text-rose-600 text-center py-4">${escapeHtml(data.message || 'No autorizado para consultar correlativos.')}</div>`;
+      return;
+    }
+    const lista = data.correlativos || [];
+    container.innerHTML = lista.map(c => {
+      const td = escapeHtml(c.tipo_documento);
+      const etiqueta = escapeHtml(c.etiqueta || c.tipo_documento);
+      const prefijo = escapeHtml(c.prefijo || '');
+      const sig = parseInt(c.siguiente_numero || 1, 10);
+      const preview = `${prefijo}${String(sig).padStart(c.longitud || 8, '0')}`;
+      return `
+        <div class="grid grid-cols-12 gap-2 items-center bg-white border border-slate-200 rounded-xl p-2.5 text-xs" data-corr-row="${td}">
+          <div class="col-span-4">
+            <span class="font-bold text-slate-800 block">${etiqueta}</span>
+            <span class="text-[10px] text-slate-400 font-mono">${td}</span>
+          </div>
+          <div class="col-span-2">
+            <label class="block text-[10px] text-slate-500 font-semibold">Prefijo (opc.)</label>
+            <input type="text" maxlength="10" value="${prefijo}" data-corr-prefijo="${td}" oninput="updateCorrelativoPreview('${td}')" class="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2 text-xs font-mono">
+          </div>
+          <div class="col-span-3">
+            <label class="block text-[10px] text-slate-500 font-semibold">Próximo N°</label>
+            <input type="number" min="1" max="99999999" value="${sig}" data-corr-num="${td}" oninput="updateCorrelativoPreview('${td}')" class="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2 text-xs font-mono font-bold text-slate-800">
+          </div>
+          <div class="col-span-3 text-right">
+            <span class="block text-[10px] text-slate-400">Vista Previa</span>
+            <span id="corrPreview_${td}" class="inline-block bg-teal-50 text-teal-800 border border-teal-200 font-mono font-extrabold text-[11px] px-2 py-0.5 rounded-lg">${escapeHtml(preview)}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    container.innerHTML = `<div class="text-xs text-rose-600 text-center py-4">Error cargando correlativos: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function updateCorrelativoPreview(tipoDoc) {
+  const elPref = document.querySelector(`[data-corr-prefijo="${tipoDoc}"]`);
+  const elNum = document.querySelector(`[data-corr-num="${tipoDoc}"]`);
+  const elPrev = document.getElementById(`corrPreview_${tipoDoc}`);
+  if (!elPrev) return;
+  const pref = (elPref ? elPref.value : '').trim();
+  let num = parseInt(elNum ? elNum.value : '1', 10);
+  if (isNaN(num) || num < 1) num = 1;
+  if (num > 99999999) num = 99999999;
+  elPrev.textContent = `${pref}${String(num).padStart(8, '0')}`;
+}
+
+async function guardarCorrelativosConfig() {
+  const rows = Array.from(document.querySelectorAll('#cfgCorrelativosList [data-corr-row]'));
+  if (!rows.length) return;
+  const payloadList = [];
+  for (const row of rows) {
+    const td = row.getAttribute('data-corr-row');
+    const pref = (row.querySelector(`[data-corr-prefijo="${td}"]`)?.value || '').trim();
+    const numRaw = parseInt(row.querySelector(`[data-corr-num="${td}"]`)?.value || '1', 10);
+    if (isNaN(numRaw) || numRaw < 1 || numRaw > 99999999) {
+      alert(`El número correlativo para "${td}" debe estar entre 1 y 99999999.`);
+      return;
+    }
+    payloadList.push({
+      tipo_documento: td,
+      prefijo: pref,
+      siguiente_numero: numRaw
+    });
+  }
+
+  try {
+    const res = await fetch('/api/configuracion/correlativos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ correlativos: payloadList })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      alert('Correlativos actualizados correctamente.');
+      loadCorrelativosConfig();
+    } else {
+      alert('No se pudo actualizar correlativos: ' + (data.message || `HTTP ${res.status}`));
+    }
+  } catch (err) {
+    alert('Error de conexión al guardar correlativos: ' + err.message);
+  }
+}
+
 async function saveConfig(e) {
   e.preventDefault();
   const swAuto = document.getElementById('cfgTasasAutoSwitch');
+  const elTipoContrib = document.getElementById('cfgTipoContribuyente');
+  const elEsEsp = document.getElementById('cfgEsContribuyenteEspecial');
+  const elIgtfPct = document.getElementById('cfgIgtfPorcentaje');
   const fileInput = document.getElementById('logoUpload');
   const logoFile = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
 
@@ -1424,6 +1559,10 @@ async function saveConfig(e) {
     alert('El archivo de logotipo supera el límite máximo de 2MB. Por favor seleccione un archivo más liviano.');
     return;
   }
+
+  const esEspecialVal = elEsEsp && elEsEsp.checked ? 1 : 0;
+  const tipoContribVal = elTipoContrib ? elTipoContrib.value : (esEspecialVal === 1 ? 'especial' : 'ordinario');
+  const igtfPctVal = elIgtfPct ? Math.max(0, parseFloat(elIgtfPct.value) || 0) : 3.0;
 
   // Refactorización a FormData (empaqueta texto + archivo binario en la misma petición)
   const formData = new FormData();
@@ -1435,6 +1574,9 @@ async function saveConfig(e) {
   formData.append('telefono', document.getElementById('cfgTelefono').value);
   formData.append('direccion', document.getElementById('cfgDireccion').value);
   formData.append('sincronizacion_tasas_auto', swAuto ? (swAuto.checked ? '1' : '0') : '1');
+  formData.append('tipo_contribuyente', tipoContribVal);
+  formData.append('es_contribuyente_especial', String(esEspecialVal));
+  formData.append('igtf_porcentaje', String(igtfPctVal));
 
   if (logoFile) {
     formData.append('logo', logoFile);
@@ -1460,12 +1602,15 @@ async function saveConfig(e) {
         tasa_cop: parseFloat(document.getElementById('cfgTasaCop').value),
         iva_porcentaje: parseFloat(document.getElementById('cfgIva').value),
         sincronizacion_tasas_auto: swAuto ? (swAuto.checked ? 1 : 0) : 1,
+        tipo_contribuyente: tipoContribVal,
+        es_contribuyente_especial: esEspecialVal,
+        igtf_porcentaje: igtfPctVal,
         logo_url: data.logo_url !== undefined ? data.logo_url : AppState.config.logo_url
       };
       updateConfigUI();
       closeConfigModal();
       if (AppState.currentView === 'facturacion') updatePosTotals();
-      alert('Configuración y logotipo de empresa guardados correctamente.');
+      alert('Configuración fiscal y logotipo de empresa guardados correctamente.');
     } else {
       alert('Error al guardar configuración: ' + (data.message || 'Error desconocido'));
     }
@@ -3478,6 +3623,42 @@ function renderPosCart() {
   updatePosTotals();
 }
 
+function calcularIgtfPos(totalUsd, pagosList = AppState.posPagos) {
+  const cfg = AppState.config || {};
+  const esEspecial = Number(cfg.es_contribuyente_especial || 0) === 1;
+  const pct = Math.max(0, parseFloat(cfg.igtf_porcentaje !== undefined ? cfg.igtf_porcentaje : 3.0) || 0);
+  const totalSafe = Math.max(0, parseFloat(totalUsd) || 0);
+
+  let pagosDivisasUsd = 0;
+  let hayDivisas = false;
+  (pagosList || []).forEach(p => {
+    const monto = parseFloat(p.monto) || 0;
+    const moneda = String(p.moneda || 'USD').toUpperCase();
+    if (monto <= 0 || moneda === 'VES') return;
+    hayDivisas = true;
+    if (moneda === 'COP') {
+      pagosDivisasUsd += cfg.tasa_cop > 0 ? (monto / cfg.tasa_cop) : 0;
+    } else {
+      pagosDivisasUsd += monto;
+    }
+  });
+
+  const aplica = esEspecial && hayDivisas && totalSafe > 0 && pct > 0;
+  const baseIgtfUsd = aplica ? Math.round(Math.min(pagosDivisasUsd, totalSafe) * 100) / 100 : 0;
+  const igtfUsd = aplica ? Math.round(baseIgtfUsd * (pct / 100.0) * 100) / 100 : 0;
+  const totalOperacionUsd = Math.round((totalSafe + igtfUsd) * 100) / 100;
+
+  return {
+    esEspecial,
+    hayDivisas,
+    aplica,
+    pct,
+    baseIgtfUsd,
+    igtfUsd,
+    totalOperacionUsd
+  };
+}
+
 function updatePosTotals() {
   const subtotal = AppState.posCart.reduce((acc, i) => acc + i.subtotal, 0);
   const iva = AppState.posCart.reduce((acc, i) => acc + i.iva_total, 0);
@@ -3503,9 +3684,12 @@ function calcularSaldoPendienteParaFila(filaIdExcluida = null) {
   const iva = AppState.posCart.reduce((acc, i) => acc + i.iva_total, 0);
   const totalUsd = subtotal + iva;
 
+  const pagosActivos = AppState.posPagos.filter(p => filaIdExcluida === null || p.id !== filaIdExcluida);
+  const igtfInfo = calcularIgtfPos(totalUsd, pagosActivos);
+  const objetivoUsd = igtfInfo.totalOperacionUsd;
+
   let pagadoUSD = 0;
-  AppState.posPagos.forEach(p => {
-    if (filaIdExcluida !== null && p.id === filaIdExcluida) return;
+  pagosActivos.forEach(p => {
     let equiv = 0;
     if (p.moneda === 'USD') equiv = p.monto;
     else if (p.moneda === 'VES') equiv = AppState.config.tasa_ves > 0 ? (p.monto / AppState.config.tasa_ves) : 0;
@@ -3513,7 +3697,7 @@ function calcularSaldoPendienteParaFila(filaIdExcluida = null) {
     pagadoUSD += equiv;
   });
 
-  return Math.max(0, totalUsd - pagadoUSD);
+  return Math.max(0, objetivoUsd - pagadoUSD);
 }
 
 // Métodos de pago vinculados estrictamente por moneda
@@ -3666,7 +3850,32 @@ function recalcularPagosMixtos() {
     totalPagadoUsd += equiv;
   });
 
-  const diff = totalPagadoUsd - totalUsd;
+  const igtfInfo = calcularIgtfPos(totalUsd, AppState.posPagos);
+  const totalOperacionUsd = igtfInfo.totalOperacionUsd;
+  const totalOperacionVes = totalOperacionUsd * (AppState.config.tasa_ves || 0);
+  const totalOperacionCop = Math.round(totalOperacionUsd * (AppState.config.tasa_cop || 0));
+
+  const elIgtfRow = document.getElementById('posIgtfRow');
+  const elIgtfLabel = document.getElementById('posIgtfLabel');
+  const elIgtfUsd = document.getElementById('posIgtfUsd');
+  if (elIgtfRow) {
+    if (igtfInfo.aplica) {
+      if (elIgtfLabel) elIgtfLabel.textContent = `IGTF (${igtfInfo.pct.toFixed(2)}%) [Base $${igtfInfo.baseIgtfUsd.toFixed(2)}]:`;
+      if (elIgtfUsd) elIgtfUsd.textContent = `$${igtfInfo.igtfUsd.toFixed(2)}`;
+      elIgtfRow.classList.remove('hidden');
+    } else {
+      elIgtfRow.classList.add('hidden');
+    }
+  }
+
+  const elPosTotalUsd = document.getElementById('posTotalUsd');
+  const elPosTotalVes = document.getElementById('posTotalVes');
+  const elPosTotalCop = document.getElementById('posTotalCop');
+  if (elPosTotalUsd) elPosTotalUsd.textContent = `$${totalOperacionUsd.toFixed(2)}`;
+  if (elPosTotalVes) elPosTotalVes.textContent = `${totalOperacionVes.toFixed(2)} Bs.`;
+  if (elPosTotalCop) elPosTotalCop.textContent = `${totalOperacionCop.toLocaleString('es-CO')} COP`;
+
+  const diff = totalPagadoUsd - totalOperacionUsd;
   document.getElementById('posPagadoUsd').textContent = `$${totalPagadoUsd.toFixed(2)}`;
   document.getElementById('posPagadoDetalle').textContent = `${AppState.posPagos.length} forma(s) de pago`;
 
@@ -3897,13 +4106,35 @@ async function verFacturaEmitida(facturaId) {
     `).join('');
 
     // Totales
+    const igtfUsd = parseFloat(f.igtf_monto_usd || 0);
+    const baseIgtfUsd = parseFloat(f.base_igtf_usd || 0);
+    const igtfPct = parseFloat(f.igtf_porcentaje || 3);
+    const totalOpUsd = parseFloat(f.total_operacion_usd || f.total_usd || 0);
+    const totalOpVes = parseFloat(f.total_operacion_ves || f.total_ves || 0);
+
     document.getElementById('ticketSubtotal').textContent = `$${parseFloat(f.subtotal).toFixed(2)}`;
     document.getElementById('ticketIva').textContent = `$${parseFloat(f.iva_total).toFixed(2)}`;
     document.getElementById('ticketTotalUsd').textContent = `$${parseFloat(f.total_usd).toFixed(2)}`;
+
+    const elIgtfRow = document.getElementById('ticketIgtfRow');
+    const elTotalOpRow = document.getElementById('ticketTotalOpRow');
+    if (elIgtfRow && elTotalOpRow) {
+      if (igtfUsd > 0) {
+        document.getElementById('ticketIgtfLabel').textContent = `IGTF (${igtfPct.toFixed(2)}%) [Base $${baseIgtfUsd.toFixed(2)}]:`;
+        document.getElementById('ticketIgtfUsd').textContent = `$${igtfUsd.toFixed(2)}`;
+        document.getElementById('ticketTotalOpUsd').textContent = `$${totalOpUsd.toFixed(2)}`;
+        elIgtfRow.classList.remove('hidden');
+        elTotalOpRow.classList.remove('hidden');
+      } else {
+        elIgtfRow.classList.add('hidden');
+        elTotalOpRow.classList.add('hidden');
+      }
+    }
+
     document.getElementById('ticketTasaVes').textContent = parseFloat(f.tasa_ves).toFixed(2);
-    document.getElementById('ticketTotalVes').textContent = `${parseFloat(f.total_ves).toFixed(2)} Bs.`;
+    document.getElementById('ticketTotalVes').textContent = `${totalOpVes.toFixed(2)} Bs.`;
     document.getElementById('ticketTasaCop').textContent = Math.round(f.tasa_cop).toLocaleString('es-CO');
-    document.getElementById('ticketTotalCop').textContent = `${Math.round(f.total_cop).toLocaleString('es-CO')} COP`;
+    document.getElementById('ticketTotalCop').textContent = `${Math.round(totalOpUsd * (parseFloat(f.tasa_cop) || 1)).toLocaleString('es-CO')} COP`;
 
     // Pagos
     const paymentsBody = document.getElementById('ticketPaymentsBody');
@@ -4081,6 +4312,7 @@ function setModoDevolucion(modo) {
   AppState.devolucionModo = modo;
   const boxFactura = document.getElementById('devBuscadorFacturaBox');
   const boxCliente = document.getElementById('devBuscadorClienteBox');
+  const boxManualFact = document.getElementById('devFacturaAfectadaManualBox');
   const btnFactura = document.getElementById('btnModoDevFactura');
   const btnManual = document.getElementById('btnModoDevManual');
   const btnTotalAll = document.getElementById('btnDevTotalAll');
@@ -4089,6 +4321,7 @@ function setModoDevolucion(modo) {
   if (modo === 'factura') {
     if (boxFactura) boxFactura.classList.remove('hidden');
     if (boxCliente) boxCliente.classList.add('hidden');
+    if (boxManualFact) boxManualFact.classList.add('hidden');
     if (btnFactura) {
       btnFactura.className = 'px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm bg-white text-cyan-700';
     }
@@ -4105,6 +4338,7 @@ function setModoDevolucion(modo) {
   } else {
     if (boxFactura) boxFactura.classList.add('hidden');
     if (boxCliente) boxCliente.classList.remove('hidden');
+    if (boxManualFact) boxManualFact.classList.remove('hidden');
     if (btnFactura) {
       btnFactura.className = 'px-4 py-1.5 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900';
     }
@@ -5193,8 +5427,18 @@ async function procesarDevolucionConfirm() {
     impuesto_tipo: it.impuesto_tipo
   }));
 
+  const factSel = AppState.devolucionFacturaSeleccionada;
+  const numAfectada = AppState.devolucionModo === 'factura'
+    ? (factSel ? factSel.numero_factura : null)
+    : ((document.getElementById('devFacturaNumAfectadaInput')?.value || '').trim() || null);
+  const fechaAfectada = AppState.devolucionModo === 'factura'
+    ? (factSel ? (factSel.fecha_emision || '') : null)
+    : ((document.getElementById('devFacturaFechaAfectadaInput')?.value || '').trim() || null);
+
   const payload = {
     factura_id: facturaId,
+    factura_numero_afectada: numAfectada,
+    factura_fecha_afectada: fechaAfectada,
     cliente_id: clienteId,
     motivo: motivo,
     notas: `Devolución ${AppState.devolucionModo === 'factura' ? 'de Factura' : 'Libre'} - ${motivo}`,
@@ -5367,9 +5611,13 @@ async function abrirTicketDevolucion(devId) {
     document.getElementById('ticketDevBusinessRif').textContent = `RIF: ${cfg.documento_fiscal}`;
     document.getElementById('ticketDevBusinessPhone').textContent = `Tel: ${cfg.telefono}`;
 
-    document.getElementById('ticketDevNumero').textContent = `NOTA DE DEVOLUCIÓN #${dev.numero_devolucion}`;
+    document.getElementById('ticketDevNumero').textContent = `NOTA DE CRÉDITO #${dev.numero_devolucion}`;
     document.getElementById('ticketDevFecha').textContent = `Fecha: ${formatFecha(dev.fecha_emision)}`;
-    document.getElementById('ticketDevFacturaRef').textContent = dev.numero_factura ? `Factura ${dev.numero_factura}` : 'Devolución Libre / Manual';
+    const factRefNum = dev.factura_numero_afectada || dev.numero_factura;
+    const factRefFecha = dev.factura_fecha_afectada || dev.factura_fecha || '';
+    document.getElementById('ticketDevFacturaRef').textContent = factRefNum ? `${factRefNum}` : 'Devolución Libre / Manual';
+    const elFactFecha = document.getElementById('ticketDevFechaFacturaAfectada');
+    if (elFactFecha) elFactFecha.textContent = factRefFecha ? formatFecha(factRefFecha) : '—';
     document.getElementById('ticketDevClienteNombre').textContent = dev.cliente_nombre || 'Consumidor Final';
     document.getElementById('ticketDevClienteDoc').textContent = dev.cliente_cedula || '-';
     document.getElementById('ticketDevMotivo').textContent = dev.motivo || '-';
@@ -7004,6 +7252,7 @@ async function verHistorialAbonosCXC(cxcId) {
     if (!c.abonos || c.abonos.length === 0) {
       html += `<p class="text-center py-6 text-slate-400 text-xs">No se han registrado abonos a esta cuenta.</p>`;
     } else {
+      AppState.cxcHistorialCuentaActual = c;
       html += `<div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider pt-1">Detalle de Pagos / Abonos Registrados:</div>`;
       html += c.abonos.map((ab, idx) => {
         const esAnulado = ab.estado === 'anulado';
@@ -7017,6 +7266,11 @@ async function verHistorialAbonosCXC(cxcId) {
             </span>
             <div class="flex items-center gap-2">
               <strong class="${esAnulado ? 'line-through text-slate-400' : 'text-emerald-700'} font-extrabold text-sm">+$${parseFloat(ab.monto_usd).toFixed(2)}</strong>
+              ${!esAnulado ? `
+                <button type="button" onclick="imprimirReciboAbonoCXC(${idx})" class="px-2 py-1 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-[11px] font-bold shadow-sm transition cursor-pointer" title="Imprimir recibo de abono">
+                  <i class="fa-solid fa-print mr-1"></i>Recibo
+                </button>
+              ` : ''}
               ${puedeAnular ? `
                 <button type="button" onclick="anularAbonoCXC(${ab.id}, ${c.id})" class="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[11px] font-bold shadow-sm transition cursor-pointer" title="Anular este cobro y restituir saldo inmediatamente">
                   <i class="fa-solid fa-ban mr-1"></i>Anular este Pago
@@ -8331,6 +8585,7 @@ async function verHistorialAbonosCXP(cxpId) {
     if (!c.abonos || c.abonos.length === 0) {
       html += `<p class="text-center py-6 text-slate-400 text-xs">No se han registrado pagos para esta cuenta.</p>`;
     } else {
+      AppState.cxpHistorialCuentaActual = c;
       html += `<div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider pt-1">Detalle de Pagos Registrados:</div>`;
       html += c.abonos.map((ab, idx) => {
         const esAnulado = ab.estado === 'anulado';
@@ -8344,6 +8599,11 @@ async function verHistorialAbonosCXP(cxpId) {
             </span>
             <div class="flex items-center gap-2">
               <strong class="${esAnulado ? 'line-through text-slate-400' : 'text-rose-700'} font-extrabold text-sm">-$${parseFloat(ab.monto_usd).toFixed(2)}</strong>
+              ${!esAnulado ? `
+                <button type="button" onclick="imprimirReciboAbonoCXP(${idx})" class="px-2 py-1 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-[11px] font-bold shadow-sm transition cursor-pointer" title="Imprimir recibo de pago">
+                  <i class="fa-solid fa-print mr-1"></i>Recibo
+                </button>
+              ` : ''}
               ${puedeAnular ? `
                 <button type="button" onclick="anularAbonoCXP(${ab.id}, ${c.id})" class="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[11px] font-bold shadow-sm transition cursor-pointer" title="Anular este pago y restituir deuda inmediatamente">
                   <i class="fa-solid fa-ban mr-1"></i>Anular este Pago
@@ -9166,764 +9426,39 @@ function renderReporteCxpTable() {
 // ========================================================
 // MOTOR DE VISTA PRELIMINAR, IMPRESIÓN Y EXPORTACIÓN A PDF/EXCEL
 // ========================================================
+function _getReporteActualDocPayload() {
+  const tab = AppState.reportesTabActual || 'inventario';
+  const map = {
+    inventario: { docType: 'inventario_valorado', data: AppState.reportesInventarioData, title: 'Inventario_Valorado' },
+    diarias: { docType: 'ventas_diarias', data: AppState.reportesVentasDiariasData, title: 'Ventas_Diarias' },
+    mensuales: { docType: 'ventas_mensuales', data: AppState.reportesVentasMensualesData, title: 'Ventas_Mensuales' },
+    cxc: { docType: 'estado_cuenta_cxc', data: AppState.reportesCxcData, title: 'Estado_Cuenta_CxC' },
+    cxp: { docType: 'estado_cuenta_cxp', data: AppState.reportesCxpData, title: 'Estado_Cuenta_CxP' },
+    kardex: { docType: 'kardex', data: AppState.reportesKardexData, title: 'Kardex_Inventario' },
+    inv_simple: { docType: 'inventario_simple', data: AppState.reportesInvSimpleData, title: 'Inventario_Simple' },
+    libro_ventas: { docType: 'libro_ventas_seniat', data: AppState.reportesLibroVentasSeniat, title: 'Libro_Ventas_SENIAT' },
+    libro_compras: { docType: 'libro_compras_seniat', data: AppState.reportesLibroComprasSeniat, title: 'Libro_Compras_SENIAT' },
+    art177: { docType: 'libro_inventario_art177', data: AppState.reportesArt177Data, title: 'Libro_Inventario_Art177' }
+  };
+  return map[tab] || { docType: 'inventario_valorado', data: AppState.reportesInventarioData, title: 'Reporte' };
+}
+
 function abrirVistaPreliminarReporte() {
   const container = document.getElementById('hojaReporteImprimible');
   if (!container) return;
 
-  const cfg = AppState.config;
-  const hoyStr = new Date().toLocaleString('es-VE', { dateStyle: 'long', timeStyle: 'short' });
-  const tab = AppState.reportesTabActual || 'inventario';
-
-  let tituloReporte = '';
-  let subtituloReporte = '';
-  let kpisHtml = '';
-  let tablaHtml = '';
-
-  // 1. Encabezado Oficial Membretado Común
-  const headerHtml = `
-    <div class="border-b-2 border-slate-800 pb-4 flex justify-between items-start">
-      <div>
-        <h1 class="text-2xl font-black text-slate-900 uppercase tracking-wide">${escapeHtml(cfg.nombre_negocio || 'Mi Negocio Comercial')}</h1>
-        <p class="text-xs text-slate-600 font-semibold font-mono">RIF / DOC: ${escapeHtml(cfg.documento_fiscal || 'J-00000000-0')}</p>
-        <p class="text-xs text-slate-500">${escapeHtml(cfg.direccion || 'Dirección Comercial Principal')}</p>
-        <p class="text-xs text-slate-500">Teléfono: ${escapeHtml(cfg.telefono || '+58 000 0000000')}</p>
-      </div>
-      <div class="text-right text-xs space-y-1">
-        <span class="inline-block bg-slate-900 text-white font-bold px-3 py-1 rounded text-[11px] tracking-wider uppercase">DOCUMENTO OFICIAL</span>
-        <p class="text-slate-500 mt-1"><strong>Emisión:</strong> ${hoyStr}</p>
-        <p class="text-slate-500"><strong>Tasas del día:</strong> BCV ${parseFloat(cfg.tasa_ves || 0).toFixed(2)} Bs. | TRM ${Math.round(cfg.tasa_cop || 0).toLocaleString('es-CO')} COP</p>
-      </div>
-    </div>
-  `;
-
-  if (tab === 'inventario') {
-    const data = AppState.reportesInventarioData;
-    const r = data?.resumen || {};
-    tituloReporte = 'REPORTE GENERAL DE VALORACIÓN DE INVENTARIO';
-    subtituloReporte = 'Catálogo consolidado de productos y servicios con costo, precio de venta y margen proyectado.';
-
-    kpisHtml = `
-      <div class="grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Costo Inventario</p>
-          <strong class="text-slate-900 text-base font-black">$${parseFloat(r.total_costo_inventario_usd || 0).toFixed(2)}</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Valor Estimado Venta</p>
-          <strong class="text-emerald-700 text-base font-black">$${parseFloat(r.total_venta_estimada_usd || 0).toFixed(2)}</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Ganancia Proyectada</p>
-          <strong class="text-indigo-700 text-base font-black">$${parseFloat(r.ganancia_estimada_usd || 0).toFixed(2)}</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Total Unidades Físicas</p>
-          <strong class="text-slate-800 text-base font-black">${r.total_unidades_stock || 0}</strong>
-        </div>
-      </div>
-    `;
-
-    const items = data?.items || [];
-    tablaHtml = `
-      <table class="w-full text-left text-xs border border-slate-300">
-        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[10px] text-slate-700">
-          <tr>
-            <th class="p-2">Código</th>
-            <th class="p-2">Descripción del Ítem</th>
-            <th class="p-2">Categoría</th>
-            <th class="p-2 text-center">Tipo</th>
-            <th class="p-2 text-right">Existencia</th>
-            <th class="p-2 text-right">Costo Unit.</th>
-            <th class="p-2 text-right">Costo Total</th>
-            <th class="p-2 text-right">Precio Venta</th>
-            <th class="p-2 text-right">Valor Venta Total</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-200">
-          ${items.map(i => `
-            <tr>
-              <td class="p-2 font-mono">${escapeHtml(i.codigo || '-')}</td>
-              <td class="p-2 font-semibold text-slate-900">${escapeHtml(i.nombre)}</td>
-              <td class="p-2 text-slate-600">${escapeHtml(i.categoria_nombre)}</td>
-              <td class="p-2 text-center uppercase text-[10px]">${i.tipo}</td>
-              <td class="p-2 text-right font-bold">${i.tipo === 'producto' ? i.stock : '-'}</td>
-              <td class="p-2 text-right">$${parseFloat(i.costo || 0).toFixed(2)}</td>
-              <td class="p-2 text-right font-bold">$${parseFloat(i.costo_total_stock || 0).toFixed(2)}</td>
-              <td class="p-2 text-right">$${parseFloat(i.precio || 0).toFixed(2)}</td>
-              <td class="p-2 text-right font-bold text-slate-900">$${parseFloat(i.valor_venta_stock || 0).toFixed(2)}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
-          <tr>
-            <td colspan="4" class="p-2 text-right uppercase">Totales:</td>
-            <td class="p-2 text-right">${r.total_unidades_stock || 0}</td>
-            <td class="p-2 text-right">-</td>
-            <td class="p-2 text-right font-black">$${parseFloat(r.total_costo_inventario_usd || 0).toFixed(2)}</td>
-            <td class="p-2 text-right">-</td>
-            <td class="p-2 text-right font-black">$${parseFloat(r.total_venta_estimada_usd || 0).toFixed(2)}</td>
-          </tr>
-        </tfoot>
-      </table>
-    `;
-  } else if (tab === 'diarias') {
-    const data = AppState.reportesVentasDiariasData;
-    const r = data?.resumen || {};
-    tituloReporte = `REPORTE DE VENTAS DIARIAS (${data?.fecha || hoyStr})`;
-    subtituloReporte = 'Desglose detallado de ventas por facturación y monedas recibidas (USD, Bolívares y Pesos).';
-
-    kpisHtml = `
-      <div class="grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Total Facturado USD</p>
-          <strong class="text-emerald-700 text-base font-black">$${parseFloat(r.total_ventas_usd || 0).toFixed(2)}</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Efectivo / Divisas USD</p>
-          <strong class="text-slate-900 text-base font-bold">$${parseFloat(r.total_usd_recibido || 0).toFixed(2)}</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Bolívares (VES)</p>
-          <strong class="text-amber-800 text-base font-bold">${parseFloat(r.total_ves_recibido || 0).toLocaleString('es-VE')} Bs.</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Pesos (COP)</p>
-          <strong class="text-blue-800 text-base font-bold">${Math.round(r.total_cop_recibido || 0).toLocaleString('es-CO')} COP</strong>
-        </div>
-      </div>
-    `;
-
-    const facturas = data?.facturas || [];
-    tablaHtml = `
-      <table class="w-full text-left text-xs border border-slate-300">
-        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[10px] text-slate-700">
-          <tr>
-            <th class="p-2">N° Factura</th>
-            <th class="p-2">Hora</th>
-            <th class="p-2">Cliente</th>
-            <th class="p-2">Condición</th>
-            <th class="p-2 text-right">Total ($ USD)</th>
-            <th class="p-2 text-right">Equiv. Bs.</th>
-            <th class="p-2 text-right">Equiv. COP</th>
-            <th class="p-2">Desglose de Pagos</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-200">
-          ${facturas.map(f => `
-            <tr>
-              <td class="p-2 font-mono font-bold">${escapeHtml(f.numero_factura)}</td>
-              <td class="p-2 text-slate-500">${formatFecha(f.fecha)}</td>
-              <td class="p-2 font-semibold">${escapeHtml(f.cliente_nombre)}</td>
-              <td class="p-2 uppercase text-[10px] font-bold ${f.tipo_venta === 'credito' ? 'text-amber-700' : 'text-emerald-700'}">${f.tipo_venta}</td>
-              <td class="p-2 text-right font-black">$${parseFloat(f.total_usd).toFixed(2)}</td>
-              <td class="p-2 text-right">${parseFloat(f.total_ves).toLocaleString('es-VE')} Bs.</td>
-              <td class="p-2 text-right">${Math.round(f.total_cop).toLocaleString('es-CO')} COP</td>
-              <td class="p-2 text-[10px] text-slate-600">
-                ${(f.pagos || []).map(p => `${p.metodo}: ${parseFloat(p.monto_moneda).toLocaleString('es-VE')} ${p.moneda}`).join(' | ') || (f.tipo_venta === 'credito' ? 'Crédito' : '-')}
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
-          <tr>
-            <td colspan="4" class="p-2 text-right uppercase">Total del Día:</td>
-            <td class="p-2 text-right font-black text-emerald-800">$${parseFloat(r.total_ventas_usd || 0).toFixed(2)}</td>
-            <td class="p-2 text-right">${(parseFloat(r.total_ventas_usd || 0) * (cfg.tasa_ves || 1)).toLocaleString('es-VE')} Bs.</td>
-            <td class="p-2 text-right">${Math.round(parseFloat(r.total_ventas_usd || 0) * (cfg.tasa_cop || 1)).toLocaleString('es-CO')} COP</td>
-            <td class="p-2">-</td>
-          </tr>
-        </tfoot>
-      </table>
-    `;
-  } else if (tab === 'mensuales') {
-    const data = AppState.reportesVentasMensualesData;
-    const r = data?.resumen || {};
-    tituloReporte = `REPORTE CONSOLIDADO MENSUAL DE VENTAS (${data?.anio || new Date().getFullYear()})`;
-    subtituloReporte = 'Evolución mensual de facturación, volumen de transacciones y comparativo histórico.';
-
-    kpisHtml = `
-      <div class="grid grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Total Facturado en el Año</p>
-          <strong class="text-indigo-700 text-base font-black">$${parseFloat(r.total_facturado_usd || 0).toFixed(2)}</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Total Facturas Emitidas</p>
-          <strong class="text-slate-800 text-base font-black">${r.total_facturas_emitidas || 0}</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Ticket Promedio Venta</p>
-          <strong class="text-emerald-700 text-base font-black">$${parseFloat(r.ticket_promedio_usd || 0).toFixed(2)}</strong>
-        </div>
-      </div>
-    `;
-
-    const meses = data?.meses || [];
-    tablaHtml = `
-      <table class="w-full text-left text-xs border border-slate-300">
-        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[10px] text-slate-700">
-          <tr>
-            <th class="p-2">Mes</th>
-            <th class="p-2 text-right">N° Facturas</th>
-            <th class="p-2 text-right">Total USD</th>
-            <th class="p-2 text-right">Equivalente Bolívares (VES)</th>
-            <th class="p-2 text-right">Equivalente Pesos (COP)</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-200">
-          ${meses.map(m => `
-            <tr>
-              <td class="p-2 font-bold">${escapeHtml(m.nombre_mes)}</td>
-              <td class="p-2 text-right font-semibold">${m.total_facturas}</td>
-              <td class="p-2 text-right font-black text-indigo-900">$${parseFloat(m.total_usd).toFixed(2)}</td>
-              <td class="p-2 text-right">${parseFloat(m.total_ves).toLocaleString('es-VE')} Bs.</td>
-              <td class="p-2 text-right">${Math.round(m.total_cop).toLocaleString('es-CO')} COP</td>
-            </tr>
-          `).join('')}
-        </tbody>
-        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
-          <tr>
-            <td class="p-2 uppercase">Total Anual:</td>
-            <td class="p-2 text-right">${r.total_facturas_emitidas || 0}</td>
-            <td class="p-2 text-right font-black">$${parseFloat(r.total_facturado_usd || 0).toFixed(2)}</td>
-            <td class="p-2 text-right">-</td>
-            <td class="p-2 text-right">-</td>
-          </tr>
-        </tfoot>
-      </table>
-    `;
-  } else if (tab === 'cxc') {
-    const data = AppState.reportesCxcData;
-    const r = data?.resumen || {};
-    tituloReporte = 'ESTADO DE CUENTAS POR COBRAR (CARTERA DE CLIENTES)';
-    subtituloReporte = 'Detalle de facturas emitidas a crédito, amortizaciones y saldos pendientes por cobrar.';
-
-    kpisHtml = `
-      <div class="grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Cartera Total Saldo</p>
-          <strong class="text-rose-700 text-base font-black">$${parseFloat(r.total_saldo_pendiente_usd || 0).toFixed(2)}</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Cuentas Pendientes</p>
-          <strong class="text-slate-800 text-base font-black">${r.total_cuentas_pendientes || 0}</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Mora / Deuda Vencida</p>
-          <strong class="text-rose-600 text-base font-black">$${parseFloat(r.total_vencido_usd || 0).toFixed(2)} (${r.total_cuentas_vencidas || 0})</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Total Cobrado / Abonado</p>
-          <strong class="text-emerald-700 text-base font-black">$${parseFloat(r.total_abonado_usd || 0).toFixed(2)}</strong>
-        </div>
-      </div>
-    `;
-
-    const cuentas = data?.cuentas || [];
-    tablaHtml = `
-      <table class="w-full text-left text-xs border border-slate-300">
-        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[10px] text-slate-700">
-          <tr>
-            <th class="p-2">Factura</th>
-            <th class="p-2">Cliente</th>
-            <th class="p-2">Emisión</th>
-            <th class="p-2">Vencimiento</th>
-            <th class="p-2 text-right">Total ($)</th>
-            <th class="p-2 text-right">Abonado ($)</th>
-            <th class="p-2 text-right">Saldo Deudor ($)</th>
-            <th class="p-2 text-right">Saldo en Bs.</th>
-            <th class="p-2 text-center">Estado</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-200">
-          ${cuentas.map(c => `
-            <tr>
-              <td class="p-2 font-mono font-bold">${escapeHtml(c.numero_factura)}</td>
-              <td class="p-2 font-semibold">${escapeHtml(c.cliente_nombre)} (${escapeHtml(c.cliente_cedula)})</td>
-              <td class="p-2 text-slate-500">${formatFecha(c.fecha_emision)}</td>
-              <td class="p-2 ${parseInt(c.dias_vencido) > 0 ? 'text-rose-600 font-bold' : ''}">${c.fecha_vencimiento}</td>
-              <td class="p-2 text-right">$${parseFloat(c.monto_total).toFixed(2)}</td>
-              <td class="p-2 text-right text-emerald-700 font-medium">$${parseFloat(c.monto_pagado).toFixed(2)}</td>
-              <td class="p-2 text-right font-black text-rose-700">$${parseFloat(c.saldo_pendiente).toFixed(2)}</td>
-              <td class="p-2 text-right">${parseFloat(c.saldo_ves || 0).toLocaleString('es-VE')} Bs.</td>
-              <td class="p-2 text-center uppercase text-[10px] font-bold">${c.estado}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
-          <tr>
-            <td colspan="4" class="p-2 text-right uppercase">Total Cartera:</td>
-            <td class="p-2 text-right font-black">$${cuentas.reduce((a,c)=>a+parseFloat(c.monto_total||0),0).toFixed(2)}</td>
-            <td class="p-2 text-right font-black text-emerald-700">$${cuentas.reduce((a,c)=>a+parseFloat(c.monto_pagado||0),0).toFixed(2)}</td>
-            <td class="p-2 text-right font-black text-rose-700">$${parseFloat(r.total_saldo_pendiente_usd || 0).toFixed(2)}</td>
-            <td class="p-2 text-right font-black">${parseFloat(r.total_saldo_pendiente_ves || 0).toLocaleString('es-VE')} Bs.</td>
-            <td class="p-2">-</td>
-          </tr>
-        </tfoot>
-      </table>
-    `;
-  } else if (tab === 'cxp') {
-    const data = AppState.reportesCxpData;
-    const r = data?.resumen || {};
-    tituloReporte = 'ESTADO DE CUENTAS POR PAGAR (PASIVOS & PROVEEDORES)';
-    subtituloReporte = 'Detalle de compras a crédito y gastos directos pendientes de pago con proveedores.';
-
-    kpisHtml = `
-      <div class="grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Pasivo Total Pendiente</p>
-          <strong class="text-rose-700 text-base font-black">$${parseFloat(r.total_saldo_pendiente_usd || 0).toFixed(2)}</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Cuentas por Pagar</p>
-          <strong class="text-slate-800 text-base font-black">${r.total_cuentas_pendientes || 0}</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Deuda Vencida (Mora)</p>
-          <strong class="text-rose-600 text-base font-black">$${parseFloat(r.total_vencido_usd || 0).toFixed(2)} (${r.total_cuentas_vencidas || 0})</strong>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Total Pagado a la Fecha</p>
-          <strong class="text-emerald-700 text-base font-black">$${parseFloat(r.total_pagado_usd || 0).toFixed(2)}</strong>
-        </div>
-      </div>
-    `;
-
-    const cuentas = data?.cuentas || [];
-    tablaHtml = `
-      <table class="w-full text-left text-xs border border-slate-300">
-        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[10px] text-slate-700">
-          <tr>
-            <th class="p-2">Factura / Control</th>
-            <th class="p-2">Proveedor</th>
-            <th class="p-2">Concepto</th>
-            <th class="p-2">Vencimiento</th>
-            <th class="p-2 text-right">Monto Total ($)</th>
-            <th class="p-2 text-right">Pagado ($)</th>
-            <th class="p-2 text-right">Saldo Deudor ($)</th>
-            <th class="p-2 text-right">Saldo en Bs.</th>
-            <th class="p-2 text-center">Estado</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-200">
-          ${cuentas.map(c => `
-            <tr>
-              <td class="p-2 font-mono font-bold">${escapeHtml(c.numero_factura || '-')}</td>
-              <td class="p-2 font-semibold">${escapeHtml(c.proveedor_nombre)} (${escapeHtml(c.proveedor_cedula || '')})</td>
-              <td class="p-2 text-slate-600">${escapeHtml(c.descripcion_concepto || 'Compra')}</td>
-              <td class="p-2 ${parseInt(c.dias_vencido) > 0 ? 'text-rose-600 font-bold' : ''}">${c.fecha_vencimiento}</td>
-              <td class="p-2 text-right font-medium">$${parseFloat(c.monto_total).toFixed(2)}</td>
-              <td class="p-2 text-right text-emerald-700 font-medium">$${parseFloat(c.monto_pagado).toFixed(2)}</td>
-              <td class="p-2 text-right font-black text-rose-700">$${parseFloat(c.saldo_pendiente).toFixed(2)}</td>
-              <td class="p-2 text-right">${parseFloat(c.saldo_ves || 0).toLocaleString('es-VE')} Bs.</td>
-              <td class="p-2 text-center uppercase text-[10px] font-bold">${c.estado}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
-          <tr>
-            <td colspan="4" class="p-2 text-right uppercase">Total Pasivos:</td>
-            <td class="p-2 text-right font-black">$${cuentas.reduce((a,c)=>a+parseFloat(c.monto_total||0),0).toFixed(2)}</td>
-            <td class="p-2 text-right font-black text-emerald-700">$${cuentas.reduce((a,c)=>a+parseFloat(c.monto_pagado||0),0).toFixed(2)}</td>
-            <td class="p-2 text-right font-black text-rose-700">$${parseFloat(r.total_saldo_pendiente_usd || 0).toFixed(2)}</td>
-            <td class="p-2 text-right font-black">${parseFloat(r.total_saldo_pendiente_ves || 0).toLocaleString('es-VE')} Bs.</td>
-            <td class="p-2">-</td>
-          </tr>
-        </tfoot>
-      </table>
-    `;
-  } else if (tab === 'kardex') {
-    const data = AppState.reportesKardexData;
-    const p = data?.producto || {};
-    const r = data?.resumen || {};
-    tituloReporte = `KARDEX DE INVENTARIO: ${p.codigo || ''} - ${p.nombre || ''}`;
-    subtituloReporte = `Categoría: ${p.categoria_nombre || 'General'} | Costo Unitario: $${parseFloat(p.costo || 0).toFixed(2)} | Precio Venta: $${parseFloat(p.precio_total || p.precio || 0).toFixed(2)}`;
-
-    kpisHtml = `
-      <div class="grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Stock Inicial</p>
-          <strong class="text-slate-800 text-base font-black">${r.stock_inicial || 0}</strong>
-        </div>
-        <div>
-          <p class="text-emerald-700 uppercase text-[10px] font-bold">Total Entradas</p>
-          <strong class="text-emerald-700 text-base font-black">${r.total_entradas || 0} ($${parseFloat(r.valor_entradas || 0).toFixed(2)})</strong>
-        </div>
-        <div>
-          <p class="text-rose-700 uppercase text-[10px] font-bold">Total Salidas</p>
-          <strong class="text-rose-700 text-base font-black">${r.total_salidas || 0} ($${parseFloat(r.valor_salidas || 0).toFixed(2)})</strong>
-        </div>
-        <div>
-          <p class="text-cyan-800 uppercase text-[10px] font-bold">Existencia Actual</p>
-          <strong class="text-cyan-800 text-base font-black">${r.stock_actual || 0} ($${parseFloat(r.valor_total_actual || 0).toFixed(2)})</strong>
-        </div>
-      </div>
-    `;
-
-    const movs = data?.movimientos || [];
-    tablaHtml = `
-      <table class="w-full text-left text-xs border border-slate-300">
-        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[10px] text-slate-700">
-          <tr>
-            <th class="p-2">Fecha</th>
-            <th class="p-2">Tipo</th>
-            <th class="p-2">Documento / Ref</th>
-            <th class="p-2">Tercero</th>
-            <th class="p-2">Concepto</th>
-            <th class="p-2 text-right">Entrada Cant.</th>
-            <th class="p-2 text-right">Entrada Total</th>
-            <th class="p-2 text-right">Salida Cant.</th>
-            <th class="p-2 text-right">Salida Total</th>
-            <th class="p-2 text-right font-black">Stock Saldo</th>
-            <th class="p-2 text-right font-black">Saldo Total ($)</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-200">
-          ${movs.map(m => `
-            <tr>
-              <td class="p-2 font-mono">${formatFecha(m.fecha)}</td>
-              <td class="p-2 font-bold">${m.tipo_movimiento}</td>
-              <td class="p-2 font-mono">${escapeHtml(m.documento)}</td>
-              <td class="p-2">${escapeHtml(m.tercero || '-')}</td>
-              <td class="p-2 text-slate-500">${escapeHtml(m.concepto || '-')}</td>
-              <td class="p-2 text-right font-semibold text-emerald-700">${m.entrada_cant > 0 ? m.entrada_cant : '-'}</td>
-              <td class="p-2 text-right text-emerald-800">${m.entrada_cant > 0 ? '$' + parseFloat(m.entrada_total).toFixed(2) : '-'}</td>
-              <td class="p-2 text-right font-semibold text-rose-700">${m.salida_cant > 0 ? m.salida_cant : '-'}</td>
-              <td class="p-2 text-right text-rose-800">${m.salida_cant > 0 ? '$' + parseFloat(m.salida_total).toFixed(2) : '-'}</td>
-              <td class="p-2 text-right font-black">${m.saldo_cant}</td>
-              <td class="p-2 text-right font-black">$${parseFloat(m.saldo_total || 0).toFixed(2)}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `;
-  } else if (tab === 'inv_simple') {
-    const data = AppState.reportesInvSimpleData?.productos || [];
-    tituloReporte = 'INFORME SIMPLIFICADO DE STOCK Y EXISTENCIAS';
-    subtituloReporte = 'Reporte operativo de almacén con código, descripción, categoría y cantidad actual disponible.';
-
-    const totalStock = data.reduce((a, b) => a + parseFloat(b.stock || 0), 0);
-    kpisHtml = `
-      <div class="grid grid-cols-2 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Total Ítems en Catálogo</p>
-          <strong class="text-slate-900 text-base font-black">${data.length}</strong>
-        </div>
-        <div>
-          <p class="text-emerald-700 uppercase text-[10px] font-bold">Total Unidades Físicas en Stock</p>
-          <strong class="text-emerald-700 text-base font-black">${totalStock}</strong>
-        </div>
-      </div>
-    `;
-
-    tablaHtml = `
-      <table class="w-full text-left text-xs border border-slate-300">
-        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[10px] text-slate-700">
-          <tr>
-            <th class="p-2 w-32">Código del Ítem</th>
-            <th class="p-2">Nombre del Ítem / Descripción</th>
-            <th class="p-2 w-48">Categoría</th>
-            <th class="p-2 w-36 text-right font-black">Cantidad Actual (Stock)</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-200">
-          ${data.map(p => `
-            <tr>
-              <td class="p-2 font-mono font-bold">${escapeHtml(p.codigo)}</td>
-              <td class="p-2 font-medium text-slate-900">${escapeHtml(p.nombre)}</td>
-              <td class="p-2 text-slate-500">${escapeHtml(p.categoria_nombre || '-')}</td>
-              <td class="p-2 text-right font-black text-sm text-slate-950">${p.stock}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
-          <tr>
-            <td colspan="3" class="p-2 text-right uppercase">Total Unidades Físicas:</td>
-            <td class="p-2 text-right font-black text-sm">${totalStock}</td>
-          </tr>
-        </tfoot>
-      </table>
-    `;
-  } else if (tab === 'libro_ventas') {
-    const data = AppState.reportesLibroVentasSeniat;
-    const r = data?.resumen || {};
-    const emp = data?.empresa || {};
-    tituloReporte = `LIBRO DE VENTAS (NORMATIVA SENIAT - VENEZUELA)`;
-    subtituloReporte = `Contribuyente: ${emp.nombre || AppState.config.nombre_negocio} | RIF: ${emp.rif || AppState.config.documento_fiscal} | Período: ${data?.mes || ''}/${data?.anio || ''} | Tasa BCV: ${parseFloat(data?.tasa_bcv_cierre || 0).toFixed(2)} Bs.`;
-
-    kpisHtml = `
-      <div class="grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Total Ventas (Bs.)</p>
-          <strong class="text-slate-900 text-sm font-black">${parseFloat(r.total_ventas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
-          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_ventas_usd || 0).toFixed(2)})</span>
-        </div>
-        <div>
-          <p class="text-indigo-700 uppercase text-[10px] font-bold">Base Imponible (16%)</p>
-          <strong class="text-indigo-700 text-sm font-black">${parseFloat(r.total_base_imponible_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
-          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_base_imponible_usd || 0).toFixed(2)})</span>
-        </div>
-        <div>
-          <p class="text-rose-700 uppercase text-[10px] font-bold">Débito Fiscal IVA (16%)</p>
-          <strong class="text-rose-700 text-sm font-black">${parseFloat(r.total_iva_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
-          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_iva_usd || 0).toFixed(2)})</span>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Ventas Exentas</p>
-          <strong class="text-slate-700 text-sm font-black">${parseFloat(r.total_exento_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
-          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_exento_usd || 0).toFixed(2)})</span>
-        </div>
-      </div>
-    `;
-
-    const items = data?.items || [];
-    tablaHtml = `
-      <table class="w-full text-left text-[11px] border border-slate-300">
-        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[9px] text-slate-700">
-          <tr>
-            <th class="p-1 text-center">N° Op.</th>
-            <th class="p-1">Fecha</th>
-            <th class="p-1">RIF/Cédula</th>
-            <th class="p-1">Nombre / Razón Social</th>
-            <th class="p-1">N° Factura</th>
-            <th class="p-1">N° Control</th>
-            <th class="p-1">N° NC</th>
-            <th class="p-1">Fact. Afectada</th>
-            <th class="p-1 text-center">Tipo</th>
-            <th class="p-1 text-right">Total Ventas Bs.</th>
-            <th class="p-1 text-right">Exento Bs.</th>
-            <th class="p-1 text-right">Base Imponible</th>
-            <th class="p-1 text-right">IVA (16%)</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-200">
-          ${items.map(i => `
-            <tr class="${i.es_devolucion ? 'text-rose-700 bg-rose-50/40' : ''}">
-              <td class="p-1 text-center font-mono">${i.operacion_nro}</td>
-              <td class="p-1 font-mono">${i.fecha}</td>
-              <td class="p-1 font-mono">${escapeHtml(i.cliente_rif)}</td>
-              <td class="p-1">${escapeHtml(i.cliente_nombre)}</td>
-              <td class="p-1 font-mono font-bold">${escapeHtml(i.numero_factura || '-')}</td>
-              <td class="p-1 font-mono">${escapeHtml(i.numero_control || '-')}</td>
-              <td class="p-1 font-mono">${escapeHtml(i.numero_nota_credito || '-')}</td>
-              <td class="p-1 font-mono">${escapeHtml(i.factura_afectada || '-')}</td>
-              <td class="p-1 text-center font-bold">${i.tipo_transaccion}</td>
-              <td class="p-1 text-right font-black">${parseFloat(i.total_ventas_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-              <td class="p-1 text-right">${parseFloat(i.ventas_exentas_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-              <td class="p-1 text-right font-semibold">${parseFloat(i.base_imponible_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-              <td class="p-1 text-right font-bold">${parseFloat(i.iva_debito_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
-          <tr>
-            <td colspan="9" class="p-1.5 text-right uppercase">TOTALES GENERALES SENIAT:</td>
-            <td class="p-1.5 text-right font-black">${parseFloat(r.total_ventas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-            <td class="p-1.5 text-right font-semibold">${parseFloat(r.total_exento_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-            <td class="p-1.5 text-right font-bold">${parseFloat(r.total_base_imponible_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-            <td class="p-1.5 text-right font-black text-rose-700">${parseFloat(r.total_iva_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-          </tr>
-        </tfoot>
-      </table>
-    `;
-  } else if (tab === 'libro_compras') {
-    const data = AppState.reportesLibroComprasSeniat;
-    const r = data?.resumen || {};
-    const emp = data?.empresa || {};
-    tituloReporte = `LIBRO DE COMPRAS (NORMATIVA SENIAT - VENEZUELA)`;
-    subtituloReporte = `Contribuyente: ${emp.nombre || AppState.config.nombre_negocio} | RIF: ${emp.rif || AppState.config.documento_fiscal} | Período: ${data?.mes || ''}/${data?.anio || ''} | Tasa BCV: ${parseFloat(data?.tasa_bcv_cierre || 0).toFixed(2)} Bs.`;
-
-    kpisHtml = `
-      <div class="grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Total Compras (Bs.)</p>
-          <strong class="text-slate-900 text-sm font-black">${parseFloat(r.total_compras_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
-          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_ventas_usd || 0).toFixed(2)})</span>
-        </div>
-        <div>
-          <p class="text-indigo-700 uppercase text-[10px] font-bold">Base Imponible (16%)</p>
-          <strong class="text-indigo-700 text-sm font-black">${parseFloat(r.total_base_imponible_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
-          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_base_imponible_usd || 0).toFixed(2)})</span>
-        </div>
-        <div>
-          <p class="text-emerald-700 uppercase text-[10px] font-bold">Crédito Fiscal IVA (16%)</p>
-          <strong class="text-emerald-700 text-sm font-black">${parseFloat(r.total_iva_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
-          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_iva_usd || 0).toFixed(2)})</span>
-        </div>
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Compras Exentas</p>
-          <strong class="text-slate-700 text-sm font-black">${parseFloat(r.total_exento_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
-          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_exento_usd || 0).toFixed(2)})</span>
-        </div>
-      </div>
-    `;
-
-    const items = data?.items || [];
-    tablaHtml = `
-      <table class="w-full text-left text-[11px] border border-slate-300">
-        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[9px] text-slate-700">
-          <tr>
-            <th class="p-1 text-center">N° Op.</th>
-            <th class="p-1">Fecha</th>
-            <th class="p-1">RIF Proveedor</th>
-            <th class="p-1">Nombre / Razón Social</th>
-            <th class="p-1">N° Factura</th>
-            <th class="p-1">N° Control</th>
-            <th class="p-1">N° ND/NC</th>
-            <th class="p-1">Fact. Afectada</th>
-            <th class="p-1 text-center">Tipo</th>
-            <th class="p-1 text-right">Total Compras Bs.</th>
-            <th class="p-1 text-right">Exento Bs.</th>
-            <th class="p-1 text-right">Base Imponible</th>
-            <th class="p-1 text-right">IVA (16%)</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-200">
-          ${items.map(i => `
-            <tr>
-              <td class="p-1 text-center font-mono">${i.operacion_nro}</td>
-              <td class="p-1 font-mono">${i.fecha}</td>
-              <td class="p-1 font-mono font-semibold">${escapeHtml(i.proveedor_rif)}</td>
-              <td class="p-1">${escapeHtml(i.proveedor_nombre)}</td>
-              <td class="p-1 font-mono font-bold">${escapeHtml(i.numero_factura || '-')}</td>
-              <td class="p-1 font-mono">${escapeHtml(i.numero_control || '-')}</td>
-              <td class="p-1 font-mono text-slate-400">${escapeHtml(i.numero_nota_deb_cred || '-')}</td>
-              <td class="p-1 font-mono text-slate-400">${escapeHtml(i.factura_afectada || '-')}</td>
-              <td class="p-1 text-center font-bold">${i.tipo_transaccion}</td>
-              <td class="p-1 text-right font-black">${parseFloat(i.total_compras_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-              <td class="p-1 text-right">${parseFloat(i.compras_exentas_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-              <td class="p-1 text-right font-semibold">${parseFloat(i.base_imponible_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-              <td class="p-1 text-right font-bold text-emerald-700">${parseFloat(i.iva_credito_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
-          <tr>
-            <td colspan="9" class="p-1.5 text-right uppercase">TOTALES GENERALES SENIAT:</td>
-            <td class="p-1.5 text-right font-black">${parseFloat(r.total_compras_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-            <td class="p-1.5 text-right font-semibold">${parseFloat(r.total_exento_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-            <td class="p-1.5 text-right font-bold">${parseFloat(r.total_base_imponible_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-            <td class="p-1.5 text-right font-black text-emerald-800">${parseFloat(r.total_iva_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-          </tr>
-        </tfoot>
-      </table>
-    `;
-  } else if (tab === 'art177') {
-    const data = AppState.reportesArt177Data;
-    const r = data?.resumen || {};
-    tituloReporte = `LIBRO DE INVENTARIO DE MERCANCÍAS (ARTÍCULO 177 R-LISLR)`;
-    subtituloReporte = `Registro detallado mensual de entradas y salidas de mercancías en unidades físicas y valores monetarios | Período: ${data?.periodo || ''} | Tasa BCV: ${parseFloat(data?.tasa_bcv || 0).toFixed(2)} Bs.`;
-
-    kpisHtml = `
-      <div class="grid grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-300 text-center text-xs">
-        <div>
-          <p class="text-slate-500 uppercase text-[10px] font-bold">Inventario Inicial</p>
-          <strong class="text-slate-900 text-sm font-black">${parseFloat(r.total_inicial_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
-          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_inicial_usd || 0).toFixed(2)})</span>
-        </div>
-        <div>
-          <p class="text-emerald-700 uppercase text-[10px] font-bold">Entradas del Mes</p>
-          <strong class="text-emerald-700 text-sm font-black">${parseFloat(r.total_entradas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
-          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_entradas_usd || 0).toFixed(2)})</span>
-        </div>
-        <div>
-          <p class="text-rose-700 uppercase text-[10px] font-bold">Salidas del Mes</p>
-          <strong class="text-rose-700 text-sm font-black">${parseFloat(r.total_salidas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
-          <span class="block text-[10px] text-slate-400">($${parseFloat(r.total_salidas_usd || 0).toFixed(2)})</span>
-        </div>
-        <div>
-          <p class="text-indigo-900 uppercase text-[10px] font-bold">Inventario Final</p>
-          <strong class="text-indigo-900 text-sm font-black">${parseFloat(r.total_final_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})} Bs.</strong>
-          <span class="block text-[10px] text-indigo-700 font-bold">($${parseFloat(r.total_final_usd || 0).toFixed(2)})</span>
-        </div>
-      </div>
-    `;
-
-    const items = data?.items || [];
-    tablaHtml = `
-      <table class="w-full text-left text-[11px] border border-slate-300">
-        <thead class="bg-slate-100 border-b border-slate-300 font-bold uppercase text-[9px] text-slate-700">
-          <tr>
-            <th class="p-1">Código</th>
-            <th class="p-1">Descripción Mercancía</th>
-            <th class="p-1 text-right">Inicial Cant.</th>
-            <th class="p-1 text-right">Inicial Total Bs.</th>
-            <th class="p-1 text-right">Entradas Cant.</th>
-            <th class="p-1 text-right">Entradas Total Bs.</th>
-            <th class="p-1 text-right">Salidas Cant.</th>
-            <th class="p-1 text-right">Salidas Total Bs.</th>
-            <th class="p-1 text-right font-black">Final Cant.</th>
-            <th class="p-1 text-right font-black">Final Total Bs.</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-200">
-          ${items.map(i => `
-            <tr>
-              <td class="p-1 font-mono font-bold">${escapeHtml(i.codigo)}</td>
-              <td class="p-1">${escapeHtml(i.nombre)}</td>
-              <td class="p-1 text-right">${i.inicial_cant}</td>
-              <td class="p-1 text-right">${parseFloat(i.inicial_total_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-              <td class="p-1 text-right text-emerald-700 font-semibold">${i.entradas_cant}</td>
-              <td class="p-1 text-right text-emerald-800 font-bold">${parseFloat(i.entradas_total_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-              <td class="p-1 text-right text-rose-700 font-semibold">${i.salidas_cant}</td>
-              <td class="p-1 text-right text-rose-800 font-bold">${parseFloat(i.salidas_total_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-              <td class="p-1 text-right font-black">${i.final_cant}</td>
-              <td class="p-1 text-right font-black text-indigo-900">${parseFloat(i.final_total_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-        <tfoot class="bg-slate-100 font-bold border-t-2 border-slate-400">
-          <tr>
-            <td colspan="3" class="p-1.5 text-right uppercase">TOTALES INVENTARIO ART. 177:</td>
-            <td class="p-1.5 text-right font-black">${parseFloat(r.total_inicial_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-            <td></td>
-            <td class="p-1.5 text-right font-black text-emerald-800">${parseFloat(r.total_entradas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-            <td></td>
-            <td class="p-1.5 text-right font-black text-rose-800">${parseFloat(r.total_salidas_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-            <td></td>
-            <td class="p-1.5 text-right font-black text-indigo-950">${parseFloat(r.total_final_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
-          </tr>
-        </tfoot>
-      </table>
-    `;
+  const { docType, data } = _getReporteActualDocPayload();
+  if (!data) {
+    if (typeof showToast === 'function') showToast('Cargue primero los datos del reporte actual.', 'warning');
+    return;
   }
 
-  // Firmas y Bloque de Auditoría Formal
-  const footerFirmasHtml = `
-    <div class="pt-8 mt-6 border-t border-slate-300">
-      <div class="grid grid-cols-3 gap-6 text-center text-xs text-slate-600 pt-8">
-        <div class="border-t border-slate-400 pt-2">
-          <p class="font-bold">Elaborado por:</p>
-          <p class="text-[11px] text-slate-400">Firma y Sello</p>
-        </div>
-        <div class="border-t border-slate-400 pt-2">
-          <p class="font-bold">Revisado por:</p>
-          <p class="text-[11px] text-slate-400">Administración / Contabilidad</p>
-        </div>
-        <div class="border-t border-slate-400 pt-2">
-          <p class="font-bold">Aprobado por:</p>
-          <p class="text-[11px] text-slate-400">Gerencia General</p>
-        </div>
-      </div>
-      <p class="text-center text-[10px] text-slate-400 mt-6 italic">
-        Reporte oficial emitido en tiempo real por el Sistema de Control de Inventario y Finanzas Multimoneda.
-      </p>
-    </div>
-  `;
-
-  // Renderizar contenido completo
-  container.innerHTML = `
-    ${headerHtml}
-    <div class="space-y-1">
-      <h2 class="text-lg font-black text-slate-900 uppercase tracking-wide">${tituloReporte}</h2>
-      <p class="text-xs text-slate-500">${subtituloReporte}</p>
-    </div>
-    ${kpisHtml}
-    <div class="overflow-x-auto">
-      ${tablaHtml}
-    </div>
-    ${footerFirmasHtml}
-  `;
+  if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.renderDocumento === 'function') {
+    const cfg = MasterReportLayout.getEffectivePrintConfig(AppState.config);
+    container.innerHTML = MasterReportLayout.renderDocumento(docType, data, cfg);
+  } else {
+    container.innerHTML = '<p class="text-center p-6 text-slate-500">Motor de reportes no disponible.</p>';
+  }
 
   document.getElementById('modalVistaPreliminarReporte').classList.remove('hidden');
 }
@@ -9933,7 +9468,166 @@ function cerrarVistaPreliminar() {
 }
 
 function imprimirDesdePreliminar() {
-  window.print();
+  const { docType, data, title } = _getReporteActualDocPayload();
+  if (!data || typeof MasterReportLayout === 'undefined' || typeof DocumentPrinter === 'undefined') {
+    window.print();
+    return;
+  }
+  const cfg = MasterReportLayout.getEffectivePrintConfig(AppState.config);
+  const html = MasterReportLayout.renderDocumento(docType, data, cfg);
+  DocumentPrinter.print({
+    docType: docType,
+    html: html,
+    title: `${title}_${new Date().toISOString().split('T')[0]}`
+  });
+}
+
+function imprimirEstadoCuentaClienteActual() {
+  const ec = AppState.cxcEstadoCuentaData;
+  const facturas = Array.isArray(AppState.cxcClienteFacturas) ? AppState.cxcClienteFacturas : [];
+  if (!ec && facturas.length === 0) {
+    if (typeof showToast === 'function') showToast('Seleccione primero un cliente con estado de cuenta.', 'warning');
+    return;
+  }
+  const cfg = MasterReportLayout.getEffectivePrintConfig(AppState.config);
+  const tasaVes = parseFloat((ec && ec.tasa_ves) || cfg.tasa_ves || 45);
+  const cliente = (ec && ec.cliente) || {};
+  const activas = facturas.filter(f => f.estado !== 'anulada');
+  const totalSaldo = activas.reduce((a, f) => a + parseFloat(f.saldo_pendiente || 0), 0);
+  const totalAbonado = activas.reduce((a, f) => a + parseFloat(f.monto_pagado || 0), 0);
+  const totalVencido = activas.filter(f => parseInt(f.dias_vencido || 0) > 0).reduce((a, f) => a + parseFloat(f.saldo_pendiente || 0), 0);
+  const payload = {
+    resumen: {
+      total_saldo_pendiente_usd: totalSaldo,
+      total_saldo_pendiente_ves: totalSaldo * tasaVes,
+      total_cuentas_pendientes: activas.filter(f => parseFloat(f.saldo_pendiente || 0) > 0).length,
+      total_vencido_usd: totalVencido,
+      total_abonado_usd: totalAbonado
+    },
+    cuentas: activas.map(f => Object.assign({}, f, {
+      cliente_nombre: cliente.nombre || f.cliente_nombre || '',
+      cliente_cedula: cliente.cedula || f.cliente_cedula || '',
+      saldo_ves: parseFloat(f.saldo_pendiente || 0) * tasaVes
+    }))
+  };
+  const html = MasterReportLayout.renderDocumento('estado_cuenta_cxc', payload, cfg);
+  DocumentPrinter.print({
+    docType: 'estado_cuenta_cxc',
+    html: html,
+    title: `Estado_Cuenta_CxC_${(cliente.nombre || 'Cliente').replace(/\s+/g, '_')}`
+  });
+}
+
+function imprimirEstadoCuentaProveedorActual() {
+  const ec = AppState.cxpEstadoCuentaData;
+  const cuentasRaw = Array.isArray(AppState.cxpProveedorCuentas) ? AppState.cxpProveedorCuentas : [];
+  if (!ec && cuentasRaw.length === 0) {
+    if (typeof showToast === 'function') showToast('Seleccione primero un proveedor con estado de cuenta.', 'warning');
+    return;
+  }
+  const cfg = MasterReportLayout.getEffectivePrintConfig(AppState.config);
+  const tasaVes = parseFloat((ec && ec.tasa_ves) || cfg.tasa_ves || 45);
+  const proveedor = (ec && ec.proveedor) || {};
+  const activas = cuentasRaw.filter(c => c.estado !== 'anulada');
+  const totalSaldo = activas.reduce((a, c) => a + parseFloat(c.saldo_pendiente || 0), 0);
+  const totalPagado = activas.reduce((a, c) => a + parseFloat(c.monto_pagado || 0), 0);
+  const totalVencido = activas.filter(c => parseInt(c.dias_vencido || 0) > 0).reduce((a, c) => a + parseFloat(c.saldo_pendiente || 0), 0);
+  const payload = {
+    resumen: {
+      total_saldo_pendiente_usd: totalSaldo,
+      total_saldo_pendiente_ves: totalSaldo * tasaVes,
+      total_cuentas_pendientes: activas.filter(c => parseFloat(c.saldo_pendiente || 0) > 0).length,
+      total_vencido_usd: totalVencido,
+      total_pagado_usd: totalPagado
+    },
+    cuentas: activas.map(c => Object.assign({}, c, {
+      proveedor_nombre: proveedor.nombre || c.proveedor_nombre || '',
+      proveedor_cedula: proveedor.cedula || c.proveedor_cedula || '',
+      saldo_ves: parseFloat(c.saldo_pendiente || 0) * tasaVes
+    }))
+  };
+  const html = MasterReportLayout.renderDocumento('estado_cuenta_cxp', payload, cfg);
+  DocumentPrinter.print({
+    docType: 'estado_cuenta_cxp',
+    html: html,
+    title: `Estado_Cuenta_CxP_${(proveedor.nombre || 'Proveedor').replace(/\s+/g, '_')}`
+  });
+}
+
+function imprimirReciboAbonoCXC(abonoIndex) {
+  const cuenta = AppState.cxcHistorialCuentaActual;
+  const abono = cuenta && Array.isArray(cuenta.abonos) ? cuenta.abonos[abonoIndex] : null;
+  if (!cuenta || !abono) return;
+  const ec = AppState.cxcEstadoCuentaData || {};
+  const cliente = ec.cliente || {};
+  const montoUsd = parseFloat(abono.monto_usd || 0);
+  const saldoRestante = parseFloat(cuenta.saldo_pendiente || 0);
+  const pagos = Array.isArray(abono.pagos) && abono.pagos.length > 0 ? abono.pagos : [{
+    metodo: abono.metodo_pago || 'Efectivo',
+    moneda: abono.moneda_pago || 'USD',
+    monto_moneda: abono.monto_moneda || montoUsd,
+    tasa_cambio: abono.tasa_aplicada || 1,
+    equivalente_usd: montoUsd,
+    referencia: abono.referencia || '-'
+  }];
+  const payload = {
+    id: abono.id,
+    numero_recibo: `REC-CXC-${abono.id || abonoIndex + 1}`,
+    fecha: abono.fecha,
+    tercero_nombre: cuenta.cliente_nombre || cliente.nombre || 'Cliente',
+    tercero_cedula: cuenta.cliente_cedula || cliente.cedula || '-',
+    numero_documento: cuenta.numero_factura || `Cuenta #${cuenta.id}`,
+    saldo_anterior_usd: saldoRestante + montoUsd,
+    saldo_restante_usd: saldoRestante,
+    monto_usd: montoUsd,
+    notas: abono.notas || 'Abono registrado en Cuentas por Cobrar.',
+    pagos: pagos
+  };
+  const cfg = MasterReportLayout.getEffectivePrintConfig(AppState.config);
+  const html = MasterReportLayout.renderDocumento('recibo_pago_cxc', payload, cfg);
+  DocumentPrinter.print({
+    docType: 'recibo_pago_cxc',
+    html: html,
+    title: payload.numero_recibo
+  });
+}
+
+function imprimirReciboAbonoCXP(abonoIndex) {
+  const cuenta = AppState.cxpHistorialCuentaActual;
+  const abono = cuenta && Array.isArray(cuenta.abonos) ? cuenta.abonos[abonoIndex] : null;
+  if (!cuenta || !abono) return;
+  const ec = AppState.cxpEstadoCuentaData || {};
+  const proveedor = ec.proveedor || {};
+  const montoUsd = parseFloat(abono.monto_usd || 0);
+  const saldoRestante = parseFloat(cuenta.saldo_pendiente || 0);
+  const pagos = Array.isArray(abono.pagos) && abono.pagos.length > 0 ? abono.pagos : [{
+    metodo: abono.metodo_pago || 'Efectivo',
+    moneda: abono.moneda_pago || 'USD',
+    monto_moneda: abono.monto_moneda || montoUsd,
+    tasa_cambio: abono.tasa_aplicada || 1,
+    equivalente_usd: montoUsd,
+    referencia: abono.referencia || '-'
+  }];
+  const payload = {
+    id: abono.id,
+    numero_recibo: `PAG-CXP-${abono.id || abonoIndex + 1}`,
+    fecha: abono.fecha,
+    tercero_nombre: cuenta.proveedor_nombre || proveedor.nombre || 'Proveedor',
+    tercero_cedula: cuenta.proveedor_cedula || proveedor.cedula || '-',
+    numero_documento: cuenta.numero_factura || `Cuenta #${cuenta.id}`,
+    saldo_anterior_usd: saldoRestante + montoUsd,
+    saldo_restante_usd: saldoRestante,
+    monto_usd: montoUsd,
+    notas: abono.notas || 'Pago registrado en Cuentas por Pagar.',
+    pagos: pagos
+  };
+  const cfg = MasterReportLayout.getEffectivePrintConfig(AppState.config);
+  const html = MasterReportLayout.renderDocumento('recibo_pago_cxp', payload, cfg);
+  DocumentPrinter.print({
+    docType: 'recibo_pago_cxp',
+    html: html,
+    title: payload.numero_recibo
+  });
 }
 
 function exportarReporteActualCsv() {
@@ -10375,17 +10069,30 @@ function renderLibroVentasSeniat() {
   document.getElementById('seniatVentasPeriodoLabel').textContent = `${mesLabel} (Tasa: ${parseFloat(tasaCierre).toFixed(2)} Bs.)`;
 
   const tbody = document.getElementById('libroVentasTableBody');
+  const tfoot = document.getElementById('libroVentasTableFoot');
+  const colIgtfTh = document.getElementById('libroVentasColIgtfTh');
   const items = data.items || data.registros || [];
   if (!tbody) return;
 
+  const esEspecial = Boolean(Number(
+    r.es_contribuyente_especial !== undefined
+      ? r.es_contribuyente_especial
+      : (emp.es_contribuyente_especial !== undefined ? emp.es_contribuyente_especial : (AppState.config && AppState.config.es_contribuyente_especial))
+  ));
+  if (colIgtfTh) colIgtfTh.classList.toggle('hidden', !esEspecial);
+
   if (items.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="14" class="text-center py-8 text-slate-400 italic">No se registraron operaciones de ventas ni devoluciones en el período fiscal seleccionado.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${esEspecial ? 15 : 14}" class="text-center py-8 text-slate-400 italic">No se registraron operaciones de ventas ni devoluciones en el período fiscal seleccionado.</td></tr>`;
+    if (tfoot) tfoot.innerHTML = '';
     return;
   }
 
   tbody.innerHTML = items.map(i => {
     const isNc = i.es_devolucion;
     const rowClass = isNc ? 'bg-rose-50/60 text-rose-950 font-semibold' : 'hover:bg-slate-50 text-slate-800';
+    const igtfCell = esEspecial
+      ? `<td class="py-2 px-2 text-right font-semibold ${isNc ? 'text-rose-700' : 'text-amber-800'}">${parseFloat(i.igtf_percibido_ves ?? i.igtf_monto_ves ?? 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>`
+      : '';
     return `
       <tr class="${rowClass} transition border-b border-slate-100">
         <td class="py-2 px-2 text-center font-mono font-bold">${i.operacion_nro}</td>
@@ -10395,19 +10102,22 @@ function renderLibroVentasSeniat() {
         <td class="py-2 px-2 font-mono font-bold">${escapeHtml(i.numero_factura || '-')}</td>
         <td class="py-2 px-2 font-mono text-slate-600">${escapeHtml(i.numero_control || '-')}</td>
         <td class="py-2 px-2 font-mono text-rose-700 font-bold">${escapeHtml(i.numero_nota_credito || '-')}</td>
-        <td class="py-2 px-2 font-mono text-slate-500">${escapeHtml(i.factura_afectada || '-')}</td>
+        <td class="py-2 px-2 font-mono text-slate-500">${escapeHtml(i.factura_afectada || i.factura_numero_afectada || '-')}</td>
         <td class="py-2 px-2 text-center font-bold text-[10px]">${i.tipo_transaccion}</td>
         <td class="py-2 px-2 text-right font-black ${isNc ? 'text-rose-700' : 'text-slate-900'}">${parseFloat(i.total_ventas_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
         <td class="py-2 px-2 text-right text-slate-500">${parseFloat(i.ventas_exentas_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
         <td class="py-2 px-2 text-right text-indigo-700 font-semibold">${parseFloat(i.base_imponible_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
         <td class="py-2 px-2 text-right text-rose-700 font-bold">${parseFloat(i.iva_debito_ves).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        ${igtfCell}
         <td class="py-2 px-2 text-right text-slate-500 font-mono text-[10px]">$${parseFloat(i.total_ventas_usd).toFixed(2)}</td>
       </tr>
     `;
   }).join('');
 
-  const tfoot = document.getElementById('libroVentasTableFoot');
   if (tfoot) {
+    const totalIgtfCell = esEspecial
+      ? `<td class="py-2.5 px-2 text-right font-black text-xs text-amber-900">${parseFloat(r.total_igtf_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>`
+      : '';
     tfoot.innerHTML = `
       <tr>
         <td colspan="9" class="py-2.5 px-3 text-right uppercase font-bold text-slate-900 text-xs">TOTALES DEL PERÍODO FISCAL:</td>
@@ -10415,6 +10125,7 @@ function renderLibroVentasSeniat() {
         <td class="py-2.5 px-2 text-right font-bold text-xs text-slate-600">${parseFloat(r.total_exento_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
         <td class="py-2.5 px-2 text-right font-bold text-xs text-indigo-900">${parseFloat(r.total_base_imponible_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
         <td class="py-2.5 px-2 text-right font-black text-xs text-rose-800">${parseFloat(r.total_iva_ves || 0).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>
+        ${totalIgtfCell}
         <td class="py-2.5 px-2 text-right font-black text-xs text-slate-900">$${parseFloat(r.total_ventas_usd || 0).toFixed(2)}</td>
       </tr>
     `;
@@ -11883,7 +11594,47 @@ function cerrarModalDetalleMovimiento() {
 }
 
 function imprimirKardexV2() {
-  window.print();
+  const data = AppState.kardexV2Data;
+  if (!data || !Array.isArray(data.movimientos) || data.movimientos.length === 0) {
+    if (typeof showToast === 'function') showToast('Cargue movimientos en el Kardex antes de imprimir.', 'warning');
+    return;
+  }
+  if (typeof MasterReportLayout === 'undefined' || typeof MasterReportLayout.renderDocumento !== 'function') {
+    window.print();
+    return;
+  }
+  const r = data.resumen || {};
+  const mapped = {
+    producto: data.producto || { codigo: 'GENERAL', nombre: 'Todos los Productos' },
+    resumen: {
+      stock_inicial: r.stock_inicial || 0,
+      total_entradas: r.total_entradas || 0,
+      total_salidas: r.total_salidas || 0,
+      stock_actual: r.stock_actual !== undefined ? r.stock_actual : ((parseFloat(r.total_entradas || 0) - parseFloat(r.total_salidas || 0)).toFixed(2)),
+      valor_total_actual: r.valor_total_actual !== undefined ? r.valor_total_actual : ((parseFloat(r.total_costo_entradas || 0) - parseFloat(r.total_costo_salidas || 0)).toFixed(2))
+    },
+    movimientos: data.movimientos.map(m => ({
+      fecha: m.fecha,
+      tipo_movimiento: m.tipo_movimiento_label || m.tipo_movimiento,
+      documento: m.documento_numero || m.documento || '-',
+      tercero: m.tercero || (m.producto_codigo ? `${m.producto_codigo} ${m.producto_nombre || ''}`.trim() : '-'),
+      concepto: m.motivo || m.concepto || '-',
+      entrada_cant: parseFloat(m.entrada || 0),
+      entrada_total: parseFloat(m.entrada || 0) > 0 ? parseFloat(m.costo_total || 0) : 0,
+      salida_cant: parseFloat(m.salida || 0),
+      salida_total: parseFloat(m.salida || 0) > 0 ? parseFloat(m.costo_total || 0) : 0,
+      saldo_cant: parseFloat(m.saldo || 0),
+      costo_unit: parseFloat(m.costo_unitario || 0),
+      saldo_total: parseFloat(m.saldo || 0) * parseFloat(m.costo_unitario || 0)
+    }))
+  };
+  const cfg = MasterReportLayout.getEffectivePrintConfig(AppState.config);
+  const html = MasterReportLayout.renderDocumento('kardex', mapped, cfg);
+  DocumentPrinter.print({
+    docType: 'kardex',
+    html: html,
+    title: `Kardex_${mapped.producto.codigo || 'General'}`
+  });
 }
 
 // ========================================================
@@ -11896,46 +11647,81 @@ const DocumentPrinter = {
   _afterPrintHandler: null,
 
   FORMATS: {
+    ticket58: {
+      key: 'ticket58',
+      name: 'Ticket Térmico 58mm',
+      cssPage: '@page { size: 58mm auto; margin: 2mm 1mm; }',
+      className: 'doc-ticket58'
+    },
     ticket80: {
       key: 'ticket80',
       name: 'Ticket Térmico 80mm',
-      cssPage: '@page { size: 80mm auto; margin: 2mm 1mm; }',
+      cssPage: '@page { size: 80mm auto; margin: 2mm 1.5mm; }',
       className: 'doc-ticket80'
+    },
+    halfLetterPortrait: {
+      key: 'halfLetterPortrait',
+      name: 'Media Carta Vertical',
+      cssPage: '@page { size: 5.5in 8.5in; margin: 10mm; }',
+      className: 'doc-sheet doc-universal doc-halfLetterPortrait'
+    },
+    halfLetterLandscape: {
+      key: 'halfLetterLandscape',
+      name: 'Media Carta Horizontal',
+      cssPage: '@page { size: 8.5in 5.5in; margin: 10mm; }',
+      className: 'doc-sheet doc-universal doc-halfLetterLandscape'
     },
     letterPortrait: {
       key: 'letterPortrait',
       name: 'Carta Vertical (Portrait)',
       cssPage: '@page { size: letter portrait; margin: 12mm; }',
-      className: 'doc-sheet doc-letterPortrait'
+      className: 'doc-sheet doc-universal doc-letterPortrait'
     },
     letterLandscape: {
       key: 'letterLandscape',
       name: 'Carta Horizontal (Landscape)',
       cssPage: '@page { size: letter landscape; margin: 10mm; }',
-      className: 'doc-sheet doc-letterLandscape'
+      className: 'doc-sheet doc-universal doc-letterLandscape'
     },
     a4Portrait: {
       key: 'a4Portrait',
       name: 'A4 Vertical (Portrait)',
       cssPage: '@page { size: A4 portrait; margin: 12mm; }',
-      className: 'doc-sheet doc-a4Portrait'
+      className: 'doc-sheet doc-universal doc-a4Portrait'
     },
     a4Landscape: {
       key: 'a4Landscape',
       name: 'A4 Horizontal (Landscape)',
       cssPage: '@page { size: A4 landscape; margin: 10mm; }',
-      className: 'doc-sheet doc-a4Landscape'
+      className: 'doc-sheet doc-universal doc-a4Landscape'
+    },
+    legalPortrait: {
+      key: 'legalPortrait',
+      name: 'Oficio Vertical (Portrait)',
+      cssPage: '@page { size: legal portrait; margin: 12mm; }',
+      className: 'doc-sheet doc-universal doc-legalPortrait'
+    },
+    legalLandscape: {
+      key: 'legalLandscape',
+      name: 'Oficio Horizontal (Landscape)',
+      cssPage: '@page { size: legal landscape; margin: 10mm; }',
+      className: 'doc-sheet doc-universal doc-legalLandscape'
     }
   },
 
   normalizeFormat: function(fmt) {
     if (!fmt) return 'letterPortrait';
     const s = String(fmt).trim().toLowerCase().replace(/[-_\s]/g, '');
+    if (s === 'ticket58' || s === '58mm') return 'ticket58';
     if (s === 'ticket80' || s === 'ticket' || s === 'pos' || s === '80mm') return 'ticket80';
+    if (s === 'halfletterlandscape' || s === 'mediacartahorizontal') return 'halfLetterLandscape';
+    if (s === 'halfletterportrait' || s === 'mediacarta' || s === 'halfletter') return 'halfLetterPortrait';
     if (s === 'letterlandscape' || s === 'cartahorizontal' || s === 'letterh') return 'letterLandscape';
     if (s === 'letterportrait' || s === 'cartavertical' || s === 'carta' || s === 'letter') return 'letterPortrait';
     if (s === 'a4landscape' || s === 'a4horizontal' || s === 'a4h') return 'a4Landscape';
     if (s === 'a4portrait' || s === 'a4vertical' || s === 'a4') return 'a4Portrait';
+    if (s === 'legallandscape' || s === 'oficiohorizontal') return 'legalLandscape';
+    if (s === 'legalportrait' || s === 'oficiovertical' || s === 'legal' || s === 'oficio') return 'legalPortrait';
     return this.FORMATS[fmt] ? fmt : 'letterPortrait';
   },
 
@@ -11974,8 +11760,27 @@ const DocumentPrinter = {
 
     this.status = 'printing';
 
-    const fmtKey = this.normalizeFormat(options.type || options.page || 'letterPortrait');
-    const formatConfig = this.FORMATS[fmtKey] || this.FORMATS.letterPortrait;
+    let cssPageRule = '';
+    let containerClass = '';
+    if ((options.docFormat || options.docType) && typeof MasterReportLayout !== 'undefined') {
+      const dynFmt = options.docFormat || MasterReportLayout.getDocFormat(options.docType);
+      cssPageRule = MasterReportLayout.getPageCssRule(dynFmt);
+      if (dynFmt.tamano_papel === 'ticket_58') {
+        containerClass = 'doc-ticket58';
+      } else if (dynFmt.tamano_papel === 'ticket_80') {
+        containerClass = 'doc-ticket80';
+      } else {
+        const paperKey = dynFmt.tamano_papel || 'letter';
+        const oriKey = dynFmt.orientacion === 'landscape' ? 'Landscape' : 'Portrait';
+        const baseKey = paperKey === 'half_letter' ? `halfLetter${oriKey}` : `${paperKey}${oriKey}`;
+        containerClass = `doc-sheet doc-universal doc-${baseKey}`;
+      }
+    } else {
+      const fmtKey = this.normalizeFormat(options.type || options.page || 'letterPortrait');
+      const formatConfig = this.FORMATS[fmtKey] || this.FORMATS.letterPortrait;
+      cssPageRule = formatConfig.cssPage;
+      containerClass = formatConfig.className;
+    }
 
     const container = this.getContainer();
     const docTitle = options.title ? String(options.title).trim() : 'Documento';
@@ -11993,10 +11798,10 @@ const DocumentPrinter = {
       pageStyleEl.id = 'documentPrinterPageStyle';
       document.head.appendChild(pageStyleEl);
     }
-    pageStyleEl.innerHTML = formatConfig.cssPage;
+    pageStyleEl.innerHTML = cssPageRule;
 
     // 3. Preparar contenedor oficial de impresión
-    container.className = formatConfig.className;
+    container.className = containerClass;
     container.innerHTML = options.html || '<p>Documento vacío</p>';
 
     // 4. Activar aislamiento documental en el body
@@ -12710,6 +12515,10 @@ const DocumentTemplates = {
   // Nota de Devolución en Formato Ticket Térmico 80mm
   devolucionTicket: function(dev, config) {
     if (!dev) return '<p>Error: Datos de devolución no disponibles.</p>';
+    if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.renderDocumento === 'function') {
+      const tPaper = (MasterReportLayout.getDocFormat('factura_ticket') || {}).tamano_papel || 'ticket_80';
+      return MasterReportLayout.renderDocumento('nota_credito_devolucion', dev, config || AppState.config, { tamano_papel: tPaper });
+    }
     const cfg = config || {};
     const esc = DocumentPrinter.escape;
     const isTotal = String(dev.tipo_devolucion).toLowerCase() === 'total';
@@ -12912,6 +12721,10 @@ const DocumentTemplates = {
   // Nota de Devolución en Hoja Completa (Carta / A4 Vertical)
   devolucionHoja: function(dev, config, paperFormat) {
     if (!dev) return '<p>Error: Datos de devolución no disponibles.</p>';
+    if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.renderDocumento === 'function') {
+      const override = typeof _buildPaperOverrideForLegacySelect === 'function' ? _buildPaperOverrideForLegacySelect(paperFormat) : null;
+      return MasterReportLayout.renderDocumento('nota_credito_devolucion', dev, config || AppState.config, override);
+    }
     const cfg = config || {};
     const esc = DocumentPrinter.escape;
     const isTotal = String(dev.tipo_devolucion).toLowerCase() === 'total';
@@ -13133,6 +12946,10 @@ const DocumentTemplates = {
   // Movimiento de Inventario en Ticket Térmico 80mm
   movimientoTicket: function(data, config) {
     if (!data) return '<p>Error: Datos de movimiento no disponibles.</p>';
+    if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.renderDocumento === 'function') {
+      const tPaper = (MasterReportLayout.getDocFormat('factura_ticket') || {}).tamano_papel || 'ticket_80';
+      return MasterReportLayout.renderDocumento('nota_debito_ajuste', data, config || AppState.config, { tamano_papel: tPaper });
+    }
     const cfg = config || {};
     const esc = DocumentPrinter.escape;
     const titulo = getTituloMovimientoInventario(data);
@@ -13309,6 +13126,10 @@ const DocumentTemplates = {
   // Movimiento de Inventario en Hoja Completa (Carta / A4 Vertical)
   movimientoHoja: function(data, config, paperFormat) {
     if (!data) return '<p>Error: Datos de movimiento no disponibles.</p>';
+    if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.renderDocumento === 'function') {
+      const override = typeof _buildPaperOverrideForLegacySelect === 'function' ? _buildPaperOverrideForLegacySelect(paperFormat) : null;
+      return MasterReportLayout.renderDocumento('nota_debito_ajuste', data, config || AppState.config, override);
+    }
     const cfg = config || {};
     const esc = DocumentPrinter.escape;
     const titulo = getTituloMovimientoInventario(data);
@@ -13511,6 +13332,9 @@ const DocumentTemplates = {
   // Agrupado estrictamente por categoría (Data Grouping) en Cuadrícula Corporativa
   // ==============================================================================
   catalogoProductos: function(productos, config, opciones) {
+    if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.renderDocumento === 'function') {
+      return MasterReportLayout.renderDocumento('catalogo_productos', { productos: productos, mostrarStock: opciones?.mostrarStock }, config || AppState.config);
+    }
     const esc = DocumentPrinter.escape;
     const cfg = config || AppState.config || {};
     const opts = opciones || {};
@@ -14050,6 +13874,18 @@ async function abrirComprobanteDesdeKardex(ajusteId) {
 // ========================================================
 // CONTROLADOR DE IMPRESIÓN DE MOVIMIENTO (DocumentPrinter)
 // ========================================================
+function _buildPaperOverrideForLegacySelect(formato) {
+  if (!formato) return null;
+  const s = String(formato).toLowerCase().trim();
+  if (s === 'carta' || s === 'letterportrait' || s === 'letter') return { tamano_papel: 'letter', orientacion: 'portrait' };
+  if (s === 'media_carta' || s === 'mediacarta' || s === 'half_letter' || s === 'halfletterportrait') return { tamano_papel: 'half_letter', orientacion: 'portrait' };
+  if (s === 'ticket_80' || s === 'ticket80' || s === 'ticket') return { tamano_papel: 'ticket_80', orientacion: 'portrait' };
+  if (s === 'ticket_58' || s === 'ticket58') return { tamano_papel: 'ticket_58', orientacion: 'portrait' };
+  if (s === 'a4portrait' || s === 'a4') return { tamano_papel: 'a4', orientacion: 'portrait' };
+  if (s === 'letterlandscape' || s === 'hoja') return { tamano_papel: 'letter', orientacion: 'landscape' };
+  return null;
+}
+
 function imprimirMovimientoActual(formatoForzado) {
   const data = AppState.ultimoMovimientoInventario || AppState.ultimoAjusteInventario;
   if (!data) {
@@ -14058,30 +13894,17 @@ function imprimirMovimientoActual(formatoForzado) {
   }
 
   const select = document.getElementById('selectFormatoImpresionMovimiento');
-  const formato = formatoForzado || (select ? select.value : 'letterPortrait') || 'letterPortrait';
+  const formato = formatoForzado || (select ? select.value : '') || '';
   const cfg = AppState.config || {};
-
-  let htmlDoc = '';
-  let printType = 'letterPortrait';
-
-  if (formato === 'ticket80') {
-    htmlDoc = DocumentTemplates.movimientoTicket(data, cfg);
-    printType = 'ticket80';
-  } else if (formato === 'a4Portrait') {
-    htmlDoc = DocumentTemplates.movimientoA4(data, cfg);
-    printType = 'a4Portrait';
-  } else if (formato === 'hoja' || formato === 'letterLandscape') {
-    // Hoja: reutiliza la plantilla documental común movimientoHoja en el formato oficial existente Carta Horizontal
-    htmlDoc = DocumentTemplates.movimientoHoja(data, cfg, 'letterLandscape');
-    printType = 'letterLandscape';
-  } else {
-    htmlDoc = DocumentTemplates.movimientoCarta(data, cfg);
-    printType = 'letterPortrait';
-  }
+  const override = _buildPaperOverrideForLegacySelect(formato);
+  const htmlDoc = MasterReportLayout.renderDocumento('nota_debito_ajuste', data, cfg, override);
+  const fmtFinal = MasterReportLayout.getDocFormat('nota_debito_ajuste', override);
 
   const numDoc = data.numero_ajuste || 'Ajuste';
   return DocumentPrinter.print({
-    type: printType,
+    docType: 'nota_debito_ajuste',
+    docFormat: fmtFinal,
+    type: formato || undefined,
     title: `Comprobante Movimiento ${numDoc}`,
     html: htmlDoc
   });
@@ -14098,27 +13921,18 @@ function imprimirDevolucionActual(formatoForzado) {
   }
 
   const select = document.getElementById('selectFormatoImpresionDevolucion');
-  const formato = formatoForzado || (select ? select.value : 'letterPortrait') || 'letterPortrait';
+  const formato = formatoForzado || (select ? select.value : 'carta') || 'carta';
   const cfg = AppState.config || {};
-
-  let htmlDoc = '';
-  let printType = 'letterPortrait';
-
-  if (formato === 'ticket80') {
-    htmlDoc = DocumentTemplates.devolucionTicket(dev, cfg);
-    printType = 'ticket80';
-  } else if (formato === 'a4Portrait') {
-    htmlDoc = DocumentTemplates.devolucionA4(dev, cfg);
-    printType = 'a4Portrait';
-  } else {
-    htmlDoc = DocumentTemplates.devolucionCarta(dev, cfg);
-    printType = 'letterPortrait';
-  }
+  const override = _buildPaperOverrideForLegacySelect(formato);
+  const htmlDoc = MasterReportLayout.renderDocumento('nota_credito_devolucion', dev, cfg, override);
+  const fmtFinal = MasterReportLayout.getDocFormat('nota_credito_devolucion', override);
 
   const numDoc = dev.numero_devolucion || 'Devolucion';
   return DocumentPrinter.print({
-    type: printType,
-    title: `Nota de Devolucion ${numDoc}`,
+    docType: 'nota_credito_devolucion',
+    docFormat: fmtFinal,
+    type: formato || undefined,
+    title: `Nota de Crédito ${numDoc}`,
     html: htmlDoc
   });
 }
@@ -14134,26 +13948,19 @@ function imprimirFacturaActual(formatoForzado) {
   }
 
   const select = document.getElementById('selectFormatoImpresionFactura');
-  const formato = formatoForzado || (select ? select.value : 'letterPortrait') || 'letterPortrait';
+  const formato = formatoForzado || (select ? select.value : 'carta') || 'carta';
   const cfg = AppState.config || {};
-
-  let htmlDoc = '';
-  let printType = 'letterPortrait';
-
-  if (formato === 'ticket80') {
-    htmlDoc = DocumentTemplates.facturaTicket(f, cfg);
-    printType = 'ticket80';
-  } else if (formato === 'a4Portrait') {
-    htmlDoc = DocumentTemplates.facturaA4(f, cfg);
-    printType = 'a4Portrait';
-  } else {
-    htmlDoc = DocumentTemplates.facturaCarta(f, cfg);
-    printType = 'letterPortrait';
-  }
+  const isTicket = String(formato).toLowerCase().includes('ticket');
+  const docType = isTicket ? 'factura_ticket' : 'factura_a4';
+  const override = _buildPaperOverrideForLegacySelect(formato);
+  const htmlDoc = MasterReportLayout.renderDocumento(docType, f, cfg, override);
+  const fmtFinal = MasterReportLayout.getDocFormat(docType, override);
 
   const numDoc = f.numero_factura || 'Factura';
   return DocumentPrinter.print({
-    type: printType,
+    docType: docType,
+    docFormat: fmtFinal,
+    type: formato,
     title: `Factura ${numDoc}`,
     html: htmlDoc
   });
@@ -15446,8 +15253,8 @@ function mostrarModalReporteCierreZ(rep) {
   const container = document.getElementById('reporteCierreZPreviewContainer');
   if (!modal || !container) return;
 
-  if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.renderReporteCierreZA4 === 'function') {
-    container.innerHTML = MasterReportLayout.renderReporteCierreZA4(rep, AppState.config, AppState.configImpresion);
+  if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.renderDocumento === 'function') {
+    container.innerHTML = MasterReportLayout.renderDocumento('cierre_z_a4', rep, AppState.config);
   } else {
     container.innerHTML = `<pre class="text-xs p-4 bg-white rounded-xl font-mono">${JSON.stringify(rep, null, 2)}</pre>`;
   }
@@ -15467,22 +15274,14 @@ function imprimirReporteCierreZActual(formato = 'letterPortrait') {
   }
 
   const cfg = AppState.config || {};
-  const pCfg = AppState.configImpresion || {};
-
-  let htmlDoc = '';
-  let printType = 'letterPortrait';
-
-  if (formato === 'ticket80') {
-    htmlDoc = MasterReportLayout.renderReporteCierreZTicket(rep, cfg, pCfg);
-    printType = 'ticket80';
-  } else {
-    htmlDoc = MasterReportLayout.renderReporteCierreZA4(rep, cfg, pCfg);
-    printType = 'letterPortrait';
-  }
+  const isTicket = String(formato || '').toLowerCase().includes('ticket');
+  const docType = isTicket ? 'cierre_z_ticket' : 'cierre_z_a4';
+  const htmlDoc = MasterReportLayout.renderDocumento(docType, rep, cfg);
 
   const numTurno = rep.turno ? String(rep.turno.id).padStart(6, '0') : 'Z';
   return DocumentPrinter.print({
-    type: printType,
+    docType: docType,
+    type: formato,
     title: `Reporte Z Turno #${numTurno}`,
     html: htmlDoc
   });
@@ -17314,28 +17113,38 @@ function cerrarModalNotaDebitoCompra() {
 }
 
 function imprimirNotaDebitoCompraDirecta() {
+  const data = AppState.devolucionActualDetalle;
+  if (data && typeof MasterReportLayout !== 'undefined' && typeof DocumentPrinter !== 'undefined') {
+    const htmlDoc = MasterReportLayout.renderDocumento('nota_debito_ajuste', {
+      numero_ajuste: data.numero_devolucion || 'ND-001',
+      fecha: (data.fecha_emision || '').substring(0, 10),
+      tipo_ajuste: 'NOTA DÉBITO PROVEEDOR',
+      sentido: 'SALIDA',
+      motivo: data.motivo || 'Devolución a proveedor',
+      proveedor_nombre: data.proveedor_nombre,
+      documento_referencia: data.numero_factura_proveedor || data.numero_control_compra,
+      total_usd: data.total_usd,
+      detalles: (data.detalles || []).map(dt => ({
+        codigo: dt.codigo,
+        nombre: dt.nombre_producto,
+        cantidad: dt.cantidad,
+        costo_unitario: dt.costo_unitario,
+        costo_total: dt.subtotal
+      }))
+    }, AppState.config);
+    return DocumentPrinter.print({
+      docType: 'nota_debito_ajuste',
+      title: `Nota_Debito_${data.numero_devolucion || 'Proveedor'}`,
+      html: htmlDoc
+    });
+  }
   const content = document.getElementById('modalNdContenidoImprimible')?.innerHTML;
   if (!content) return;
-
-  const w = window.open('', '_blank', 'width=800,height=900');
-  w.document.write(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Nota de Débito a Proveedor</title>
-      <script src="https://cdn.tailwindcss.com"></script>
-      <style>
-        @media print {
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        }
-      </style>
-    </head>
-    <body class="p-8 bg-white text-slate-800 font-sans" onload="window.print();">
-      ${content}
-    </body>
-    </html>
-  `);
-  w.document.close();
+  return DocumentPrinter.print({
+    docType: 'nota_debito_ajuste',
+    title: 'Nota de Débito a Proveedor',
+    html: content
+  });
 }
 
 async function anularDevolucionCompra(id, numDev) {
@@ -17994,11 +17803,14 @@ function imprimirCatalogoProductos() {
 
   const opciones = obtenerOpcionesCatalogoActual();
   const cfg = AppState.config || {};
-  const htmlDoc = DocumentTemplates.catalogoProductos(prods, cfg, opciones);
+  const htmlDoc = (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.renderDocumento === 'function')
+    ? MasterReportLayout.renderDocumento('catalogo_productos', { productos: prods, mostrarStock: opciones.mostrarStock }, cfg)
+    : DocumentTemplates.catalogoProductos(prods, cfg, opciones);
 
   const docTitle = opciones.mostrarStock ? 'Catalogo_Inventario_TAVO_CLOUD' : 'Catalogo_Productos_TAVO_CLOUD';
 
   DocumentPrinter.print({
+    docType: 'catalogo_productos',
     type: 'letterPortrait',
     title: docTitle,
     html: htmlDoc
@@ -19594,6 +19406,7 @@ async function abrirModalDetallePedido(pedidoId) {
     const res = await fetch(`/api/pedidos/${pedidoId}`);
     if (!res.ok) throw new Error('No se pudo obtener el pedido');
     const ped = await res.json();
+    AppState.pedidoDetalleActual = ped;
     const modalPed = document.getElementById('modalPedidoDetalle');
     if (modalPed) modalPed.dataset.pedidoId = String(pedidoId);
     const puedeFacturarPedido = AppState.usuarioActual?.permisos?.facturar_directo !== 0;
@@ -19663,8 +19476,10 @@ async function abrirModalDetallePedido(pedidoId) {
 
     const acciones = document.getElementById('modalPedAccionesAdmin');
     if (acciones) {
+      const btnPrintPed = `<button type="button" onclick="imprimirPedidoActual()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition flex items-center"><i class="fa-solid fa-print mr-1.5"></i>Imprimir Orden</button>`;
       if (ped.estado === 'PENDIENTE' && puedeFacturarPedido) {
         acciones.innerHTML = `
+          ${btnPrintPed}
           <button onclick="autorizarYFacturarPedido(${ped.id})" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center">
             <i class="fa-solid fa-check-double mr-1.5"></i>Autorizar y Facturar Pedido
           </button>
@@ -19675,6 +19490,7 @@ async function abrirModalDetallePedido(pedidoId) {
         `;
       } else {
         acciones.innerHTML = `
+          ${btnPrintPed}
           <button onclick="closeModalDetallePedido()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-bold transition">Cerrar</button>
         `;
       }
@@ -19687,54 +19503,61 @@ async function abrirModalDetallePedido(pedidoId) {
 }
 window.abrirModalDetallePedido = abrirModalDetallePedido;
 
+function imprimirPedidoActual() {
+  const ped = AppState.pedidoDetalleActual;
+  if (!ped || typeof MasterReportLayout === 'undefined') {
+    alert('No hay pedido cargado para imprimir.');
+    return false;
+  }
+  const htmlDoc = MasterReportLayout.renderDocumento('pedido_preventa', ped, AppState.config);
+  return DocumentPrinter.print({
+    docType: 'pedido_preventa',
+    title: `Pedido_${ped.numero_pedido || ped.id}`,
+    html: htmlDoc
+  });
+}
+
 function closeModalDetallePedido() {
   document.getElementById('modalPedidoDetalle')?.classList.add('hidden');
 }
 window.closeModalDetallePedido = closeModalDetallePedido;
 
 // ==============================================================================
-// CONTROLADOR DE FORMATOS DE IMPRESIÓN PARAMETRIZADOS (FASE 3C)
+// CONTROLADOR DEL ESTUDIO UNIVERSAL DE FORMATOS DE IMPRESIÓN
 // ==============================================================================
-async function openFormatosImpresionModal() {
-  if (!_isSuperAdminUser(true)) return;
-  if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.cargarConfigImpresion === 'function') {
-    await MasterReportLayout.cargarConfigImpresion();
-  }
-  const cfg = (typeof MasterReportLayout !== 'undefined' && MasterReportLayout.activePrintConfig) 
-    ? MasterReportLayout.activePrintConfig 
-    : (AppState.configImpresion || {
-        color_primario: '#0f172a',
-        mostrar_sku: true,
-        mostrar_vendedor: true,
-        mostrar_descuento_linea: true,
-        logo_alineacion: 'centro',
-        texto_footer_factura: 'Gracias por su compra. Conserve esta factura como comprobante de garantía.',
-        texto_header_ticket: '*** COMPROBANTE DE COMPRA ***',
-        texto_footer_ticket: '*** GRACIAS POR SU PREFERENCIA ***'
-      });
-  
-  const colInput = document.getElementById('cfgImpColorPrimario');
-  const colText = document.getElementById('cfgImpColorPrimarioText');
-  const aligSelect = document.getElementById('cfgImpLogoAlineacion');
-  const swSku = document.getElementById('cfgImpMostrarSku');
-  const swVendedor = document.getElementById('cfgImpMostrarVendedor');
-  const swDesc = document.getElementById('cfgImpMostrarDescuento');
-  const txtFooterFactura = document.getElementById('cfgImpTextoFooterFactura');
-  const txtHeaderTicket = document.getElementById('cfgImpTextoHeaderTicket');
-  const txtFooterTicket = document.getElementById('cfgImpTextoFooterTicket');
+const StudioFormatosState = {
+  activeDocType: 'factura_a4',
+  activeTab: 'papel',
+  zoom: 0.75,
+  draftMap: {}
+};
 
-  if (colInput) colInput.value = cfg.color_primario || '#0f172a';
-  if (colText) colText.value = (cfg.color_primario || '#0f172a').toUpperCase();
-  if (aligSelect) aligSelect.value = cfg.logo_alineacion || 'centro';
-  if (swSku) swSku.checked = Boolean(cfg.mostrar_sku);
-  if (swVendedor) swVendedor.checked = Boolean(cfg.mostrar_vendedor);
-  if (swDesc) swDesc.checked = Boolean(cfg.mostrar_descuento_linea);
-  if (txtFooterFactura) txtFooterFactura.value = cfg.texto_footer_factura || '';
-  if (txtHeaderTicket) txtHeaderTicket.value = cfg.texto_header_ticket || '';
-  if (txtFooterTicket) txtFooterTicket.value = cfg.texto_footer_ticket || '';
+async function openFormatosImpresionModal(initialDocType = null) {
+  if (!_isSuperAdminUser(true)) return;
+  if (typeof MasterReportLayout !== 'undefined' && typeof MasterReportLayout.cargarFormatos === 'function') {
+    await MasterReportLayout.cargarFormatos();
+  }
+
+  StudioFormatosState.draftMap = {};
+  if (typeof MasterReportLayout !== 'undefined') {
+    MasterReportLayout.DOCUMENT_REGISTRY.forEach(item => {
+      StudioFormatosState.draftMap[item.doc_type] = MasterReportLayout.getDocFormat(item.doc_type);
+    });
+  }
+
+  if (initialDocType && StudioFormatosState.draftMap[initialDocType]) {
+    StudioFormatosState.activeDocType = initialDocType;
+  } else if (!StudioFormatosState.draftMap[StudioFormatosState.activeDocType]) {
+    StudioFormatosState.activeDocType = 'factura_a4';
+  }
 
   const modal = document.getElementById('modalFormatosImpresion');
   if (modal) modal.classList.remove('hidden');
+
+  renderStudioDocList();
+  switchStudioTab(StudioFormatosState.activeTab || 'papel');
+  setStudioPreviewZoom(StudioFormatosState.zoom || 0.75);
+  studioLoadDocIntoForm(StudioFormatosState.activeDocType);
 }
 
 function closeFormatosImpresionModal() {
@@ -19742,100 +19565,404 @@ function closeFormatosImpresionModal() {
   if (modal) modal.classList.add('hidden');
 }
 
-function setPresetColor(hex) {
-  const colInput = document.getElementById('cfgImpColorPrimario');
-  const colText = document.getElementById('cfgImpColorPrimarioText');
-  if (colInput) colInput.value = hex;
-  if (colText) colText.value = hex.toUpperCase();
+function renderStudioDocList() {
+  const container = document.getElementById('studioDocList');
+  if (!container || typeof MasterReportLayout === 'undefined') return;
+
+  const q = (document.getElementById('studioDocSearch')?.value || '').trim().toLowerCase();
+  const categorias = ['Comerciales', 'Tesorería', 'Libros SENIAT', 'Reportes'];
+  const reg = MasterReportLayout.DOCUMENT_REGISTRY || [];
+
+  let html = '';
+  categorias.forEach(cat => {
+    const items = reg.filter(item => {
+      if (item.categoria !== cat) return false;
+      if (!q) return true;
+      return item.etiqueta.toLowerCase().includes(q) || item.doc_type.toLowerCase().includes(q) || cat.toLowerCase().includes(q);
+    });
+    if (items.length === 0) return;
+
+    html += `
+      <div>
+        <div class="px-2 py-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">${escapeHtml(cat)}</div>
+        <div class="space-y-1 mt-1">
+          ${items.map(it => {
+            const isActive = it.doc_type === StudioFormatosState.activeDocType;
+            const cfgDoc = StudioFormatosState.draftMap[it.doc_type] || MasterReportLayout.formatsMap[it.doc_type] || {};
+            const isCustom = Boolean(cfgDoc.customizado);
+            return `
+              <button type="button" onclick="selectStudioDoc('${escapeHtml(it.doc_type)}')" class="w-full text-left px-2.5 py-2 rounded-xl flex items-center justify-between gap-2 transition ${isActive ? 'bg-slate-900 text-white shadow-xs font-bold' : 'hover:bg-slate-100 text-slate-700 font-medium'}">
+                <span class="flex items-center gap-2 min-w-0">
+                  <i class="fa-solid ${escapeHtml(it.icono || 'fa-file')} text-xs ${isActive ? 'text-teal-400' : 'text-slate-400'} shrink-0"></i>
+                  <span class="truncate">${escapeHtml(it.etiqueta)}</span>
+                </span>
+                ${isCustom ? `<span class="w-2 h-2 rounded-full ${isActive ? 'bg-teal-400' : 'bg-teal-600'} shrink-0" title="Personalizado"></span>` : ''}
+              </button>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html || `<div class="text-center py-6 text-slate-400 text-xs">Sin coincidencias.</div>`;
 }
 
-function actualizarPreviewColor(hex) {
-  const colText = document.getElementById('cfgImpColorPrimarioText');
-  if (colText) colText.value = hex.toUpperCase();
-}
-
-function actualizarColorDesdeTexto(hex) {
-  const colInput = document.getElementById('cfgImpColorPrimario');
-  if (colInput && /^#[0-9A-Fa-f]{6}$/.test(hex)) {
-    colInput.value = hex;
+function selectStudioDoc(docType) {
+  if (!StudioFormatosState.draftMap[docType] && typeof MasterReportLayout !== 'undefined') {
+    StudioFormatosState.draftMap[docType] = MasterReportLayout.getDocFormat(docType);
   }
+  StudioFormatosState.activeDocType = docType;
+  renderStudioDocList();
+  studioLoadDocIntoForm(docType);
+}
+
+function switchStudioTab(tab) {
+  const valid = ['papel', 'marca', 'columnas', 'moneda', 'firmas', 'avanzado'];
+  const t = valid.includes(tab) ? tab : 'papel';
+  StudioFormatosState.activeTab = t;
+
+  document.querySelectorAll('.studio-tab-btn').forEach(btn => {
+    const active = btn.dataset.studioTab === t;
+    btn.className = active
+      ? 'studio-tab-btn px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-slate-900 text-white transition'
+      : 'studio-tab-btn px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 transition';
+  });
+
+  document.querySelectorAll('.studio-tab-panel').forEach(panel => {
+    panel.classList.toggle('hidden', panel.id !== `studioTab-${t}`);
+  });
+}
+
+function studioLoadDocIntoForm(docType) {
+  if (typeof MasterReportLayout === 'undefined') return;
+  const regItem = MasterReportLayout.REGISTRY_MAP[docType];
+  const cfg = StudioFormatosState.draftMap[docType] || MasterReportLayout.getDocFormat(docType);
+  StudioFormatosState.draftMap[docType] = cfg;
+
+  const lblEl = document.getElementById('studioHeaderActiveLabel');
+  if (lblEl) lblEl.textContent = regItem ? regItem.etiqueta : docType;
+  const customBadge = document.getElementById('studioHeaderCustomBadge');
+  if (customBadge) customBadge.classList.toggle('hidden', !cfg.customizado);
+
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v !== undefined && v !== null ? v : ''; };
+  const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = Boolean(v); };
+
+  // Tab Papel
+  setVal('stTamanoPapel', cfg.tamano_papel || 'letter');
+  setVal('stOrientacion', cfg.orientacion || 'portrait');
+  setVal('stMargenMm', cfg.margen_mm !== undefined ? cfg.margen_mm : 10);
+  setVal('stEscalaFuente', cfg.escala_fuente || 'normal');
+  setVal('stFamiliaFuente', cfg.familia_fuente || 'sans');
+  setVal('stDensidadFilas', cfg.densidad_filas || 'normal');
+  setChk('stZebraStriping', cfg.zebra_striping !== false);
+  setChk('stModoFormaLibre', cfg.modo_forma_libre === true);
+  setVal('stMargenFormaLibreMm', cfg.margen_superior_forma_libre_mm !== undefined ? cfg.margen_superior_forma_libre_mm : 35);
+
+  // Tab Marca & Encabezado
+  setVal('stTituloDoc', cfg.titulo_documento || '');
+  setVal('stSubtituloDoc', cfg.subtitulo_documento || '');
+  setVal('stColorPrimario', cfg.color_primario || '#0f172a');
+  setVal('stColorPrimarioTxt', (cfg.color_primario || '#0f172a').toUpperCase());
+  setVal('stColorSecundario', cfg.color_secundario || '#0284c7');
+  setVal('stColorSecundarioTxt', (cfg.color_secundario || '#0284c7').toUpperCase());
+  setVal('stLogoAlineacion', cfg.logo_alineacion || 'izquierda');
+  setVal('stLogoTamano', cfg.logo_tamano || 'md');
+  setChk('stMostrarLogo', cfg.mostrar_logo !== false);
+  setChk('stMostrarRif', cfg.mostrar_rif !== false);
+  setChk('stMostrarDireccion', cfg.mostrar_direccion !== false);
+  setChk('stMostrarTelefono', cfg.mostrar_telefono !== false);
+  setChk('stMostrarFechaImp', cfg.mostrar_fecha_impresion !== false);
+  setChk('stMostrarPaginacion', cfg.mostrar_paginacion !== false);
+
+  // Tab Columnas dinámicas
+  const colsContainer = document.getElementById('studioColumnsContainer');
+  if (colsContainer && regItem) {
+    const colsMeta = regItem.colsMeta || [];
+    const colsState = cfg.columnas || {};
+    colsContainer.innerHTML = colsMeta.map(cm => {
+      const checked = colsState[cm.key] !== false;
+      return `
+        <label class="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100/70 transition">
+          <div>
+            <span class="font-bold text-slate-800 block">${escapeHtml(cm.label)}</span>
+            <span class="text-[10px] font-mono text-slate-400">${escapeHtml(cm.key)}</span>
+          </div>
+          <input type="checkbox" data-col-key="${escapeHtml(cm.key)}" ${checked ? 'checked' : ''} onchange="studioOnFieldChange()" class="studio-col-chk w-4 h-4 rounded text-teal-600">
+        </label>
+      `;
+    }).join('');
+  }
+
+  // Tab Moneda & Bancos
+  setChk('stMostrarVes', cfg.mostrar_equivalente_ves !== false);
+  setChk('stMostrarCop', Boolean(cfg.mostrar_equivalente_cop));
+  setChk('stMostrarTasas', cfg.mostrar_tasas_cambio !== false);
+  setChk('stMostrarDesglosePagos', cfg.mostrar_desglose_pagos !== false);
+  setChk('stMostrarBancos', Boolean(cfg.mostrar_cuentas_bancarias));
+  setVal('stTextoBancos', cfg.texto_cuentas_bancarias || '');
+
+  // Tab Firmas & Textos
+  setVal('stTextoHeaderExtra', cfg.texto_encabezado_extra || '');
+  setVal('stTextoFooter', cfg.texto_pie_pagina || '');
+  setChk('stMostrarFirmas', Boolean(cfg.mostrar_firmas));
+  const fArr = Array.isArray(cfg.firmas) ? cfg.firmas : [];
+  setVal('stFirma1', fArr[0] || '');
+  setVal('stFirma2', fArr[1] || '');
+  setVal('stFirma3', fArr[2] || '');
+
+  // Tab Avanzado
+  setChk('stMostrarMarcaSaas', cfg.mostrar_marca_saas !== false);
+  setVal('stCssPersonalizado', cfg.css_personalizado || '');
+
+  studioRenderLivePreview();
+}
+
+function studioReadFormToDraft() {
+  const docType = StudioFormatosState.activeDocType;
+  const cur = StudioFormatosState.draftMap[docType] || {};
+  const val = (id, fb = '') => { const el = document.getElementById(id); return el ? el.value : fb; };
+  const chk = (id, fb = false) => { const el = document.getElementById(id); return el ? el.checked : fb; };
+
+  const columnas = Object.assign({}, cur.columnas || {});
+  document.querySelectorAll('#studioColumnsContainer .studio-col-chk').forEach(cb => {
+    const k = cb.dataset.colKey;
+    if (k) columnas[k] = Boolean(cb.checked);
+  });
+
+  const firmas = [val('stFirma1', '').trim(), val('stFirma2', '').trim(), val('stFirma3', '').trim()].filter(Boolean);
+
+  const updated = Object.assign({}, cur, {
+    doc_type: docType,
+    tamano_papel: val('stTamanoPapel', 'letter'),
+    orientacion: val('stOrientacion', 'portrait'),
+    margen_mm: parseInt(val('stMargenMm', '10'), 10) || 0,
+    escala_fuente: val('stEscalaFuente', 'normal'),
+    familia_fuente: val('stFamiliaFuente', 'sans'),
+    densidad_filas: val('stDensidadFilas', 'normal'),
+    zebra_striping: chk('stZebraStriping', true),
+    modo_forma_libre: chk('stModoFormaLibre', false),
+    margen_superior_forma_libre_mm: Math.max(0, parseInt(val('stMargenFormaLibreMm', '35'), 10) || 0),
+
+    titulo_documento: val('stTituloDoc', ''),
+    subtitulo_documento: val('stSubtituloDoc', ''),
+    color_primario: val('stColorPrimario', '#0f172a'),
+    color_secundario: val('stColorSecundario', '#0284c7'),
+    logo_alineacion: val('stLogoAlineacion', 'izquierda'),
+    logo_tamano: val('stLogoTamano', 'md'),
+    mostrar_logo: chk('stMostrarLogo', true),
+    mostrar_rif: chk('stMostrarRif', true),
+    mostrar_direccion: chk('stMostrarDireccion', true),
+    mostrar_telefono: chk('stMostrarTelefono', true),
+    mostrar_fecha_impresion: chk('stMostrarFechaImp', true),
+    mostrar_paginacion: chk('stMostrarPaginacion', true),
+
+    columnas: columnas,
+    mostrar_sku: columnas.sku !== undefined ? columnas.sku : (cur.mostrar_sku !== false),
+    mostrar_vendedor: columnas.vendedor !== undefined ? columnas.vendedor : (cur.mostrar_vendedor !== false),
+    mostrar_descuento_linea: columnas.descuento !== undefined ? columnas.descuento : (cur.mostrar_descuento_linea !== false),
+
+    mostrar_equivalente_ves: chk('stMostrarVes', true),
+    mostrar_equivalente_cop: chk('stMostrarCop', false),
+    mostrar_tasas_cambio: chk('stMostrarTasas', true),
+    mostrar_desglose_pagos: chk('stMostrarDesglosePagos', true),
+    mostrar_cuentas_bancarias: chk('stMostrarBancos', false),
+    texto_cuentas_bancarias: val('stTextoBancos', ''),
+
+    texto_encabezado_extra: val('stTextoHeaderExtra', ''),
+    texto_pie_pagina: val('stTextoFooter', ''),
+    mostrar_firmas: chk('stMostrarFirmas', false),
+    firmas: firmas,
+
+    mostrar_marca_saas: chk('stMostrarMarcaSaas', true),
+    css_personalizado: val('stCssPersonalizado', '')
+  });
+
+  StudioFormatosState.draftMap[docType] = updated;
+  return updated;
+}
+
+function studioOnFieldChange() {
+  studioReadFormToDraft();
+  studioRenderLivePreview();
+}
+
+function studioSyncColor(which, hex) {
+  const txtId = which === 'sec' ? 'stColorSecundarioTxt' : 'stColorPrimarioTxt';
+  const txtEl = document.getElementById(txtId);
+  if (txtEl) txtEl.value = String(hex || '#0f172a').toUpperCase();
+  studioOnFieldChange();
+}
+
+function studioSyncColorText(which, hex) {
+  const inpId = which === 'sec' ? 'stColorSecundario' : 'stColorPrimario';
+  const inpEl = document.getElementById(inpId);
+  if (inpEl && /^#[0-9A-Fa-f]{6}$/.test(hex)) {
+    inpEl.value = hex;
+    studioOnFieldChange();
+  }
+}
+
+function studioToggleTodasColumnas(activar) {
+  document.querySelectorAll('#studioColumnsContainer .studio-col-chk').forEach((cb, idx) => {
+    // Si es 'Mínimas', mantener al menos la 1ra/2da columna visible
+    cb.checked = activar ? true : idx < 2;
+  });
+  studioOnFieldChange();
+}
+
+function setStudioPreviewZoom(z) {
+  StudioFormatosState.zoom = z;
+  const wrap = document.getElementById('studioLivePreviewWrapper');
+  if (wrap) {
+    wrap.style.transform = `scale(${z})`;
+    wrap.style.transformOrigin = 'top center';
+  }
+  document.querySelectorAll('.studio-zoom-btn').forEach(btn => {
+    const active = parseFloat(btn.dataset.studioZoom) === z;
+    btn.className = active
+      ? 'studio-zoom-btn px-2 py-1 rounded text-[11px] font-bold bg-slate-900 text-white'
+      : 'studio-zoom-btn px-2 py-1 rounded text-[11px] font-semibold text-slate-600 hover:bg-slate-100';
+  });
+}
+
+function studioRenderLivePreview() {
+  if (typeof MasterReportLayout === 'undefined') return;
+  const docType = StudioFormatosState.activeDocType;
+  const draft = StudioFormatosState.draftMap[docType] || MasterReportLayout.getDocFormat(docType);
+
+  const badge = document.getElementById('studioPreviewPaperBadge');
+  if (badge) {
+    const paperLbl = (draft.tamano_papel || 'letter').toUpperCase().replace('_', ' ');
+    const orientLbl = (draft.tamano_papel || '').startsWith('ticket') ? 'ROLLO' : (draft.orientacion === 'landscape' ? 'HORIZONTAL' : 'VERTICAL');
+    badge.textContent = `${paperLbl} • ${orientLbl}`;
+  }
+
+  const stage = document.getElementById('studioLivePreviewStage');
+  if (!stage) return;
+
+  const sampleData = MasterReportLayout.getSampleData(docType, AppState.config);
+  stage.innerHTML = MasterReportLayout.renderDocumento(docType, sampleData, AppState.config, draft);
 }
 
 async function guardarConfigImpresion(e) {
   if (e && e.preventDefault) e.preventDefault();
-  
-  const payload = {
-    color_primario: document.getElementById('cfgImpColorPrimario')?.value || '#0f172a',
-    logo_alineacion: document.getElementById('cfgImpLogoAlineacion')?.value || 'centro',
-    mostrar_sku: document.getElementById('cfgImpMostrarSku')?.checked ?? true,
-    mostrar_vendedor: document.getElementById('cfgImpMostrarVendedor')?.checked ?? true,
-    mostrar_descuento_linea: document.getElementById('cfgImpMostrarDescuento')?.checked ?? true,
-    texto_footer_factura: document.getElementById('cfgImpTextoFooterFactura')?.value || '',
-    texto_header_ticket: document.getElementById('cfgImpTextoHeaderTicket')?.value || '',
-    texto_footer_ticket: document.getElementById('cfgImpTextoFooterTicket')?.value || ''
-  };
+  if (typeof MasterReportLayout === 'undefined') return;
+
+  const docType = StudioFormatosState.activeDocType;
+  const payload = studioReadFormToDraft();
 
   try {
-    const res = await fetch('/api/configuracion/impresion', {
+    const res = await fetch(`/api/formatos/${encodeURIComponent(docType)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (res.ok && data.success) {
-      if (typeof MasterReportLayout !== 'undefined') {
-        MasterReportLayout.activePrintConfig = Object.assign({}, payload);
+      if (data.formatos) {
+        MasterReportLayout.formatsMap = data.formatos;
+        Object.keys(data.formatos).forEach(k => {
+          StudioFormatosState.draftMap[k] = data.formatos[k];
+        });
       }
-      AppState.configImpresion = Object.assign({}, payload);
-      alert('Configuración de formatos de impresión guardada exitosamente.');
-      closeFormatosImpresionModal();
+      if (docType === 'factura_a4' && data.config) {
+        MasterReportLayout.activePrintConfig = Object.assign({}, data.config);
+        AppState.configImpresion = Object.assign({}, data.config);
+      }
+      renderStudioDocList();
+      studioLoadDocIntoForm(docType);
+      if (typeof showToast === 'function') {
+        showToast(`Formato "${data.config?.etiqueta || docType}" guardado en el sistema.`, 'success');
+      } else {
+        alert(`✅ Formato guardado correctamente.`);
+      }
     } else {
-      alert('Error al guardar configuración de impresión: ' + (data.error || data.message || 'Error desconocido'));
+      alert('Error al guardar formato: ' + (data.error || data.message || 'Error desconocido'));
     }
   } catch (err) {
-    console.error('Error al guardar formatos de impresión:', err);
-    alert('Error de conexión al guardar formatos de impresión.');
+    console.error('Error al guardar formato:', err);
+    alert('Error de conexión al guardar formato.');
+  }
+}
+
+async function studioResetFormatoActual() {
+  if (typeof MasterReportLayout === 'undefined') return;
+  const docType = StudioFormatosState.activeDocType;
+  const regItem = MasterReportLayout.REGISTRY_MAP[docType];
+  if (!confirm(`¿Restablecer "${regItem ? regItem.etiqueta : docType}" a sus valores de fábrica?`)) return;
+
+  try {
+    const res = await fetch(`/api/formatos/${encodeURIComponent(docType)}/reset`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (data.formatos) MasterReportLayout.formatsMap = data.formatos;
+      StudioFormatosState.draftMap[docType] = MasterReportLayout.getDocFormat(docType);
+      renderStudioDocList();
+      studioLoadDocIntoForm(docType);
+      if (typeof showToast === 'function') showToast('Formato restablecido a fábrica.', 'info');
+    } else {
+      alert('Error al restablecer: ' + (data.error || data.message));
+    }
+  } catch (err) {
+    console.error('Error reset formato:', err);
+    alert('Error de conexión al restablecer formato.');
+  }
+}
+
+async function studioAplicarMarcaGlobal() {
+  if (typeof MasterReportLayout === 'undefined') return;
+  const cur = studioReadFormToDraft();
+  if (!confirm('¿Deseas aplicar el color primario, color secundario, configuración de logotipo, tipografía y pie corporativo actual a TODOS los documentos del sistema?')) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/formatos/aplicar-marca-global', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        color_primario: cur.color_primario,
+        color_secundario: cur.color_secundario,
+        familia_fuente: cur.familia_fuente,
+        logo_alineacion: cur.logo_alineacion,
+        logo_tamano: cur.logo_tamano,
+        mostrar_logo: cur.mostrar_logo,
+        mostrar_marca_saas: cur.mostrar_marca_saas,
+        texto_pie_pagina: cur.texto_pie_pagina
+      })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      MasterReportLayout.formatsMap = data.formatos || {};
+      MasterReportLayout.DOCUMENT_REGISTRY.forEach(item => {
+        StudioFormatosState.draftMap[item.doc_type] = MasterReportLayout.getDocFormat(item.doc_type);
+      });
+      renderStudioDocList();
+      studioLoadDocIntoForm(StudioFormatosState.activeDocType);
+      if (typeof showToast === 'function') showToast('Marca corporativa propagada a los 20 documentos.', 'success');
+    } else {
+      alert('Error aplicando marca global: ' + (data.error || data.message));
+    }
+  } catch (err) {
+    console.error('Error aplicando marca global:', err);
+    alert('Error de conexión aplicando marca global.');
   }
 }
 
 function previewFormatoImpresionDirecto() {
-  const mockFactura = {
-    numero_factura: 'FAC-DEMO-001',
-    fecha: new Date().toLocaleDateString('es-VE'),
-    tipo_venta: 'contado',
-    cliente_nombre: 'Cliente Corporativo Demo',
-    cliente_cedula: 'J-30112233-4',
-    cliente_telefono: '+58 412 1234567',
-    cliente_direccion: 'Avenida Libertador, Edif. Torre Centro',
-    vendedor_nombre: 'Vendedor Demo',
-    subtotal: 125.00,
-    iva_total: 20.00,
-    total_usd: 145.00,
-    detalles: [
-      { codigo: 'PRD-001', nombre: 'Harina de Trigo Especial 1kg', cantidad: 50, precio_unitario: 1.50, descuento: 5, impuesto_tipo: 'gravado', total: 71.25 },
-      { codigo: 'PRD-002', nombre: 'Aceite Vegetal Comestible 1L', cantidad: 20, precio_unitario: 2.50, descuento: 0, impuesto_tipo: 'gravado', total: 50.00 }
-    ]
-  };
+  if (typeof MasterReportLayout === 'undefined') return;
+  const docType = StudioFormatosState.activeDocType;
+  const draft = studioReadFormToDraft();
+  const sampleData = MasterReportLayout.getSampleData(docType, AppState.config);
+  const htmlDoc = MasterReportLayout.renderDocumento(docType, sampleData, AppState.config, draft);
 
-  const previewConfig = {
-    color_primario: document.getElementById('cfgImpColorPrimario')?.value || '#0f172a',
-    logo_alineacion: document.getElementById('cfgImpLogoAlineacion')?.value || 'centro',
-    mostrar_sku: document.getElementById('cfgImpMostrarSku')?.checked ?? true,
-    mostrar_vendedor: document.getElementById('cfgImpMostrarVendedor')?.checked ?? true,
-    mostrar_descuento_linea: document.getElementById('cfgImpMostrarDescuento')?.checked ?? true,
-    texto_footer_factura: document.getElementById('cfgImpTextoFooterFactura')?.value || '',
-    texto_header_ticket: document.getElementById('cfgImpTextoHeaderTicket')?.value || '',
-    texto_footer_ticket: document.getElementById('cfgImpTextoFooterTicket')?.value || ''
-  };
-
-  if (typeof MasterReportLayout !== 'undefined') {
-    const htmlDoc = MasterReportLayout.renderFacturaA4(mockFactura, AppState.config, previewConfig);
-    DocumentPrinter.print({
-      type: 'letterPortrait',
-      title: 'Vista_Previa_Factura_Parametrizada',
-      html: htmlDoc
-    });
-  }
+  DocumentPrinter.print({
+    docType: docType,
+    docFormat: draft,
+    title: `Prueba_${docType}`,
+    html: htmlDoc
+  });
 }
 
 // ==============================================================================
@@ -20690,11 +20817,23 @@ window.renderModuloPedidosTable = renderModuloPedidosTable;
 
 window.openFormatosImpresionModal = openFormatosImpresionModal;
 window.closeFormatosImpresionModal = closeFormatosImpresionModal;
-window.setPresetColor = setPresetColor;
-window.actualizarPreviewColor = actualizarPreviewColor;
-window.actualizarColorDesdeTexto = actualizarColorDesdeTexto;
+window.renderStudioDocList = renderStudioDocList;
+window.selectStudioDoc = selectStudioDoc;
+window.switchStudioTab = switchStudioTab;
+window.studioOnFieldChange = studioOnFieldChange;
+window.studioSyncColor = studioSyncColor;
+window.studioSyncColorText = studioSyncColorText;
+window.studioToggleTodasColumnas = studioToggleTodasColumnas;
+window.setStudioPreviewZoom = setStudioPreviewZoom;
+window.studioAplicarMarcaGlobal = studioAplicarMarcaGlobal;
+window.studioResetFormatoActual = studioResetFormatoActual;
 window.guardarConfigImpresion = guardarConfigImpresion;
 window.previewFormatoImpresionDirecto = previewFormatoImpresionDirecto;
+window.imprimirEstadoCuentaClienteActual = imprimirEstadoCuentaClienteActual;
+window.imprimirEstadoCuentaProveedorActual = imprimirEstadoCuentaProveedorActual;
+window.imprimirPedidoActual = imprimirPedidoActual;
+window.imprimirReciboAbonoCXC = imprimirReciboAbonoCXC;
+window.imprimirReciboAbonoCXP = imprimirReciboAbonoCXP;
 
 
 window.actualizarEstadoCajaPOS = actualizarEstadoCajaPOS;
