@@ -16124,32 +16124,44 @@ function renderIaAlertasBanner(alertas) {
     container.innerHTML = `
       <div class="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center space-x-2 text-xs text-emerald-800">
         <i class="fa-solid fa-circle-check text-emerald-600 text-sm"></i>
-        <span>Todos los productos operan con márgenes positivos sobre el costo CPP auditado. Cero ventas a pérdida detectadas.</span>
+        <span>Todos los productos operan con márgenes saludables sobre el costo CPP auditado y cobertura óptima.</span>
       </div>
     `;
     return;
   }
 
   const criticas = alertas.filter(a => a.nivel === 'CRITICO');
+  const esCritico = criticas.length > 0;
+  const wrapCls = esCritico ? 'bg-rose-50/90 border-rose-200 text-rose-950' : 'bg-amber-50/90 border-amber-200 text-amber-950';
+  const hdrCls = esCritico ? 'text-rose-900' : 'text-amber-900';
+  const iconCls = esCritico ? 'text-rose-600' : 'text-amber-600';
+  const subCls = esCritico ? 'text-rose-800' : 'text-amber-800';
+  const borderCls = esCritico ? 'border-rose-200/80' : 'border-amber-200/80';
+  const itemBorderCls = esCritico ? 'border-rose-100' : 'border-amber-100';
+
+  const titulo = esCritico
+    ? `Alertas Críticas Detectadas (${criticas.length} crítica(s) / ${alertas.length} total)`
+    : `Observaciones Preventivas de Inventario y Costos (${alertas.length} ítem(s))`;
+  const bajada = esCritico
+    ? 'El motor de IA detectó riesgos financieros o de quiebre que requieren atención inmediata.'
+    : 'Se recomienda revisar los costos CPP, márgenes estrechos o niveles de reposición indicados abajo.';
 
   container.innerHTML = `
-    <div class="p-4 bg-rose-50/90 border border-rose-200 rounded-2xl space-y-2 text-xs text-rose-950">
-      <div class="flex items-center space-x-2.5 font-bold text-rose-900 text-sm">
-        <i class="fa-solid fa-triangle-exclamation text-rose-600 text-base"></i>
-        <span>Diagnóstico Crítico de Rentabilidad: ${criticas.length} Producto(s) con Venta a Pérdida</span>
+    <div class="p-4 ${wrapCls} border rounded-2xl space-y-2 text-xs">
+      <div class="flex items-center space-x-2.5 font-bold ${hdrCls} text-sm">
+        <i class="fa-solid fa-triangle-exclamation ${iconCls} text-base"></i>
+        <span>${escapeHtml(titulo)}</span>
       </div>
-      <p class="text-rose-800">
-        El motor de IA orgánica detectó que existe mercancía cuyo precio de venta en catálogo es inferior al Costo Promedio Ponderado (CPP) auditado. Cada venta a ese precio destruye patrimonio de la empresa.
-      </p>
-      <div class="mt-2 space-y-1.5 pt-2 border-t border-rose-200/80">
+      <p class="${subCls}">${escapeHtml(bajada)}</p>
+      <div class="mt-2 space-y-1.5 pt-2 border-t ${borderCls}">
         ${alertas.map(a => `
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between p-2 bg-white/80 rounded-xl border border-rose-100 gap-1.5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between p-2 bg-white/85 rounded-xl border ${itemBorderCls} gap-1.5">
             <div>
-              <strong class="text-rose-900 font-mono">[${a.codigo}] ${a.nombre}:</strong>
-              <span class="text-slate-700 ml-1">${a.mensaje}</span>
+              <strong class="${hdrCls} font-mono">[${escapeHtml(a.codigo || '-')}] ${escapeHtml(a.nombre || '')}:</strong>
+              <span class="text-slate-700 ml-1">${escapeHtml(a.mensaje || '')}</span>
             </div>
             <span class="text-emerald-800 font-bold bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200 text-[11px] whitespace-nowrap">
-              ${a.recomendacion}
+              ${escapeHtml(a.recomendacion || '')}
             </span>
           </div>
         `).join('')}
@@ -16171,41 +16183,49 @@ function renderIaTablaDiagnostico(productos) {
   }
 
   tbody.innerHTML = productos.map(p => {
-    const estadoBadge = p.estado_abastecimiento === 'SOBRESTOCK'
-      ? `<span class="bg-indigo-50 text-indigo-700 font-bold px-2.5 py-0.5 rounded-full border border-indigo-200 text-[10px]"><i class="fa-solid fa-layer-group mr-1"></i>Sobrestock</span>`
-      : (p.estado_abastecimiento === 'OPTIMO'
-        ? `<span class="bg-emerald-50 text-emerald-700 font-bold px-2.5 py-0.5 rounded-full border border-emerald-200 text-[10px]"><i class="fa-solid fa-check mr-1"></i>Óptimo</span>`
-        : `<span class="bg-rose-50 text-rose-700 font-bold px-2.5 py-0.5 rounded-full border border-rose-200 text-[10px]"><i class="fa-solid fa-triangle-exclamation mr-1"></i>${p.estado_abastecimiento}</span>`);
+    let estadoBadge = '';
+    if (p.estado_abastecimiento === 'SERVICIO') {
+      estadoBadge = `<span class="bg-sky-50 text-sky-700 font-bold px-2.5 py-0.5 rounded-full border border-sky-200 text-[10px]"><i class="fa-solid fa-briefcase mr-1"></i>Servicio</span>`;
+    } else if (p.estado_abastecimiento === 'SOBRESTOCK') {
+      estadoBadge = `<span class="bg-indigo-50 text-indigo-700 font-bold px-2.5 py-0.5 rounded-full border border-indigo-200 text-[10px]"><i class="fa-solid fa-layer-group mr-1"></i>Sobrestock</span>`;
+    } else if (p.estado_abastecimiento === 'OPTIMO') {
+      estadoBadge = `<span class="bg-emerald-50 text-emerald-700 font-bold px-2.5 py-0.5 rounded-full border border-emerald-200 text-[10px]"><i class="fa-solid fa-check mr-1"></i>Óptimo</span>`;
+    } else {
+      estadoBadge = `<span class="bg-rose-50 text-rose-700 font-bold px-2.5 py-0.5 rounded-full border border-rose-200 text-[10px]"><i class="fa-solid fa-triangle-exclamation mr-1"></i>${escapeHtml(p.estado_abastecimiento)}</span>`;
+    }
 
     const alertaBadge = p.alerta_rentabilidad === 'VENTA_A_PERDIDA'
       ? `<span class="bg-rose-600 text-white font-extrabold px-2 py-0.5 rounded-full text-[10px] animate-pulse">Venta a Pérdida</span>`
       : (p.alerta_rentabilidad === 'MARGEN_ESTRECHO'
-        ? `<span class="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full text-[10px]">Margen Estrecho</span>`
+        ? `<span class="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full text-[10px]">Atención Margen/Costo</span>`
         : `<span class="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full text-[10px]">Saludable</span>`);
 
     const margenColor = p.margen_unitario_usd < 0 ? 'text-rose-600 font-black' : (p.margen_porcentaje < 8 ? 'text-amber-600 font-bold' : 'text-emerald-700 font-bold');
+    const stockExtra = (p.stock_comprometido && parseFloat(p.stock_comprometido) > 0)
+      ? `<span class="text-[10px] text-amber-600 block">Reservado: ${p.stock_comprometido} u | Disp: ${p.stock_disponible} u</span>`
+      : `<span class="text-[10px] text-slate-400">Mínimo: ${p.stock_minimo} u</span>`;
 
     return `
       <tr class="hover:bg-slate-50/80 transition text-xs font-medium">
         <td class="py-3 px-4">
-          <strong class="text-slate-900 block font-bold font-mono">[${p.codigo}]</strong>
-          <span class="text-slate-600 text-[11px]">${p.nombre}</span>
+          <strong class="text-slate-900 block font-bold font-mono">[${escapeHtml(p.codigo || '-')}]</strong>
+          <span class="text-slate-600 text-[11px]">${escapeHtml(p.nombre || '')}</span>
         </td>
         <td class="py-3 px-4 text-right font-mono">
-          <strong class="text-slate-900 block font-bold">${p.stock_actual} u</strong>
-          <span class="text-[10px] text-slate-400">Mínimo: ${p.stock_minimo} u</span>
+          <strong class="text-slate-900 block font-bold">${p.tipo === 'servicio' ? 'N/A' : `${p.stock_actual} u`}</strong>
+          ${p.tipo === 'servicio' ? '<span class="text-[10px] text-slate-400">Intangible</span>' : stockExtra}
         </td>
-        <td class="py-3 px-4 text-right font-mono font-bold text-slate-800">$${parseFloat(p.costo_cpp_usd).toFixed(2)}</td>
-        <td class="py-3 px-4 text-right font-mono font-bold text-slate-900">$${parseFloat(p.precio_venta_usd).toFixed(2)}</td>
+        <td class="py-3 px-4 text-right font-mono font-bold text-slate-800">$${parseFloat(p.costo_cpp_usd || 0).toFixed(2)}</td>
+        <td class="py-3 px-4 text-right font-mono font-bold text-slate-900">$${parseFloat(p.precio_venta_usd || 0).toFixed(2)}</td>
         <td class="py-3 px-4 text-right font-mono ${margenColor}">
-          <span class="block">${p.margen_porcentaje > 0 ? '+' : ''}${parseFloat(p.margen_porcentaje).toFixed(1)}%</span>
-          <span class="text-[10px] block font-normal">(${p.margen_unitario_usd > 0 ? '+' : ''}$${parseFloat(p.margen_unitario_usd).toFixed(2)})</span>
+          <span class="block">${p.margen_porcentaje > 0 ? '+' : ''}${parseFloat(p.margen_porcentaje || 0).toFixed(1)}%</span>
+          <span class="text-[10px] block font-normal">(${p.margen_unitario_usd > 0 ? '+' : ''}$${parseFloat(p.margen_unitario_usd || 0).toFixed(2)})</span>
         </td>
         <td class="py-3 px-4 text-center">${estadoBadge}</td>
         <td class="py-3 px-4 text-center">${alertaBadge}</td>
-        <td class="py-3 px-4 text-slate-600 text-[11px] max-w-xs leading-tight">${p.accion_abastecimiento}</td>
+        <td class="py-3 px-4 text-slate-600 text-[11px] max-w-xs leading-tight">${escapeHtml(p.accion_abastecimiento || '')}</td>
         <td class="py-3 px-4 text-center">
-          <button onclick="openModalSimuladorPrecioIA(${p.id}, '${escapeHtml(p.nombre)}', ${p.stock_actual}, ${p.costo_cpp_usd}, ${p.precio_venta_usd})"
+          <button onclick="abrirSimuladorPrecioIA(${parseInt(p.id, 10)})"
                   class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold rounded-lg text-xs transition" title="Simular impacto de precio">
             <i class="fa-solid fa-chart-line mr-1"></i>Simular
           </button>
@@ -16213,6 +16233,35 @@ function renderIaTablaDiagnostico(productos) {
       </tr>
     `;
   }).join('');
+}
+
+/**
+ * Abre el Simulador de Precios IA resolviendo datos reales por ID desde diagnóstico o API.
+ */
+async function abrirSimuladorPrecioIA(prodId) {
+  let prod = (AppState.iaDiagnosticoData?.analisis_productos || []).find(p => Number(p.id) === Number(prodId));
+  if (!prod) {
+    try {
+      const res = await fetch('/api/ia/inventario/diagnostico');
+      if (res.ok) {
+        const json = await res.json();
+        AppState.iaDiagnosticoData = json;
+        prod = (json.analisis_productos || []).find(p => Number(p.id) === Number(prodId));
+      }
+    } catch (e) {
+      console.error('[IA Simulador] Error consultando producto:', e);
+    }
+  }
+  if (prod) {
+    openModalSimuladorPrecioIA(prod.id, prod.nombre, prod.stock_actual, prod.costo_cpp_usd, prod.precio_venta_usd);
+    return;
+  }
+  const fallback = (AppState.productos || []).find(p => Number(p.id) === Number(prodId));
+  if (fallback) {
+    const cpp = (fallback.costo_cpp && parseFloat(fallback.costo_cpp) > 0) ? parseFloat(fallback.costo_cpp) : parseFloat(fallback.costo || 0);
+    const precio = (fallback.precio_total && parseFloat(fallback.precio_total) > 0) ? parseFloat(fallback.precio_total) : parseFloat(fallback.precio_base || 0);
+    openModalSimuladorPrecioIA(fallback.id, fallback.nombre, fallback.stock || 0, cpp, precio);
+  }
 }
 
 /**
@@ -16316,8 +16365,17 @@ function abrirModalCfoCopilot() {
     renderizarMensajeInicialCopilot();
   }
 
+  const inp = document.getElementById('inputCfoCopilot');
+  const clearBtn = document.getElementById('btnClearInputCopilot');
+  if (inp && !inp.dataset.copilotBound) {
+    inp.dataset.copilotBound = '1';
+    inp.addEventListener('input', () => {
+      if (clearBtn) clearBtn.classList.toggle('hidden', !inp.value.trim());
+    });
+  }
+
   setTimeout(() => {
-    document.getElementById('inputCfoCopilot')?.focus();
+    inp?.focus();
   }, 100);
 }
 
@@ -16327,10 +16385,12 @@ function cerrarModalCfoCopilot() {
 
 function limpiarInputCopilot() {
   const inp = document.getElementById('inputCfoCopilot');
+  const clearBtn = document.getElementById('btnClearInputCopilot');
   if (inp) {
     inp.value = '';
     inp.focus();
   }
+  if (clearBtn) clearBtn.classList.add('hidden');
 }
 
 function reiniciarConversacionCopilot() {
@@ -16350,7 +16410,7 @@ async function cargarSugerenciasCopilot() {
     if (!res.ok || !json.sugerencias) return;
 
     container.innerHTML = json.sugerencias.map(s => `
-      <button type="button" onclick="ejecutarPreguntaRapidaCopilot('${escapeHtml(s.texto)}')" class="inline-flex items-center px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/70 text-slate-700 hover:text-indigo-900 text-xs font-semibold shadow-2xs transition whitespace-nowrap active:scale-95">
+      <button type="button" data-pregunta="${escapeHtml(s.texto)}" onclick="ejecutarPreguntaRapidaCopilot(this.dataset.pregunta)" class="inline-flex items-center px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/70 text-slate-700 hover:text-indigo-900 text-xs font-semibold shadow-2xs transition whitespace-nowrap active:scale-95">
         <i class="fa-solid fa-sparkles text-indigo-500 mr-1.5 text-[10px]"></i>
         <span>${escapeHtml(s.texto)}</span>
       </button>
@@ -16496,13 +16556,15 @@ function renderizarRespuestaCopilot(data, container) {
   // Formatear markdown básico en el resumen
   let resumenHtml = escapeHtml(data.resumen_ejecutivo || '')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>');
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 rounded bg-slate-100 font-mono text-[11px]">$1</code>');
 
   // KPI cards grid
   let kpisHtml = '';
   if (kpis.length > 0) {
+    const smCols = kpis.length <= 2 ? 'sm:grid-cols-2' : (kpis.length === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4');
     kpisHtml = `
-      <div class="grid grid-cols-2 sm:grid-cols-${Math.min(kpis.length, 4)} gap-2 pt-2">
+      <div class="grid grid-cols-2 ${smCols} gap-2 pt-2">
         ${kpis.map(k => {
           let badgeColor = 'bg-slate-50 border-slate-200 text-slate-800';
           let valColor = 'text-slate-900';
@@ -16510,6 +16572,7 @@ function renderizarRespuestaCopilot(data, container) {
           else if (k.tipo === 'danger') { badgeColor = 'bg-rose-50 border-rose-200 text-rose-900'; valColor = 'text-rose-700'; }
           else if (k.tipo === 'warning') { badgeColor = 'bg-amber-50 border-amber-200 text-amber-900'; valColor = 'text-amber-800'; }
           else if (k.tipo === 'success') { badgeColor = 'bg-emerald-50 border-emerald-200 text-emerald-900'; valColor = 'text-emerald-700'; }
+          else if (k.tipo === 'info') { badgeColor = 'bg-sky-50 border-sky-200 text-sky-900'; valColor = 'text-sky-700'; }
 
           return `
             <div class="p-2.5 rounded-xl border ${badgeColor} shadow-2xs space-y-0.5">
@@ -16528,9 +16591,11 @@ function renderizarRespuestaCopilot(data, container) {
     alertasHtml = `
       <div class="space-y-1.5 pt-1">
         ${alertas.map(a => {
-          let bg = a.nivel === 'danger' ? 'bg-rose-50 border-rose-200 text-rose-800' :
-                   (a.nivel === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800');
-          let icon = a.nivel === 'danger' ? 'fa-triangle-exclamation' : (a.nivel === 'warning' ? 'fa-circle-exclamation' : 'fa-circle-check');
+          let bg = 'bg-emerald-50 border-emerald-200 text-emerald-800';
+          let icon = 'fa-circle-check';
+          if (a.nivel === 'danger') { bg = 'bg-rose-50 border-rose-200 text-rose-800'; icon = 'fa-triangle-exclamation'; }
+          else if (a.nivel === 'warning') { bg = 'bg-amber-50 border-amber-200 text-amber-800'; icon = 'fa-circle-exclamation'; }
+          else if (a.nivel === 'info') { bg = 'bg-sky-50 border-sky-200 text-sky-800'; icon = 'fa-circle-info'; }
           return `
             <div class="p-2.5 rounded-xl border ${bg} text-xs flex items-start space-x-2">
               <i class="fa-solid ${icon} mt-0.5 shrink-0"></i>
@@ -16576,7 +16641,7 @@ function renderizarRespuestaCopilot(data, container) {
     accionesHtml = `
       <div class="pt-2 flex flex-wrap gap-1.5 border-t border-slate-100">
         ${acciones.map(ac => `
-          <button type="button" onclick="ejecutarAccionCopilot('${escapeHtml(ac.accion)}')" class="inline-flex items-center px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold text-[11px] border border-indigo-200 shadow-2xs transition active:scale-95">
+          <button type="button" data-accion="${escapeHtml(ac.accion)}" onclick="ejecutarAccionCopilot(this.dataset.accion)" class="inline-flex items-center px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold text-[11px] border border-indigo-200 shadow-2xs transition active:scale-95">
             <span>${escapeHtml(ac.texto)}</span>
             <i class="fa-solid fa-arrow-up-right-from-square ml-1.5 text-[9px]"></i>
           </button>
@@ -16614,27 +16679,30 @@ function renderizarRespuestaCopilot(data, container) {
 }
 
 function ejecutarAccionCopilot(accionJs) {
+  if (!accionJs) return;
   cerrarModalCfoCopilot();
   try {
     if (accionJs.startsWith("navigate('") && accionJs.endsWith("')")) {
-      const vista = accionJs.replace("navigate('", "").replace("')", "");
+      const vista = accionJs.slice(10, -2);
       navigate(vista);
     } else if (accionJs.startsWith("abrirSimuladorPrecioIA(")) {
-      const prodId = parseInt(accionJs.replace("abrirSimuladorPrecioIA(", "").replace(")", ""));
+      const prodId = parseInt(accionJs.replace("abrirSimuladorPrecioIA(", "").replace(")", ""), 10);
       abrirSimuladorPrecioIA(prodId);
-    } else if (accionJs === "abrirModalAperturaCaja()") {
-      abrirModalAperturaCaja();
+    } else if (accionJs === "openModalAperturaCaja()" || accionJs === "abrirModalAperturaCaja()") {
+      if (typeof openModalAperturaCaja === 'function') openModalAperturaCaja();
+    } else if (accionJs === "openModalMovimientoCaja()") {
+      if (typeof openModalMovimientoCaja === 'function') openModalMovimientoCaja();
+    } else if (accionJs === "openModalCierreCaja()") {
+      if (typeof openModalCierreCaja === 'function') openModalCierreCaja();
     } else if (accionJs === "abrirDiagnosticoIaProductos()") {
       navigate('productos');
       setTimeout(() => {
         document.getElementById('btnSubtabProdIa')?.click();
       }, 150);
     } else if (accionJs.startsWith("ejecutarPreguntaCopilot('")) {
-      const p = accionJs.replace("ejecutarPreguntaCopilot('", "").replace("')", "");
+      const p = accionJs.slice("ejecutarPreguntaCopilot('".length, -2);
       abrirModalCfoCopilot();
       ejecutarPreguntaRapidaCopilot(p);
-    } else {
-      new Function(accionJs)();
     }
   } catch (err) {
     console.error('Error ejecutando acción sugerida por Copilot:', err);
