@@ -71,6 +71,61 @@ UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
 os.makedirs(PUBLIC_DIR, exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
+
+def _generar_codigo_producto_unico(cursor, tipo="producto"):
+    """Genera un código SKU único garantizado verificando colisiones en productos."""
+    prefix = "PRD" if str(tipo or "").strip().lower() != "servicio" else "SRV"
+    cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM productos")
+    seq = int(cursor.fetchone()[0] or 1)
+    while True:
+        candidato = f"{prefix}-{seq:05d}"
+        cursor.execute(
+            "SELECT 1 FROM productos WHERE UPPER(TRIM(codigo)) = UPPER(?) LIMIT 1",
+            (candidato,)
+        )
+        if not cursor.fetchone():
+            return candidato
+        seq += 1
+
+
+def _validar_o_liberar_codigo_producto(cursor, codigo, exclude_id=None):
+    """
+    Valida unicidad de código de producto:
+    - Si pertenece a un ítem desactivado (activo = 0), archiva su código para liberar el SKU exacto.
+    - Si pertenece a otro ítem activo (activo = 1), retorna mensaje legible de conflicto.
+    """
+    cod_norm = str(codigo or "").strip()
+    if not cod_norm:
+        return None
+    if exclude_id is not None:
+        cursor.execute(
+            "SELECT id, codigo, nombre, COALESCE(activo, 1) AS activo FROM productos WHERE UPPER(TRIM(codigo)) = UPPER(?) AND id != ? LIMIT 1",
+            (cod_norm, int(exclude_id))
+        )
+    else:
+        cursor.execute(
+            "SELECT id, codigo, nombre, COALESCE(activo, 1) AS activo FROM productos WHERE UPPER(TRIM(codigo)) = UPPER(?) LIMIT 1",
+            (cod_norm,)
+        )
+    dup = cursor.fetchone()
+    if not dup:
+        return None
+    dup_id, dup_cod, dup_nom, dup_act = dup[0], dup[1], dup[2], int(dup[3] if dup[3] is not None else 1)
+    if dup_act == 0:
+        nuevo_cod_inactivo = f"{dup_cod}__INACT_{dup_id}"
+        cursor.execute(
+            "SELECT 1 FROM productos WHERE UPPER(TRIM(codigo)) = UPPER(?) AND id != ? LIMIT 1",
+            (nuevo_cod_inactivo, dup_id)
+        )
+        if cursor.fetchone():
+            nuevo_cod_inactivo = f"{dup_cod}__INACT_{dup_id}_{int(time.time())}"
+        cursor.execute("UPDATE productos SET codigo = ? WHERE id = ?", (nuevo_cod_inactivo, dup_id))
+        return None
+    return (
+        f"El código '{cod_norm}' ya está asignado al ítem activo '{dup_nom}' (ID #{dup_id}). "
+        "Usa otro código, déjalo vacío para autogenerar uno, o edita el producto existente."
+    )
+
 def obtener_tasas_oficiales():
     """
     Consulta las tasas oficiales en tiempo real con verificación TLS estricta:
@@ -3750,26 +3805,34 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
 
             # 2. Crear Producto o Servicio
             elif path == "/api/productos":
-                codigo = body.get("codigo", "").strip()
-                nombre = body.get("nombre", "").strip()
+                codigo = (body.get("codigo") or "").strip()
+                nombre = (body.get("nombre") or "").strip()
                 categoria_id = body.get("categoria_id")
-                tipo = body.get("tipo", "").strip().lower()
-                impuesto_tipo = body.get("impuesto_tipo", "gravado").strip().lower()
+                tipo = (body.get("tipo") or "").strip().lower()
+                impuesto_tipo = (body.get("impuesto_tipo") or "gravado").strip().lower()
                 precio_base = float(body.get("precio_base", 0.0))
                 costo = float(body.get("costo", 0.0))
                 stock = float(body.get("stock", 0.0))
                 stock_minimo = float(body.get("stock_minimo", 5.0))
-                imagen = body.get("imagen", "")
-                descripcion = body.get("descripcion", "").strip()
+                imagen = body.get("imagen") or ""
+                descripcion = (body.get("descripcion") or "").strip()
 
                 if not nombre or not categoria_id or tipo not in ('servicio', 'producto'):
                     self.send_error_json("Campos obligatorios: nombre, categoria_id y tipo ('servicio' o 'producto')", 400)
                     return
 
+                if not conn.in_transaction:
+                    cursor.execute("BEGIN IMMEDIATE")
+
                 if not codigo:
-                    # Generar código automático si no se proporcionó
-                    prefix = "PRD" if tipo == "producto" else "SRV"
-                    codigo = f"{prefix}-{int(time.time()) % 100000:05d}"
+                    # Generar código SKU único garantizado verificando la BD bajo bloqueo de escritura
+                    codigo = _generar_codigo_producto_unico(cursor, tipo)
+                else:
+                    err_dup = _validar_o_liberar_codigo_producto(cursor, codigo)
+                    if err_dup:
+                        conn.rollback()
+                        self.send_error_json(err_dup, 409)
+                        return
 
                 # Si es servicio, NO maneja existencia
                 if tipo == 'servicio':
@@ -3816,6 +3879,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         usuario_id=1
                     )
                 conn.commit()
+                schedule_cloud_sync()
                 self.send_json({"id": p_id, "codigo": codigo, "success": True}, 201)
 
             # 3. Crear Cliente
@@ -4515,7 +4579,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                             cat_row = cursor.fetchone()
                             cat_id = cat_row[0] if cat_row else 1
 
-                        codigo_nuevo = f"PRD-{int(time.time() * 100) % 1000000:06d}"
+                        codigo_nuevo = _generar_codigo_producto_unico(cursor, tipo)
                         iva_v = round(precio_venta * iva_pct, 4) if impuesto_tipo == "gravado" else 0.0
 
                         cursor.execute("""
@@ -5888,7 +5952,11 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             self.send_error_json(str(ve), 400)
         except sqlite3.IntegrityError as ie:
             conn.rollback()
-            self.send_error_json(f"Error de integridad: {str(ie)}", 400)
+            msg_ie = str(ie)
+            if "productos.codigo" in msg_ie:
+                self.send_error_json("Ese código / SKU ya existe en otro producto. Usa un código diferente o déjalo vacío para generarlo automáticamente.", 409)
+            else:
+                self.send_error_json(f"Error de integridad: {msg_ie}", 400)
         except Exception as e:
             conn.rollback()
             self.send_error_json(str(e), 500)
@@ -5921,9 +5989,22 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             # 1. Actualizar Producto / Servicio
             if path.startswith("/api/productos/"):
                 p_id = int(path.split("/")[-1])
+                codigo_upd = (body.get("codigo") or "").strip()
                 precio_base = float(body.get("precio_base", 0.0))
                 impuesto_tipo = body.get("impuesto_tipo", "gravado")
                 tipo = body.get("tipo", "producto")
+
+                if not conn.in_transaction:
+                    cursor.execute("BEGIN IMMEDIATE")
+
+                if not codigo_upd:
+                    codigo_upd = _generar_codigo_producto_unico(cursor, tipo)
+                else:
+                    err_dup = _validar_o_liberar_codigo_producto(cursor, codigo_upd, exclude_id=p_id)
+                    if err_dup:
+                        conn.rollback()
+                        self.send_error_json(err_dup, 409)
+                        return
 
                 cursor.execute("SELECT iva_porcentaje FROM configuracion WHERE id = 1")
                 iva_pct = cursor.fetchone()[0] / 100.0
@@ -5941,7 +6022,7 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                         stock_minimo = ?, imagen = ?, descripcion = ?
                     WHERE id = ?
                 """, (
-                    body.get("codigo"),
+                    codigo_upd,
                     body.get("nombre"),
                     body.get("categoria_id"),
                     tipo,
@@ -5956,7 +6037,8 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
                     p_id
                 ))
                 conn.commit()
-                self.send_json({"success": True, "message": "Producto actualizado"})
+                schedule_cloud_sync()
+                self.send_json({"success": True, "codigo": codigo_upd, "message": "Producto actualizado"})
 
             # 3. Actualizar Categoría
             elif path.startswith("/api/categorias/"):
@@ -6173,6 +6255,13 @@ class InventoryAppHandler(http.server.BaseHTTPRequestHandler):
             else:
                 self.send_error_json("Endpoint no reconocido", 404)
 
+        except sqlite3.IntegrityError as ie:
+            conn.rollback()
+            msg_ie = str(ie)
+            if "productos.codigo" in msg_ie:
+                self.send_error_json("Ese código / SKU ya existe en otro producto. Usa un código diferente o déjalo vacío para generarlo automáticamente.", 409)
+            else:
+                self.send_error_json(f"Error de integridad: {msg_ie}", 400)
         except Exception as e:
             conn.rollback()
             self.send_error_json(str(e), 500)
