@@ -2969,6 +2969,17 @@ function editProducto(id) {
 
 async function saveProducto(e) {
   e.preventDefault();
+  if (window._savingProducto) return;
+  window._savingProducto = true;
+
+  const submitBtn = document.querySelector('#formProducto button[type="submit"]');
+  const originalBtnHtml = submitBtn ? submitBtn.innerHTML : 'Guardar Ítem';
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.classList.add('opacity-60', 'cursor-not-allowed');
+    submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i>Guardando...';
+  }
+
   const id = document.getElementById('prodId').value;
   const payload = {
     codigo: document.getElementById('prodCodigo').value.trim(),
@@ -3025,11 +3036,18 @@ async function saveProducto(e) {
       }
       AppState.productoModalOrigen = 'productos';
     } else {
-      const err = await res.json();
+      const err = await res.json().catch(() => ({}));
       alert('Error: ' + (err.error || 'No se pudo guardar el ítem'));
     }
   } catch (err) {
     alert('Error al guardar el ítem: ' + err.message);
+  } finally {
+    window._savingProducto = false;
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+      submitBtn.innerHTML = originalBtnHtml;
+    }
   }
 }
 
